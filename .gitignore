@@ -1,0 +1,3 @@
+*.o
+libvdr-suiteosd.so
+navigation-test
