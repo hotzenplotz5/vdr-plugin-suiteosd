@@ -13,7 +13,7 @@ enum class Activation { None, Close, Hero, ChannelNow, ChannelNext, Recording, M
 
 struct Navigation {
     static constexpr int kSections = 4; // hero, now, next, recordings
-    static constexpr int kSidebarItems = 10;
+    static constexpr int kSidebarItems = 11;
     bool sideFocused = false;
     int sideIndex = 0;
     int section = 0;
