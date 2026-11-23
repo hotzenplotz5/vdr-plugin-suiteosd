@@ -22,8 +22,8 @@ Kein Feld enthält ein aus einem Addon-Manifest frei ausführbares Shell-Kommand
 
 ## Einbindungstypen
 
-1. **Native TV-Ansicht**: Suite-OSD rendert Navigation und Daten; Core bleibt Besitzer der Aktionen. Beispiel: EPG, Aufnahmen, Suchtimer, Image-Galerie, Media Tools.
-2. **Handoff an vorhandenes VDR-Plugin**: Öffnen und Fokusrückgabe über nachgewiesene VDR-APIs. Beispiele: Teletext und die bestehende HbbTV-Lösung. Keine zweite Teletext-/Browser-Engine.
+1. **Native TV-Ansicht**: Suite-OSD rendert lokale VDR-Daten und Navigation. **VDR** bleibt Besitzer von EPG, Timern, Aufnahmen und Wiedergabe; **Suite-Core/Agent** bleibt Besitzer ausschließlich der Suite-spezifischen Addon-Aktionen, etwa Media Tools und Image.
+2. **Handoff an vorhandenes VDR-Plugin**: Vorhandene VDR-Plugin-Menüs direkt öffnen. Beispiele: `epgsearch`/optional `epgsearchonly` für Suchtimer, `osdteletext` für Teletext und `web` für HbbTV. Keine zweite Suchtimer-/Teletext-/Browser-Engine und kein Public-API-v1-Umweg.
 3. **Handoff an Wiedergabe**: Auswahl im Suite-OSD, Start über eine belegte VDR-/Ausgabeplugin-Schnittstelle. Playback-Owner ist vom Media-Tools-Worker getrennt.
 
 ## Fernbedienung und Lifecycle
@@ -37,7 +37,7 @@ Kein Feld enthält ein aus einem Addon-Manifest frei ausführbares Shell-Kommand
 
 - Keine Duplizierung von Suite-Rechten, Datenbanken, Aufnahmeoperationen, Backend-Agent-Jobs oder HbbTV-Sitzungen.
 - Keine neuen allgemeinen Aktivierungs-/Authentisierungssperren ohne explizite Maintainer-Genehmigung.
-- Suite-Core bleibt der Autorisierungs- und Mutations-Owner, VDR bleibt Owner der nativen VDR-Funktionen.
+- VDR und seine Plugins bleiben Owner ihrer nativen Aktionen und Rechte (EPG, Timer, Aufnahmen, `epgsearch`-Suchtimer, Teletext, HbbTV). Suite-Core bleibt Owner **nur** der Suite-spezifischen Addon-Aktionen und deren bereits vorhandener Autorisierung. Keine zusätzliche API-v1-Abhängigkeit für lokale VDR-Funktionen.
 - Fehler einer externen Suite-Verbindung dürfen das vorhandene VDR-Hauptmenü nicht unbenutzbar machen.
 - Für langlaufende Vorgänge den vorhandenen SSE/Push-Kanal bevorzugen; bestätigte Zustände nach Reconnect einmal lesen.
 
@@ -46,7 +46,7 @@ Kein Feld enthält ein aus einem Addon-Manifest frei ausführbares Shell-Kommand
 1. Feature im Suite-Hauptmenü auffindbar, ohne vorhandene Buttons zu verstecken.
 2. Reale Navigation mit OK, Back, Farbtasten und Wechsel zwischen TV und Addon getestet.
 3. Daten, Berechtigungen, Sortierung, Metadaten und Fehlerverhalten mit vorhandenem Webfrontend/VDR verglichen.
-4. Mutierende Operationen laufen nur über ihre bestehende autoritative Schnittstelle und zeigen einen bestätigten Readback.
+4. Mutierende Operationen laufen ausschließlich über die bestehende VDR-/Plugin- beziehungsweise lokale Suite-Addon-Schnittstelle ihres Eigentümers. Für Suite-eigene asynchrone Aktionen bestätigten Readback und gegebenenfalls Push verwenden.
 5. HbbTV/Teletext/Player sind nach Ende sauber zum Suite-OSD oder Live-TV zurückgekehrt.
 6. Testnachweis enthält genaue VDR-API, Ausgabegerät, Suite-Build und Plugin-Commit.
 
