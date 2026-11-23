@@ -43,8 +43,20 @@ int main()
     direct.Move(Direction::Down, 1, 4);
     direct.Move(Direction::Down, 1, 4);
     assert(direct.sideIndex == 3);
-    assert(direct.Move(Direction::Select, 6, 4) == Activation::None);
-    assert(direct.section == 3);
-    assert(direct.firstVisibleSection == 2);
+    assert(direct.Move(Direction::Select, 6, 4) == Activation::Module);
+    assert(direct.sideIndex == 3); // recordings native VDR menu
+    assert(!direct.sideFocused);
+    assert(direct.section == 0); // Suite Home stays unchanged
+
+    // Every non-Home icon calls its own native menu/plug-in adapter,
+    // not another location of the Home carousel.
+    for (int index = 1; index < Navigation::kSidebarItems; ++index) {
+        Navigation menu;
+        menu.Move(Direction::Left, 1, 4);
+        for (int j = 0; j < index; ++j)
+            menu.Move(Direction::Down, 1, 4);
+        assert(menu.sideIndex == index);
+        assert(menu.Move(Direction::Select, 1, 4) == Activation::Module);
+    }
     return 0;
 }
