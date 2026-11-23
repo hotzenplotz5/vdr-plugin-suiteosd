@@ -12,6 +12,13 @@ jobs:
       - name: Test remote navigation without display device
         run: make check-navigation
 
+  logos:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify local sender-logo name matching and safe fallback
+        run: make check-logos
+
   epg-timeline:
     runs-on: ubuntu-24.04
     steps:
