@@ -13,17 +13,23 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.2.0, noch nicht auf TV abgenommen)
+## Aktueller Implementierungsstand (0.3.0, noch nicht auf TV abgenommen)
 
 - Native `cOsdObject`-Home-Ansicht mit fester Kopfzeile, schmaler Icon-Leiste und eingeblendeten **allen** Labels beim Navigieren auf die Sidebar.
 - Pfeiltasten, OK und Zurück sowie vertikale Home-Sektionen ohne sichtbaren Scrollbalken und horizontale Sender-/Aufnahmekacheln.
 - Reale VDR-Kanäle, aktuelle/folgende EPG-Ereignisse und Aufnahmetitel als Snapshot (keine künstlichen Beispieldaten).
 - Direkter VDR-Senderwechsel bei Auswahl einer Jetzt-Sendung und VDR-eigene Wiedergabe für ausgewählte Aufnahmen; kein zweiter Video-Player.
 - Menüübergabe an **bereits installierte** VDR-Plugins `web` (HbbTV), `osdteletext` und `epgsearch` (Suchtimer/Suche, optional `epgsearchonly`) per `cRemote::CallPlugin`. Verfügbarkeit und Fokus-/Rückkehrverhalten sind auf dem echten VDR noch zu testen.
-- Derzeit **keine** eingebettete Live-Vorschau, kein Artwork, keine eigenständigen Suite-Addon-Ansichten und noch keine Public-API-v1-Anbindung. Das Vorschaufeld ist ein ausdrücklich beschrifteter Platzhalter.
+- **Aufnahmen mit TVScraper-Daten:** Die sieben gerade sichtbaren Aufnahmekacheln lesen lokal über den VDR-Service `GetScraperVideo` Filmtitel, Episodenname, Erscheinungsdatum, Beschreibung und Bildpfad. PNG-/JPEG-Artwork wird als kleines natives OSD-Bild eingeblendet; `Info` zeigt die Beschreibung und `Zurück` schließt die Detailansicht. Ohne installierten TVScraper oder bei nicht gefundenem Artwork bleiben Titel, Datum, VDR-Beschreibung und Wiedergabe verfügbar. Kein API-v1-Aufruf.
+- **Artwork-Speicher:** Nur sichtbare Aufnahmen werden angefragt, das Thumbnail-Cache ist auf 48 Einträge begrenzt; die blaue Taste verwirft den Cache und lädt die Daten neu.
+- Derzeit **keine** eingebettete Live-Vorschau, keine gesonderte Skin-Implementierung und keine Public-API-v1-Anbindung. Das TV-Vorschaufeld ist weiterhin ein ausdrücklich beschrifteter Platzhalter.
 - Ein echter Ausgabe-/OSD-Provider und passende VDR-ABI sind für eine Anzeige nötig; der Code ist **ohne vorhandenes Ausgabeplugin entwickel- und CI-testbar**, aber noch nicht visuell abgenommen.
 
-Die GitHub-Actions-Matrix kompiliert gegen den unveränderten Upstream-VDR-Quellstand der Tags **2.8.3** und **2.8.4** sowie einen separaten Headless-Navigationstest. Ein erfolgreicher Build bedeutet keine Funktionsabnahme auf dem realen yaVDR.
+Die GitHub-Actions-Matrix kompiliert gegen den unveränderten Upstream-VDR-Quellstand der Tags **2.8.3** und **2.8.4** sowie separate Headless-Tests für Navigation und PNG-/JPEG-Bilddekodierung. Ein erfolgreicher Build bedeutet keine Funktionsabnahme auf dem realen yaVDR.
+
+## Zusätzliche Build-Abhängigkeiten ab 0.3.0
+
+`libpng-dev` und `libjpeg-dev` für das lokale Dekodieren von TVScraper-Bildern, sowie die bereits benötigten VDR-Entwicklungsheader. Das Projekt enthält ausschließlich den öffentlichen TVScraper-Service-Header mit Upstream-Provenienz und GPL-Hinweis unter [vendor/tvscraper](vendor/tvscraper/README.md); **keinen TVScraper-Fork**. Zur Laufzeit ist TVScraper optional. Test mit dem tatsächlich installierten TVScraper und OSD-Provider steht noch aus.
 
 ## Dokumente
 
