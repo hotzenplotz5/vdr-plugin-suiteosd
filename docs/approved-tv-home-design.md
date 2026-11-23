@@ -1,0 +1,32 @@
+# Freigegebenes TV-Home – Designvertrag
+
+**Freigabe:** Nutzer am 23.11.2026, nach mehreren Entwürfen. Die finale visuelle Vorlage ist die ausdrücklich mit „Perfekt!!! Los!“ bestätigte TV-OSD-Ansicht, abgeleitet aus dem echten VDR-Suite-Webfrontend-Home.
+
+## Layout
+
+- Dunkles, ruhiges **VDR-Suite-Design**; keine neue Streaming-App-Ästhetik.
+- Fixierte Kopfzeile mit VDR-Suite, aktuellem Kanal und später realen Statusdaten.
+- **Links standardmäßig nur Icons.** Fokus/Navigieren auf die Leiste klappt die Beschreibungen **aller** Icons zugleich auf; Verlassen klappt sie wieder zu. Keine zweite, permanent offene Beschriftungsleiste.
+- Startbereich: **Live-TV-Informationen** (Sender, Jetzt, Als nächstes, Zeit/Progress); rechts das aktuelle TV-Programm **wenn die Ausgabeplugin-Schnittstelle eine solche Einbettung erlaubt**.
+- Darunter vertikale, fortsetzbare Home-Abschnitte in dieser Reihenfolge:
+  1. **Was läuft jetzt** – horizontale Sender-/Sendungskacheln;
+  2. **Was läuft als nächstes** – gleiche Kanalnavigation, folgende Sendung;
+  3. **Aufnahmen** – Kacheln mit Aufnahmetiteln und zukünftig Artwork;
+  4. spätere Home-Abschnitte entsprechend tatsächlichem VDR-Suite-Webfrontend (z. B. Weiterschauen), sobald Daten/Player-Vertrag vorhanden.
+- **Vertikales Scrollen ohne sichtbaren Scrollbalken**. Horizontal durch die Kacheln navigieren, mit Fokusrahmen und automatischem Versetzen des sichtbaren Bereichs.
+- Kein doppeltes Menü, keine riesigen Kacheln/Glüheffekte; niedrige Informationsverluste gegenüber Webfrontend.
+- Fernbedienungspfeile, OK, Zurück. Farbtasten nur für echte vorhandene Funktionen belegen.
+
+## Technische Implementierungsetappen
+
+1. **Jetzt:** nativer VDR-Menüeinstieg, Headless-Navigationsmodell, 32-Bit-OSD-Darstellung, reale lokale EPG-Daten und Aufnahmetitel. Die erste Umsetzung darf Text-/Farbflächen statt Artwork verwenden und kennzeichnet unverdrahtete Aktionen ausdrücklich.
+2. **Danach:** Live-TV-Bildeinbettung/Ausgabeplugin und Bild-/Artwork-Rendering **nur nach echter API-/Hardwareprüfung**; Fokushandoff zu Teletext und HbbTV ohne Fork.
+3. **Danach:** Suite Public API v1, gemeinsame Daten-/Rechte-Semantik, Aufnahme-/Timeraktionen, Media Tools, Image und weitere Addons.
+
+Das Projekt ist ohne angeschlossenes Ausgabeplugin **baubar und navigationsseitig testbar**, aber **nicht visuell auf einem realen TV abnehmbar**. Die aktuelle Implementierung zeichnet vorläufig ein explizit als solches gekennzeichnetes Live-TV-Vorschaufeld: Sie darf keinen fremden Streamplayer erfinden oder das ganze Fernsehbild als skaliertes Video ausgeben.
+
+## Quellenbasis
+
+- Nutzerfreigabe am 23.11.2026 und echte Home-Ansicht als visuelle Referenz.
+- VDR-2.8.3-Schnittstellen: `cOsdObject`, `cOsdProvider`, `cChannels`, `cSchedules`, `cRecordings`.
+- VDR-Suite-Webfrontend und bestehende Source-Owner im Hauptrepo.
