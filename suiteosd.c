@@ -374,6 +374,18 @@ private:
                 if (cRemote::Put(nativeKey, true))
                     return osEnd;
                 notice = "VDR-Menü konnte nicht geöffnet werden";
+            } else if (nav.sideIndex == 5) {
+                // Search timers belong to the local epgsearch VDR plugin,
+                // NOT the VDR core or VDR-Suite Public API v1.
+                // Prefer epgsearchonly's direct native search menu when
+                // installed; epgsearch itself is a usable local fallback.
+                const char *plugin = cPluginManager::GetPlugin("epgsearchonly")
+                    ? "epgsearchonly"
+                    : (cPluginManager::GetPlugin("epgsearch") ? "epgsearch" : nullptr);
+                if (plugin && cRemote::CallPlugin(plugin))
+                    return osEnd;
+                notice = plugin ? "Epgsearch-Menü konnte nicht geöffnet werden"
+                                : "Epgsearch-Plugin nicht installiert";
             } else if (nav.sideIndex == 6 || nav.sideIndex == 7) {
                 // Keep HbbTV and teletext owned by their installed VDR plugins.
                 const char *plugin = nav.sideIndex == 6 ? "web" : "osdteletext";
