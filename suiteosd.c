@@ -223,7 +223,7 @@ private:
 
     void drawPrograms(int section, int y, const char *heading, const std::vector<Programme> &items)
     {
-        if (y < -170 || y > 815)
+        if (y < 75 || y > 815)
             return;
         print(155, y, heading, fontLarge);
         const int columns = 7;
@@ -250,7 +250,7 @@ private:
 
     void drawRecordings(int y)
     {
-        if (y < -170 || y > 815)
+        if (y < 75 || y > 815)
             return;
         print(155, y, "Aufnahmen (" + std::to_string(data.recordings.size()) +
               (data.recordings.size() >= 100 ? "+" : "") + ")", fontLarge);
