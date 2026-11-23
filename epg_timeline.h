@@ -188,3 +188,5 @@ struct Timeline {
 };
 
 } // namespace suiteosd
+
+#endif // VDR_SUITEOSD_EPG_TIMELINE_H
