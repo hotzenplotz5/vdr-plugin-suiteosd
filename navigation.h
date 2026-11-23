@@ -57,6 +57,8 @@ struct Navigation {
                 case 3: section = 3; break; // recordings
                 default: return Activation::Module; // clearly pending module integration
                 }
+                KeepVisible(visibleCards, sectionCount);
+                firstVisibleSection = section >= 3 ? 2 : 1;
             }
             return Activation::None;
         }
