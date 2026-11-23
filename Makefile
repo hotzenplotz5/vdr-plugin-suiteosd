@@ -26,9 +26,9 @@ suiteosd.o: suiteosd.c navigation.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 check-navigation:
-	bin=/tmp/suiteosd-navigation-test.$$; \
-	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o $bin tests/navigation_test.cpp && $bin; status=$?; \
-	rm -f $bin; exit $status
+	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o navigation-test tests/navigation_test.cpp
+	./navigation-test
+	rm -f navigation-test
 
 show-vdr-api:
 	@printf 'VDR_API_VERSION=%s\n' '$(VDR_API_VERSION)'
