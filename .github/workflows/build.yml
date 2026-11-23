@@ -12,6 +12,13 @@ jobs:
       - name: Test remote navigation without display device
         run: make check-navigation
 
+  epg-timeline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify channel navigation and proportional EPG event geometry
+        run: make check-epg-timeline
+
   artwork:
     runs-on: ubuntu-24.04
     steps:
