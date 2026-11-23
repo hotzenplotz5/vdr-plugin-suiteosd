@@ -311,9 +311,9 @@ private:
         const int channelX = 151;
         const int trackX = 393;
         const int trackWidth = 1171;
-        const int top = 198;
-        const int rowHeight = 83;
-        const int rowGap = 7;
+        const int top = 190;
+        const int rowHeight = 76;
+        const int rowGap = 5;
         panel(channelX, top, 222, 48, false, kSurface);
         print(channelX + 14, top + 10, "KANAL", fontBody, kFocus);
         panel(trackX, top, trackWidth, 48, false, kSurface);
