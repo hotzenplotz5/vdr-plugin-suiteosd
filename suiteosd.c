@@ -6,6 +6,7 @@
  */
 #include "navigation.h"
 #include "epg_timeline.h"
+#include "logo_locator.h"
 #include "artwork_decode.h"
 #include "vendor/tvscraper/services.h"
 
@@ -19,6 +20,8 @@
 #include <vdr/plugin.h>
 #include <vdr/recording.h>
 #include <vdr/remote.h>
+#include <vdr/timers.h>
+#include <vdr/svdrp.h>
 
 #include <algorithm>
 #include <array>
@@ -31,7 +34,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.4.0";
+static const char *VERSION = "0.5.0";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace {
@@ -161,13 +164,20 @@ suiteosd::Timeline ReadNativeTimeline()
         LOCK_CHANNELS_READ;
         LOCK_SCHEDULES_READ;
         if (Channels) {
+            std::string currentGroup = "Weitere Sender";
             for (const cChannel *channel = Channels->First(); channel;
                  channel = Channels->Next(channel)) {
-                if (channel->GroupSep() || channel->Number() <= 0)
+                if (channel->GroupSep()) {
+                    currentGroup = channel->Name() ? channel->Name() : "";
+                    if (currentGroup.empty()) currentGroup = "Weitere Sender";
                     continue;
+                }
+                if (channel->Number() <= 0) continue;
                 suiteosd::TimelineChannel row;
                 row.number = channel->Number();
                 row.name = channel->Name() ? channel->Name() : "";
+                row.shortName = channel->ShortName(true) ? channel->ShortName(true) : "";
+                row.group = currentGroup;
                 const cSchedule *schedule = Schedules ?
                     Schedules->GetSchedule(channel) : nullptr;
                 if (schedule) {
@@ -193,6 +203,7 @@ suiteosd::Timeline ReadNativeTimeline()
             }
         }
     }
+    timeline.InitializeGroups();
     timeline.Reset(now, tunedChannel);
     return timeline;
 }
@@ -217,6 +228,10 @@ private:
     suiteosd::Timeline timeline;
     bool timelineActive = false;
     bool timelineDetails = false;
+    bool timelineTimerConfirm = false;
+    std::string timelineTimerNotice;
+    std::map<std::string, suiteosd::Artwork> channelLogos;
+    std::map<std::string, suiteosd::Artwork> timelineArtwork;
     Snapshot data;
     std::map<std::string, RecordingMeta> recordingMeta;
     std::string notice;
@@ -263,6 +278,29 @@ private:
         return 0;
     }
 
+    const suiteosd::Artwork &channelLogo(const suiteosd::TimelineChannel &channel)
+    {
+        const std::string key = channel.name + "\n" + channel.shortName;
+        auto it = channelLogos.find(key);
+        if (it != channelLogos.end()) return it->second;
+        if (channelLogos.size() >= 48) channelLogos.clear();
+        const std::string path = suiteosd::FindChannelLogo(channel.name, channel.shortName);
+        return channelLogos.emplace(key,
+            suiteosd::LoadArtwork(path, X(64), Y(42))).first->second;
+    }
+
+    bool drawChannelLogo(const suiteosd::TimelineChannel &channel,
+                         int x, int y, int w, int h)
+    {
+        const suiteosd::Artwork &art = channelLogo(channel);
+        if (!art.valid() || !osd) return false;
+        cImage image(cSize(art.width, art.height), art.argb.data());
+        const int px = X(x) + (X(w) - art.width) / 2;
+        const int py = Y(y) + (Y(h) - art.height) / 2;
+        osd->DrawImage(cPoint(px, py), image);
+        return true;
+    }
+
     // Suite-Webfrontend EPG: dark rounded channel labels, proportional
     // programme tiles, anchored time-axis ticks, orange Jetzt marker.
     // The wide Web timeline is zoomed to a four-hour television viewport.
@@ -291,13 +329,14 @@ private:
               (timeline.channels.empty() ? "0" : std::to_string(timeline.firstChannel + 1)) +
               "–" + std::to_string(std::min(int(timeline.channels.size()),
                                             timeline.firstChannel + suiteosd::Timeline::kRows)) +
-              " / " + std::to_string(timeline.channels.size()),
-              fontBody, kText, 900);
+              " / " + std::to_string(timeline.channels.size()) +
+              "   ·   Gruppe: " + timeline.GroupLabel(),
+              fontBody, kText, 1200);
         const time_t end = timeline.visibleStart + suiteosd::Timeline::kWindowSeconds;
         print(168, 143, formatTime(timeline.visibleStart) + " – " +
               formatTime(end) + (timeline.dayPage ? "  ·  Nächste 24h" : "  ·  Aktuelle 24h"),
               fontSmall, kFocus);
-        print(1050, 145, "Blau: Ansicht", fontSmall, kMuted);
+        print(1065, 145, "0: Gruppe  ·  Blau: Ansicht", fontSmall, kMuted);
     }
 
     int timelineX(time_t stamp, int trackX, int trackWidth) const
@@ -333,9 +372,10 @@ private:
             const int y = top + 55 + n * (rowHeight + rowGap);
             const bool focusedChannel = index == timeline.channel;
             panel(channelX, y, 222, rowHeight, focusedChannel, kSurface);
-            print(channelX + 13, y + 11, std::to_string(channel.number),
-                  fontSmall, kFocus, 53);
-            print(channelX + 13, y + 41, channel.name, fontBody, kText, 199);
+            drawChannelLogo(channel, channelX + 10, y + 13, 53, 39);
+            print(channelX + 77, y + 9, std::to_string(channel.number),
+                  fontSmall, kFocus, 50);
+            print(channelX + 76, y + 38, channel.name, fontBody, kText, 135);
             panel(trackX, y, trackWidth, rowHeight, false, kBackground);
             int shown = 0;
             for (int eIndex = 0; eIndex < int(channel.events.size()); ++eIndex) {
@@ -385,8 +425,9 @@ private:
             const int index = first + i;
             const auto &channel = timeline.channels[index];
             panel(x, 213, trackW - 5, 40, index == timeline.channel, kSurface);
-            print(x + 13, 224, std::to_string(channel.number) + "  " + channel.name,
-                  fontBody, kText, trackW - 28);
+            drawChannelLogo(channel, x + 7, 218, 43, 28);
+            print(x + 57, 224, std::to_string(channel.number) + "  " + channel.name,
+                  fontBody, kText, trackW - 66);
             panel(x, top, trackW - 5, trackH, false, kBackground);
             for (int j = 0; j < int(channel.events.size()); ++j) {
                 const auto &e = channel.events[j];
@@ -452,8 +493,9 @@ private:
             const int y = top + n * 87;
             const bool selected = index == timeline.channel;
             panel(153, y, 1409, 77, selected, kSurface);
-            print(177, y + 10, std::to_string(ch.number) + "   " + ch.name,
-                  fontBody, kFocus, 230);
+            drawChannelLogo(ch, 172, y + 18, 53, 39);
+            print(232, y + 10, std::to_string(ch.number) + "   " + ch.name,
+                  fontBody, kFocus, 180);
             const int eventIndex = timelineListEventIndex(ch);
             if (eventIndex < 0) {
                 print(452, y + 17, "Keine Programminformation", fontBody, kMuted);
@@ -544,6 +586,10 @@ private:
         timeline = ReadNativeTimeline();
         timelineActive = true;
         timelineDetails = false;
+        timelineTimerConfirm = false;
+        timelineTimerNotice.clear();
+        timelineArtwork.clear();
+        channelLogos.clear();
         notice.clear();
     }
 
@@ -578,6 +624,9 @@ private:
             break;
         case kBlue:
             timeline.NextView();
+            break;
+        case k0:
+            timeline.CycleGroup();
             break;
         case kUp:
             if (timeline.view == suiteosd::Timeline::View::Vertical)
