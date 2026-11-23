@@ -1,21 +1,37 @@
-name: VDR plugin build smoke test
+name: Native VDR 2.8 build and navigation tests
 
 on:
   push:
   pull_request:
 
 jobs:
-  build:
+  navigation:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install VDR development headers
+      - name: Test remote navigation without display device
+        run: make check-navigation
+
+  native-vdr:
+    name: VDR ${{ matrix.vdr }}
+    strategy:
+      fail-fast: false
+      matrix:
+        vdr: ["2.8.3", "2.8.4"]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: vdr-projects/vdr
+          ref: ${{ matrix.vdr }}
+          path: upstream/vdr
+          persist-credentials: false
+      - name: Install toolchain and package metadata
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config vdr-dev
-      - name: Build native VDR plugin as regular runner user
+          sudo apt-get install -y build-essential pkg-config vdr-dev
+      - name: Compile plugin against exact upstream VDR header version
         run: |
-          pkg-config --modversion vdr
-          pkg-config --variable=apiversion vdr
-          make -j2
+          make VDR_SOURCE_PARENT=upstream -j2
           test -s libvdr-suiteosd.so
