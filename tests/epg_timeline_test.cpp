@@ -67,6 +67,28 @@ int main()
     t.MoveChannel(1000);
     assert(t.channel == 14);
 
+    // VDR group separators become the same named EPG filter as Webfrontend.
+    Timeline grouped;
+    grouped.channels.push_back({1, "Das Erste", "Das Erste", "Öffentlich-Rechtlich", {}});
+    grouped.channels.push_back({2, "ZDF", "ZDF", "Öffentlich-Rechtlich", {}});
+    grouped.channels.push_back({3, "RTL", "RTL", "Private", {}});
+    grouped.channels.push_back({4, "Unsorted", "Unsorted", "", {}});
+    grouped.InitializeGroups();
+    grouped.Reset(now, 2);
+    assert(grouped.GroupLabel() == "Alle Sender");
+    assert(grouped.channels.size() == 4);
+    grouped.CycleGroup();
+    assert(grouped.GroupLabel() == "Öffentlich-Rechtlich");
+    assert(grouped.channels.size() == 2 && grouped.channels[grouped.channel].number == 2);
+    grouped.CycleGroup();
+    assert(grouped.GroupLabel() == "Private");
+    assert(grouped.channels.size() == 1 && grouped.channels[0].number == 3);
+    grouped.CycleGroup();
+    assert(grouped.GroupLabel() == "Weitere Sender");
+    assert(grouped.channels.size() == 1);
+    grouped.CycleGroup();
+    assert(grouped.GroupLabel() == "Alle Sender" && grouped.channels.size() == 4);
+
     Timeline empty;
     empty.Reset(now, 1);
     empty.MoveChannel(1);
