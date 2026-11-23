@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <ctime>
 #include <map>
+#include <sstream>
 #include <utility>
 #include <string>
 #include <vector>
@@ -53,6 +54,7 @@ struct Recording {
     std::string title;
     std::string time;
     std::string fileName;
+    std::string description;
 };
 struct RecordingMeta {
     std::string title;
@@ -136,6 +138,8 @@ Snapshot readVdrSnapshot()
                 r.title = rec->Name() ? rec->Name() : "";
                 r.time = formatTime(rec->Start());
                 r.fileName = rec->FileName() ? rec->FileName() : "";
+                if (rec->Info() && rec->Info()->Description())
+                    r.description = rec->Info()->Description();
                 snapshot.recordings.push_back(std::move(r));
             }
         }
@@ -163,6 +167,7 @@ private:
     Snapshot data;
     std::map<std::string, RecordingMeta> recordingMeta;
     std::string notice;
+    bool recordingDetails = false;
     int width = 1600;
     int height = 900;
 
@@ -369,6 +374,45 @@ private:
             print(159, y + 94, "Keine Aufnahmen vorhanden", fontBody, kMuted);
     }
 
+    void drawRecordingDetails()
+    {
+        if (!recordingDetails || nav.section != 3 ||
+            nav.card[3] < 0 || nav.card[3] >= int(data.recordings.size()))
+            return;
+        const Recording &item = data.recordings[nav.card[3]];
+        const RecordingMeta &meta = metaFor(item);
+        panel(268, 164, 1082, 540, true, kSurface);
+        const std::string title = meta.title.empty() ? item.title : meta.title;
+        print(299, 188, title, fontTitle, kText, 1008);
+        print(299, 253, "Aufnahme  ·  " + item.time, fontSmall, kFocus);
+        if (!meta.release.empty())
+            print(299, 292, "Erscheinungsdatum: " + meta.release, fontBody, kMuted, 984);
+        if (!meta.episode.empty())
+            print(299, 332, "Episode: " + meta.episode, fontBody, kMuted, 984);
+        std::string overview = meta.overview.empty() ? item.description : meta.overview;
+        if (overview.empty())
+            overview = "Keine Beschreibung vorhanden";
+        std::replace(overview.begin(), overview.end(), '\n', ' ');
+        std::istringstream words(overview);
+        std::string line, word;
+        int y = 388;
+        int lineCount = 0;
+        while (words >> word && lineCount < 8) {
+            std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(950)) {
+                print(299, y, line, fontBody, kText, 961);
+                y += 33;
+                ++lineCount;
+                line = word;
+            } else {
+                line = std::move(candidate);
+            }
+        }
+        if (!line.empty() && lineCount < 8)
+            print(299, y, line, fontBody, kText, 961);
+        print(299, 662, "Info oder Zurück: Schließen", fontSmall, kFocus);
+    }
+
     void drawSidebar()
     {
         // Expanded sidebar overlays the content; it never permanently
@@ -414,6 +458,7 @@ private:
         drawRecordings(834 - scroll);
         drawFooter();
         drawSidebar();
+        drawRecordingDetails();
         osd->Flush();
     }
 
@@ -525,6 +570,19 @@ public:
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        if (recordingDetails) {
+            if (base == kInfo || base == kBack) {
+                recordingDetails = false;
+                draw();
+            }
+            return osContinue;
+        }
+        if (base == kInfo && nav.section == 3 && !nav.sideFocused &&
+            nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size())) {
+            recordingDetails = true;
+            draw();
+            return osContinue;
+        }
         if (base == kBlue) {
             data = readVdrSnapshot();
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
