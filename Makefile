@@ -17,13 +17,13 @@ CXXFLAGS += -std=c++17 -fPIC $(SOURCE_FLAGS) $(VDR_CXXFLAGS) $(VDR_CFLAGS) $(she
 ARTWORK_LIBS = $(shell $(PKG_CONFIG) --libs libpng) -ljpeg
 DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"'
 
-.PHONY: all clean show-vdr-api check-navigation check-artwork check-epg-timeline
+.PHONY: all clean show-vdr-api check-navigation check-artwork check-epg-timeline check-logos
 all: $(SOFILE)
 
 $(SOFILE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -o $@ $^ $(ARTWORK_LIBS)
 
-suiteosd.o: suiteosd.c navigation.h epg_timeline.h artwork_decode.h vendor/tvscraper/services.h
+suiteosd.o: suiteosd.c navigation.h epg_timeline.h logo_locator.h artwork_decode.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 artwork_decode.o: artwork_decode.c artwork_decode.h
@@ -33,6 +33,11 @@ check-artwork:
 	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o artwork-test tests/artwork_test.cpp artwork_decode.c $(ARTWORK_LIBS)
 	./artwork-test
 	rm -f artwork-test
+
+check-logos:
+	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o logo-locator-test tests/logo_locator_test.cpp
+	./logo-locator-test
+	rm -f logo-locator-test
 
 check-epg-timeline:
 	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o epg-timeline-test tests/epg_timeline_test.cpp
@@ -48,4 +53,4 @@ show-vdr-api:
 	@printf 'VDR_API_VERSION=%s\n' '$(VDR_API_VERSION)'
 
 clean:
-	rm -f $(OBJECTS) $(SOFILE) artwork-test navigation-test epg-timeline-test
+	rm -f $(OBJECTS) $(SOFILE) artwork-test navigation-test epg-timeline-test logo-locator-test
