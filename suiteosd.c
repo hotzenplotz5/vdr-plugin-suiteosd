@@ -391,9 +391,19 @@ public:
         default: return osContinue;
         }
         notice.clear();
-        const int upcoming = nav.section < 3 && direction == suiteosd::Direction::Down
-                                 ? count(nav.section + 1) : count(nav.section);
-        action(nav.Move(direction, upcoming, 7));
+        // Navigation changes the section before clamping the card focus.
+        // Use the destination section's actual item count, not the old row's.
+        int target = nav.section;
+        if (!nav.sideFocused && direction == suiteosd::Direction::Down)
+            target = std::min(3, target + 1);
+        if (!nav.sideFocused && direction == suiteosd::Direction::Up)
+            target = std::max(0, target - 1);
+        if (nav.sideFocused && direction == suiteosd::Direction::Select) {
+            if (nav.sideIndex <= 1) target = 0;
+            else if (nav.sideIndex == 2) target = 1;
+            else if (nav.sideIndex == 3) target = 3;
+        }
+        action(nav.Move(direction, count(target), 7));
         draw();
         return osContinue;
     }
