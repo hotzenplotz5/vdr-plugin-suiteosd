@@ -528,6 +528,107 @@ private:
         return index >= 0 ? &row.events[index] : nullptr;
     }
 
+    const suiteosd::Artwork &selectedEventArtwork()
+    {
+        static const suiteosd::Artwork empty;
+        if (timeline.channel < 0 || timeline.channel >= int(timeline.channels.size()))
+            return empty;
+        const suiteosd::TimelineEvent *selected = timelineSelectedEvent();
+        if (!selected) return empty;
+
+        const int number = timeline.channels[timeline.channel].number;
+        const std::string key = std::to_string(number) + ":" +
+            std::to_string(selected->id) + ":" + std::to_string(selected->start);
+        auto it = timelineArtwork.find(key);
+        if (it != timelineArtwork.end()) return it->second;
+        if (timelineArtwork.size() >= 12) timelineArtwork.clear();
+
+        std::string imagePath;
+        cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
+        if (scraper) {
+            // TVScraper borrows cEvent. Keep VDR schedule/channel locks only
+            // while calling its service and copying the returned image path.
+            LOCK_CHANNELS_READ;
+            LOCK_SCHEDULES_READ;
+            const cChannel *channel = Channels ? Channels->GetByNumber(number) : nullptr;
+            const cSchedule *schedule = channel && Schedules ?
+                Schedules->GetSchedule(channel) : nullptr;
+            const cEvent *event = schedule ? schedule->GetEventById(selected->id) : nullptr;
+            if (event && event->StartTime() == selected->start) {
+                cGetScraperVideo request(event, nullptr);
+                if (scraper->Service("GetScraperVideo", &request) && request.m_scraperVideo) {
+                    cTvMedia picture = request.m_scraperVideo->getImage(
+                        cImageLevels(eImageLevel::episodeMovie,
+                                     eImageLevel::seasonMovie,
+                                     eImageLevel::tvShowCollection),
+                        cOrientations(eOrientation::landscape,
+                                      eOrientation::banner,
+                                      eOrientation::portrait), true);
+                    imagePath = picture.path;
+                }
+            }
+        }
+        // Decode only the chosen EPG detail, without holding VDR locks.
+        return timelineArtwork.emplace(key,
+            suiteosd::LoadArtwork(imagePath, X(310), Y(210))).first->second;
+    }
+
+    std::string createSelectedVdrTimer()
+    {
+        const suiteosd::TimelineEvent *selected = timelineSelectedEvent();
+        if (!selected || timeline.channel < 0 ||
+            timeline.channel >= int(timeline.channels.size()))
+            return "Keine Sendung ausgewählt";
+        if (selected->end <= time(nullptr))
+            return "Diese Sendung ist bereits beendet";
+
+        const int channelNumber = timeline.channels[timeline.channel].number;
+        const tEventID eventID = selected->id;
+        const time_t eventStart = selected->start;
+
+        // Match the lock order and timer life cycle of VDR's own
+        // cMenuSchedule::Record(). Resolve the original event again under
+        // its lock, so an outdated EPG snapshot never writes a wrong timer.
+        LOCK_TIMERS_WRITE;
+        LOCK_CHANNELS_READ;
+        LOCK_SCHEDULES_READ;
+        const cChannel *channel = Channels ?
+            Channels->GetByNumber(channelNumber) : nullptr;
+        const cSchedule *schedule = channel && Schedules ?
+            Schedules->GetSchedule(channel) : nullptr;
+        const cEvent *event = schedule ? schedule->GetEventById(eventID) : nullptr;
+        if (!event || event->StartTime() != eventStart ||
+            event->EndTime() <= time(nullptr))
+            return "Die Sendung wurde geändert. Bitte EPG neu öffnen";
+
+        eTimerMatch match = tmNone;
+        if (Timers->GetMatch(event, &match) && match == tmFull)
+            return "Ein Timer für diese Sendung ist bereits vorhanden";
+
+        cTimer *timer = new cTimer(event);
+        if (Setup.SVDRPPeering && *Setup.SVDRPDefaultHost)
+            timer->SetRemote(Setup.SVDRPDefaultHost);
+        if (Timers->GetTimer(timer)) {
+            delete timer;
+            return "Ein entsprechender Timer ist bereits vorhanden";
+        }
+
+        Timers->SetExplicitModify();
+        Timers->Add(timer);
+        Timers->SetModified();
+        cString failure;
+        if (!HandleRemoteTimerModifications(timer, nullptr, &failure)) {
+            Timers->Del(timer);
+            Timers->SetModified();
+            return *failure ? std::string(*failure) : "VDR konnte den Timer nicht erstellen";
+        }
+        if (timer->Remote())
+            Timers->SetSyncStateKey(StateKeySVDRPRemoteTimersPoll);
+        // The VDR list is authoritative; GetTimer() verifies local readback.
+        return Timers->GetTimer(timer) ? "Aufnahme programmiert" :
+                                       "Timer nicht bestätigt";
+    }
+
     void drawTimelineDetails()
     {
         if (!timelineDetails) return;
@@ -541,24 +642,41 @@ private:
               fontBody, kFocus, 1010);
         if (!e->subtitle.empty())
             print(293, 296, e->subtitle, fontBody, kText, 1000);
+        const suiteosd::Artwork &art = selectedEventArtwork();
+        const bool hasImage = art.valid();
+        if (hasImage && osd) {
+            fill(998, 339, 1320, 566, kCardAlt);
+            cImage image(cSize(art.width, art.height), art.argb.data());
+            const int px = X(1005) + (X(307) - art.width) / 2;
+            const int py = Y(348) + (Y(204) - art.height) / 2;
+            osd->DrawImage(cPoint(px, py), image);
+        }
         std::string description = e->description.empty() ?
             "Keine Beschreibung vorhanden." : e->description;
         std::replace(description.begin(), description.end(), '\n', ' ');
         std::istringstream words(description);
         std::string line, word;
+        const int textWidth = hasImage ? 670 : 1000;
         int y = 347;
-        while (words >> word && y < 660) {
+        while (words >> word && y < 635) {
             const std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(1000)) {
-                print(292, y, line, fontBody, kText, 1010);
+            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(textWidth)) {
+                print(292, y, line, fontBody, kText, textWidth + 10);
                 line = word;
                 y += 36;
             } else
                 line = candidate;
         }
-        if (!line.empty() && y < 670)
-            print(292, y, line, fontBody, kText, 1010);
-        print(294, 676, "OK / Info / Zurück: Schließen", fontSmall, kFocus);
+        if (!line.empty() && y < 660)
+            print(292, y, line, fontBody, kText, textWidth + 10);
+        if (timelineTimerConfirm)
+            print(294, 640, "Timer erstellen? OK: Bestätigen  ·  Zurück: Abbrechen",
+                  fontBody, kFocus, 1000);
+        else
+            print(294, 640, "Rot: Aufnahme programmieren  ·  Info/Zurück: Schließen",
+                  fontSmall, kFocus, 1000);
+        if (!timelineTimerNotice.empty())
+            print(294, 681, timelineTimerNotice, fontSmall, kFocus, 1000);
     }
 
     void drawTimeline()
@@ -596,10 +714,23 @@ private:
     eOSState timelineKey(eKeys base)
     {
         if (timelineDetails) {
-            if (base == kBack || base == kInfo || base == kOk) {
+            if (timelineTimerConfirm) {
+                if (base == kOk) {
+                    timelineTimerNotice = createSelectedVdrTimer();
+                    timelineTimerConfirm = false;
+                } else if (base == kBack || base == kInfo) {
+                    timelineTimerConfirm = false;
+                }
+            } else if (base == kRed || base == kRecord) {
+                timelineTimerConfirm = true;
+                timelineTimerNotice.clear();
+            } else if (base == kBack || base == kInfo || base == kOk) {
                 timelineDetails = false;
-                draw();
+                timelineTimerNotice.clear();
+            } else {
+                return osContinue;
             }
+            draw();
             return osContinue;
         }
         switch (base) {
@@ -654,8 +785,11 @@ private:
             break;
         case kInfo:
         case kOk:
-            if (timelineSelectedEvent())
+            if (timelineSelectedEvent()) {
                 timelineDetails = true;
+                timelineTimerConfirm = false;
+                timelineTimerNotice.clear();
+            }
             break;
         default: return osContinue;
         }
