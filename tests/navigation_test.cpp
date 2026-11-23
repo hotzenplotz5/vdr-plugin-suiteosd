@@ -27,6 +27,12 @@ int main()
     assert(n.sideFocused);
     n.Move(Direction::Up, 6, 4);
     assert(n.sideIndex == 0);
+    // Every icon remains focusable; the last entry is Settings.
+    n.Move(Direction::Down, 6, 4);
+    for (int i = 0; i < 20; ++i) n.Move(Direction::Down, 6, 4);
+    assert(n.sideIndex == Navigation::kSidebarItems - 1);
+    for (int i = 0; i < 20; ++i) n.Move(Direction::Up, 6, 4);
+    assert(n.sideIndex == 0);
     assert(n.Move(Direction::Select, 1, 4) == Activation::None);
     assert(n.section == 0 && !n.sideFocused);
     assert(n.Move(Direction::Back, 1, 4) == Activation::Close);
