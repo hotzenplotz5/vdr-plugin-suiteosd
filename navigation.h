@@ -51,11 +51,8 @@ struct Navigation {
             else if (key == Direction::Select) {
                 sideFocused = false;
                 switch (sideIndex) {
-                case 0: section = 0; break; // Home
-                case 1: section = 0; break; // Live-TV
-                case 2: section = 1; break; // EPG / now
-                case 3: section = 3; break; // recordings
-                default: return Activation::Module; // clearly pending module integration
+                case 0: section = 0; break; // Home stays in the approved Suite dashboard
+                default: return Activation::Module; // VDR menus or installed plugins
                 }
                 KeepVisible(visibleCards, sectionCount);
                 firstVisibleSection = section >= 3 ? 2 : 1;
