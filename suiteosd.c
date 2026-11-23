@@ -106,12 +106,10 @@ Snapshot readVdrSnapshot()
                 Programme current = fromEvent(ch, now);
                 if (snapshot.live.channel.empty() || ch->Number() == liveNumber)
                     snapshot.live = current;
-                // Keep the initial snapshot bounded; the model still scrolls
-                // through all items in this bounded set.
-                if (snapshot.now.size() < 100)
-                    snapshot.now.push_back(current);
-                if (snapshot.next.size() < 100)
-                    snapshot.next.push_back(fromEvent(ch, next));
+                // Keep VDR channel order and expose the complete rail;
+                // horizontal navigation pages through every channel.
+                snapshot.now.push_back(current);
+                snapshot.next.push_back(fromEvent(ch, next));
             }
         }
     }
@@ -124,8 +122,6 @@ Snapshot readVdrSnapshot()
                 r.time = formatTime(rec->Start());
                 r.fileName = rec->FileName() ? rec->FileName() : "";
                 snapshot.recordings.push_back(std::move(r));
-                if (snapshot.recordings.size() >= 100)
-                    break;
             }
         }
     }
@@ -257,8 +253,7 @@ private:
     {
         if (y < 75 || y > 815)
             return;
-        print(155, y, "Aufnahmen (" + std::to_string(data.recordings.size()) +
-              (data.recordings.size() >= 100 ? "+" : "") + ")", fontLarge);
+        print(155, y, "Aufnahmen (" + std::to_string(data.recordings.size()) + ")", fontLarge);
         const int cw = 188;
         const int first = nav.firstCard[3];
         for (int col = 0; col < 7 && first + col < int(data.recordings.size()); ++col) {
