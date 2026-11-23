@@ -52,6 +52,7 @@ struct Recording {
 };
 struct Snapshot {
     Programme live;
+    Programme liveNext;
     std::vector<Programme> now;
     std::vector<Programme> next;
     std::vector<Recording> recordings;
@@ -104,8 +105,10 @@ Snapshot readVdrSnapshot()
                 const cEvent *now = schedule ? schedule->GetPresentEvent() : nullptr;
                 const cEvent *next = schedule ? schedule->GetFollowingEvent() : nullptr;
                 Programme current = fromEvent(ch, now);
-                if (liveNumber > 0 && ch->Number() == liveNumber)
+                if (liveNumber > 0 && ch->Number() == liveNumber) {
                     snapshot.live = current;
+                    snapshot.liveNext = fromEvent(ch, next);
+                }
                 // Keep VDR channel order and expose the complete rail;
                 // horizontal navigation pages through every channel.
                 snapshot.now.push_back(current);
@@ -210,10 +213,17 @@ private:
               fontSmall, kFocus);
         print(189, y + 61, data.live.channel.empty() ? "Kein aktiver Sender" : data.live.channel,
               fontTitle, kText, 760);
-        print(189, y + 134, "JETZT", fontSmall, kFocus);
-        print(189, y + 160, data.live.title.empty() ? "EPG nicht verfügbar" : data.live.title,
-              fontLarge, kText, 660);
-        print(189, y + 205, data.live.time, fontSmall, kMuted);
+        // Match the approved Webfrontend Home: Jetzt and Als Nächstes
+        // come from VDR's present/following events for the tuned channel.
+        print(189, y + 130, "JETZT", fontSmall, kFocus);
+        print(189, y + 161, data.live.title.empty() ? "EPG nicht verfügbar" : data.live.title,
+              fontBody, kText, 302);
+        print(189, y + 207, data.live.time, fontSmall, kMuted, 303);
+        print(518, y + 130, "ALS NÄCHSTES", fontSmall, kFocus);
+        print(518, y + 161,
+              data.liveNext.title.empty() ? "EPG nicht verfügbar" : data.liveNext.title,
+              fontBody, kText, 285);
+        print(518, y + 207, data.liveNext.time, fontSmall, kMuted, 286);
         fill(189, y + 242, 805, y + 250, kLine);
         fill(189, y + 242, 189 + (616 * data.live.progress / 100), y + 250, kFocus);
         panel(875, y + 18, 652, 224, false, kCardAlt);
@@ -347,19 +357,36 @@ private:
             }
             notice = "Aufnahmewiedergabe aktuell nicht verfügbar";
             break;
-        case suiteosd::Activation::Module:
-            // Reuse upstream VDR plugin menu actions. This intentionally
-            // does not implement a second HbbTV/teletext renderer.
-            if (nav.sideIndex == 6 || nav.sideIndex == 7) {
+        case suiteosd::Activation::Module: {
+            // VDR handles direct-menu keys in its main loop and creates
+            // its own cMenuMain submenus. Returning osSchedule/osTimers
+            // from a plain cOsdObject would NOT open them.
+            eKeys nativeKey = kNone;
+            switch (nav.sideIndex) {
+            case 1: return osEnd;       // Live-TV: return to current broadcast
+            case 2: nativeKey = kSchedule; break;   // EPG
+            case 3: nativeKey = kRecordings; break; // Recordings
+            case 4: nativeKey = kTimers; break;     // Timers
+            case 10: nativeKey = kSetup; break;     // VDR settings
+            default: break;
+            }
+            if (nativeKey != kNone) {
+                if (cRemote::Put(nativeKey, true))
+                    return osEnd;
+                notice = "VDR-Menü konnte nicht geöffnet werden";
+            } else if (nav.sideIndex == 6 || nav.sideIndex == 7) {
+                // Keep HbbTV and teletext owned by their installed VDR plugins.
                 const char *plugin = nav.sideIndex == 6 ? "web" : "osdteletext";
                 if (cPluginManager::GetPlugin(plugin) && cRemote::CallPlugin(plugin))
                     return osEnd;
                 notice = nav.sideIndex == 6
                     ? "HbbTV-Plugin nicht verfügbar"
                     : "Teletext-Plugin nicht verfügbar";
-            } else
+            } else {
                 notice = "Dieses Suite-Modul folgt in einem weiteren Integrationsschritt.";
+            }
             break;
+        }
         default: break;
         }
         return osContinue;
@@ -424,11 +451,9 @@ public:
             target = std::min(3, target + 1);
         if (!nav.sideFocused && direction == suiteosd::Direction::Up)
             target = std::max(0, target - 1);
-        if (nav.sideFocused && direction == suiteosd::Direction::Select) {
-            if (nav.sideIndex <= 1) target = 0;
-            else if (nav.sideIndex == 2) target = 1;
-            else if (nav.sideIndex == 3) target = 3;
-        }
+        if (nav.sideFocused && direction == suiteosd::Direction::Select &&
+            nav.sideIndex == 0)
+            target = 0;
         const eOSState result = action(nav.Move(direction, count(target), 7));
         if (result != osContinue)
             return result;
