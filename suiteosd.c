@@ -828,7 +828,7 @@ private:
             const bool selected = nav.sideFocused && nav.sideIndex == i;
             if (selected)
                 panel(31, y, right - 51, 48, true, kHighlight);
-            else if (!nav.sideFocused && i == 0)
+            else if (!nav.sideFocused && i == (timelineActive ? 2 : 0))
                 panel(31, y, 52, 48, false, kHighlight);
             print(41, y + 13, kSymbols[i], fontSmall, kText, 56);
             if (nav.sideFocused)
