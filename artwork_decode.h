@@ -2,6 +2,7 @@
 #define SUITEOSD_ARTWORK_DECODE_H
 
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <vector>
 
