@@ -30,3 +30,26 @@ Das Projekt ist ohne angeschlossenes Ausgabeplugin **baubar und navigationsseiti
 - Nutzerfreigabe am 23.11.2026 und echte Home-Ansicht als visuelle Referenz.
 - VDR-2.8.3-Schnittstellen: `cOsdObject`, `cOsdProvider`, `cChannels`, `cSchedules`, `cRecordings`.
 - VDR-Suite-Webfrontend und bestehende Source-Owner im Hauptrepo.
+
+## VDR-eigene Daten- und Menüanbindung (23.11.2026)
+
+Die nativen VDR-Schnittstellen bleiben die Quelle für Sender, aktuelle/folgende Sendung, Timer und Aufnahmen. Der Home-Hero verwendet für den eingeschalteten Sender `cSchedule::GetPresentEvent()` **und** `GetFollowingEvent()`; die beiden horizontalen Senderreihen verwenden dieselben VDR-Schedules. Damit werden keine zweiten EPG-Berechnungen angelegt.
+
+Bei **OK auf der eingeklappten/ausgeklappten Seitenleiste** startet die ausgewählte native Funktion:
+
+| Sidebar | Umsetzung |
+| --- | --- |
+| Home | Suite-Home, Fokus wieder im Hauptinhalt |
+| Live-TV | Suite-OSD schließen, zum laufenden Bild |
+| EPG | VDR-Direktmenübefehl `kSchedule` |
+| Aufnahmen | VDR-Direktmenübefehl `kRecordings` |
+| Timer | VDR-Direktmenübefehl `kTimers` |
+| Einstellungen | VDR-Direktmenübefehl `kSetup` |
+| HbbTV | Vorhandenes `web`-Plugin, `cRemote::CallPlugin()` |
+| Teletext | Vorhandenes `osdteletext`-Plugin, `cRemote::CallPlugin()` |
+
+Die Direktmenü-Befehle werden **in der VDR-Hauptschleife** verarbeitet; bloß `osSchedule` oder `osTimers` aus einer `cOsdObject`-Ansicht zurückzugeben, würde diese Menüs nicht öffnen. Der ursprüngliche Suite-Home-Screen bleibt bei dieser Übergabe unverändert; tiefere VDR-Menüs behalten vorerst ihre native Skin-Gestaltung. Die konsistente Rückkehr zu Suite-Home ist Teil der weiteren OSD-/Skin-Integration und ist **noch nicht** auf dem echten VDR getestet.
+
+**Noch offen:** Kontextbezogenes Öffnen einer ausgewählten „Als Nächstes“-Kachel als VDR-Sendungsdetail mit Timeraktion, Senderlogo- und Aufnahme-Artwork, Videovorschau als echtes Bild-in-Bild, Suite-Suchtimer und weitere Suite-Addons. Eine allgemeine EPG-Menüöffnung ist ausdrücklich **nicht** gleichbedeutend mit dem ausgewählten Sendungsdetail.
+
+Die VDR-Hauptmenüs, Wiedergabe, Timer und HbbTV bleiben bei ihren bestehenden Eigentümern. Kein Fork von `vaapivideo`, keine zusätzliche Browser-/Playerinstanz und keine neue Autorisierungslogik.
