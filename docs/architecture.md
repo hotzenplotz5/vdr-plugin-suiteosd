@@ -14,7 +14,7 @@ Ein lokales, mit Fernbedienung bedienbares VDR-Suite-Frontend für alle tatsäch
 | --- | --- | --- |
 | VDR | Kanal-/Timer-/Aufnahmesteuerung, Plugin-Lebenszyklus, Fernbedienungsereignisse, OSD-API | Suite-spezifisches Addon-Geschäftsmodell |
 | `vdr-plugin-suiteosd` | TV-Navigation, Skin, Menüs, OSD-State, Aufruf bestehender Funktionen/Plugins | Speicherung und Entscheidung über Produktivrechte |
-| VDR-Suite Core / Public API v1 | Daten, Aktionen, Rechte, backendgebundene Operationen, wiederverwendbare Domänenservices | HDMI-Rendering |
+| VDR-Suite Core / Agent / vorhandene lokale Dienste | Suite-spezifische Addon-Funktionen (z. B. Media Tools, Image), dort wo VDR keine native Schnittstelle bietet | VDR-Kanäle, EPG, Timer und epgsearch-Suchtimer |
 | VDR-SuiteBridge / vorhandene Plugins | Bestehende VDR-Integration und bereits implementierte Transport-/Session-Verträge | Neues paralleles Suite-Backend |
 | `vaapivideo` oder anderes Ausgabeplugin | Video, Audio, OSD-Ausgabe auf HDMI | Suite-Menü- oder Addon-Logik |
 | `vdr-plugin-web` + `cefbrowser` + `remotetranscode` | Bestehende HbbTV-Sitzung und Wiedergabe | Suite-eigene Browser-Neuimplementierung |
@@ -27,10 +27,11 @@ Die Planung führt **keine neue Public-API-Route, Authentisierungsmethode oder g
 IR/Fernbedienung -> VDR key events
                   -> suiteosd (cOsdMenu / cOsdObject, später cSkin)
                      |         |
-                     |         +--> bestehendes VDR-Plugin-Menü / native Plugin-Interaktion
-                     +--> bestehende SuiteBridge / VDR-Suite Public API v1
+                     |         +--> VDR-Kern direkt (Kanäle, EPG, Timer, Aufnahmen)
+                     |         +--> lokale VDR-Plugins (epgsearch, Teletext, HbbTV)
+                     +--> lokale Suite-Addon-Dienste nur bei Suite-eigenen Features
                                               |
-                                     Domain / Grants / Backend-Agent
+                                    Suite Core / Backend-Agent
 OSD frame -> VDR cOsdProvider -> vaapivideo oder anderes Ausgabeplugin -> HDMI
 ```
 
@@ -40,12 +41,13 @@ OSD frame -> VDR cOsdProvider -> vaapivideo oder anderes Ausgabeplugin -> HDMI
 
 ## Medien und OSD-Handoff
 
-- **Live-TV/EPG/Timer/Aufnahmen:** Suite-Daten und Aktionen über bereits etablierte Besitzer, native OSD-Navigation. Bestehendes Verhalten des Webfrontends ist Paritätsreferenz.
+- **Live-TV/EPG/Timer/Aufnahmen:** Direkt aus VDR über die vorhandenen Kern-Schnittstellen und Menü-/Wiedergabemechanismen; kein Public-API-v1-Umweg. Das Webfrontend bleibt gestalterische und funktionale Paritätsreferenz.
 - **Teletext:** Bestehendes Teletext-Plugin verwenden, keine zweite Teletext-Engine bauen. Exakte Plugin-ID, Menü-/Service-Aufruf und Zurück-Verhalten gegen installierte Version nachweisen.
 - **HbbTV:** Bestehende Kette `vdr-plugin-web` / `cefbrowser` / `remotetranscode` beibehalten. Ein Start aus Suite-OSD benötigt einen belegten Plugin-/Suite-Aufruf und klare Übergabe von Fokus, Farbtasten/Zurück, Browserbild und Medienausgabe. Kein Versprechen paralleler OSD-Renderer oder direkter Einbettung eines CEF-Fensters. Nach Ende Fokus/Live-TV zurückgeben. Falls das Ausgabeplugin für OSD-/Videohandoff spezielle Grenzen setzt, müssen diese gesondert am realen VDR getestet werden.
 - **Image-Galerie:** Metadaten/Dateilisten aus dem künftigen Image-Addon; Decoder/Rendering nur über tatsächlich verfügbare native Bilddarstellung. Stand heute ist das **ein noch zu implementierendes** TV-Feature, nicht bereits in vaapivideo enthalten.
 - **Media Tools:** Verwaltung, Konvertierung, Import-Status und Fortschritt über den bestehenden Core/Agent; Hintergrundverarbeitung bleibt serverseitig. Für lokale Wiedergabe eines Films wird erst nach Geräte- und Stream-/Datei-Test die geeignete bestehende Player-Schnittstelle gewählt. Media Tools und Media-Player sind unterschiedliche Verantwortungen.
-- **Suchtimer und weitere Addons:** Bestehende Public-v1-Funktionen und Rechte einsetzen, ohne neue zweite Implementierung. Eigene TV-Ansichten schrittweise ergänzen; noch fehlende APIs werden als konkrete Paritätslücken dokumentiert.
+- **Suchtimer:** Gehören zum lokalen VDR-Plugin `epgsearch` (nicht zum VDR-Kern). Das Suite-OSD startet dessen vorhandene native Oberfläche: bevorzugt `epgsearchonly` (direktes Suchmenü, sofern installiert), andernfalls `epgsearch` (dessen normales Hauptmenü). Änderungen erfolgen im Plugin; keine HTTP-/Public-API-v1-Schicht oder zweite Suchtimer-Verwaltung.
+- **Weitere Suite-Addons:** Wo keine VDR-interne Schnittstelle existiert (z. B. Image oder Media Tools), den bestehenden lokalen Suite-/Agent-Dienst verwenden. Public API v1 bleibt für externe Clients bestehen, ist aber keine generelle Pflicht für das lokale OSD.
 
 ## Sitzungen, Rechte und Ereignisse
 
@@ -63,7 +65,7 @@ Für jede Funktion die folgende Matrix gegen den **tatsächlich funktionierenden
 | --- | --- | --- |
 | VDR-Menüstart | Menu öffnet, Back kehrt zum vorherigen Fokus zurück | Nicht getestet |
 | EPG / Timer / Aufnahmen | Parität von Kanälen, Rechten, Sortierung und Aktionen | Nicht implementiert |
-| Suchtimer | Public-v1-Parität und vorhandene Grants | Nicht implementiert |
+| Suchtimer | `epgsearch`-Plugin-Menü lokal; `epgsearchonly` wenn verfügbar, sonst `epgsearch` | Menüaufruf implementiert; echte VDR-/Plugin-Abnahme ausstehend |
 | Teletext | vorhandenes Plugin inkl. Farb-/Zurück-Tasten | Nicht integriert |
 | HbbTV | Start, Browser-Bild, Videos, Eingaben, Ende/TV-Rückkehr | Nicht integriert |
 | Image | Liste, Bildanzeige, Galerie, Diashow | Nicht implementiert |
@@ -76,7 +78,7 @@ Für jede Funktion die folgende Matrix gegen den **tatsächlich funktionierenden
 
 1. Installierte VDR-API-Version, vorhandene OSD-Provider und Geräteausgabe.
 2. Tatsächlich verwendbare VDR-Plugin-Aufrufe für Teletext/HbbTV und deren OSD-Ownership.
-3. Bereits existierende SuiteBridge-/API-v1-Transportpfade für einen lokalen VDR-Client inkl. Identität und Push.
+3. Lokale VDR-/Plugin-Schnittstellen für sämtliche VDR-eigenen Funktionen vorrangig nutzen; nur für Suite-eigene Addons die tatsächlich vorhandenen lokalen Suite-/Agent-Verträge prüfen. Kein pauschaler Public-API-v1-Client im Suite-OSD.
 4. Native Bilder und Videos: OSD/Player-Funktionen des eingesetzten Ausgabeplugins und Rückkehr zum TV.
 5. Reale Abnahme mit yaVDR und kompatiblem VDR-Plugin-Build; reine GitHub-Commits oder Quellcode-Tests sind kein Hardware-Nachweis.
 
