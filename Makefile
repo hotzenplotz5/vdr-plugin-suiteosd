@@ -17,13 +17,13 @@ CXXFLAGS += -std=c++17 -fPIC $(SOURCE_FLAGS) $(VDR_CXXFLAGS) $(VDR_CFLAGS) $(she
 ARTWORK_LIBS = $(shell $(PKG_CONFIG) --libs libpng) -ljpeg
 DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"'
 
-.PHONY: all clean show-vdr-api check-navigation check-artwork
+.PHONY: all clean show-vdr-api check-navigation check-artwork check-epg-timeline
 all: $(SOFILE)
 
 $(SOFILE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -o $@ $^ $(ARTWORK_LIBS)
 
-suiteosd.o: suiteosd.c navigation.h artwork_decode.h vendor/tvscraper/services.h
+suiteosd.o: suiteosd.c navigation.h epg_timeline.h artwork_decode.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 artwork_decode.o: artwork_decode.c artwork_decode.h
@@ -34,6 +34,11 @@ check-artwork:
 	./artwork-test
 	rm -f artwork-test
 
+check-epg-timeline:
+	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o epg-timeline-test tests/epg_timeline_test.cpp
+	./epg-timeline-test
+	rm -f epg-timeline-test
+
 check-navigation:
 	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o navigation-test tests/navigation_test.cpp
 	./navigation-test
@@ -43,4 +48,4 @@ show-vdr-api:
 	@printf 'VDR_API_VERSION=%s\n' '$(VDR_API_VERSION)'
 
 clean:
-	rm -f $(OBJECTS) $(SOFILE) artwork-test navigation-test
+	rm -f $(OBJECTS) $(SOFILE) artwork-test navigation-test epg-timeline-test
