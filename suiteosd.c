@@ -5,6 +5,7 @@
  * This is not a cSkin replacement or an embedded HTML/video player.
  */
 #include "navigation.h"
+#include "epg_timeline.h"
 #include "artwork_decode.h"
 #include "vendor/tvscraper/services.h"
 
@@ -22,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cmath>
 #include <ctime>
 #include <map>
 #include <sstream>
@@ -29,7 +31,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.3.0";
+static const char *VERSION = "0.4.0";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace {
@@ -147,6 +149,54 @@ Snapshot readVdrSnapshot()
     return snapshot;
 }
 
+
+suiteosd::Timeline ReadNativeTimeline()
+{
+    suiteosd::Timeline timeline;
+    const time_t now = time(nullptr);
+    const int tunedChannel = cDevice::CurrentChannel();
+    // Read and copy actual schedules. cChannel and cEvent pointers never
+    // escape VDR's read lock or enter the EPG navigation model.
+    {
+        LOCK_CHANNELS_READ;
+        LOCK_SCHEDULES_READ;
+        if (Channels) {
+            for (const cChannel *channel = Channels->First(); channel;
+                 channel = Channels->Next(channel)) {
+                if (channel->GroupSep() || channel->Number() <= 0)
+                    continue;
+                suiteosd::TimelineChannel row;
+                row.number = channel->Number();
+                row.name = channel->Name() ? channel->Name() : "";
+                const cSchedule *schedule = Schedules ?
+                    Schedules->GetSchedule(channel) : nullptr;
+                if (schedule) {
+                    for (const cEvent *event = schedule->Events()->First();
+                         event; event = schedule->Events()->Next(event)) {
+                        if (event->EndTime() <= now - 3600)
+                            continue;
+                        if (event->StartTime() >= now + 49 * 3600)
+                            break;
+                        if (event->EndTime() <= event->StartTime())
+                            continue;
+                        suiteosd::TimelineEvent e;
+                        e.id = event->EventID();
+                        e.start = event->StartTime();
+                        e.end = event->EndTime();
+                        e.title = event->Title() ? event->Title() : "";
+                        e.subtitle = event->ShortText() ? event->ShortText() : "";
+                        e.description = event->Description() ? event->Description() : "";
+                        row.events.push_back(std::move(e));
+                    }
+                }
+                timeline.channels.push_back(std::move(row));
+            }
+        }
+    }
+    timeline.Reset(now, tunedChannel);
+    return timeline;
+}
+
 const std::array<const char *, 11> kSidebar = {{
     "Home", "Live-TV", "EPG", "Aufnahmen", "Timer",
     "Suchtimer", "HbbTV", "Teletext", "Bilder", "Media Tools",
@@ -164,6 +214,9 @@ private:
     cFont *fontBody = nullptr;
     cFont *fontSmall = nullptr;
     suiteosd::Navigation nav;
+    suiteosd::Timeline timeline;
+    bool timelineActive = false;
+    bool timelineDetails = false;
     Snapshot data;
     std::map<std::string, RecordingMeta> recordingMeta;
     std::string notice;
@@ -208,6 +261,357 @@ private:
         case 3: return int(data.recordings.size());
         }
         return 0;
+    }
+
+    // Suite-Webfrontend EPG: dark rounded channel labels, proportional
+    // programme tiles, anchored time-axis ticks, orange Jetzt marker.
+    // The wide Web timeline is zoomed to a four-hour television viewport.
+    static const char *ViewLabel(suiteosd::Timeline::View view)
+    {
+        switch (view) {
+        case suiteosd::Timeline::View::Horizontal: return "Zeit horizontal";
+        case suiteosd::Timeline::View::Vertical: return "Zeit vertikal";
+        case suiteosd::Timeline::View::Live: return "Live-Liste";
+        case suiteosd::Timeline::View::Now: return "Läuft jetzt";
+        case suiteosd::Timeline::View::Next: return "Als nächstes";
+        }
+        return "EPG";
+    }
+
+    void drawTimelineHeader()
+    {
+        fill(0, 0, 1600, 77, kSurface);
+        print(33, 19, "VDR", fontTitle);
+        print(116, 19, "Suite", fontTitle, kFocus);
+        print(276, 24, "EPG Zeitleiste", fontLarge);
+        print(1250, 25, "Jetzt " + formatTime(time(nullptr)), fontBody, kMuted);
+        panel(149, 88, 1418, 96, false, kSurface);
+        print(168, 96, std::string(ViewLabel(timeline.view)) +
+              "  ·  Kanäle " +
+              (timeline.channels.empty() ? "0" : std::to_string(timeline.firstChannel + 1)) +
+              "–" + std::to_string(std::min(int(timeline.channels.size()),
+                                            timeline.firstChannel + suiteosd::Timeline::kRows)) +
+              " / " + std::to_string(timeline.channels.size()),
+              fontBody, kText, 900);
+        const time_t end = timeline.visibleStart + suiteosd::Timeline::kWindowSeconds;
+        print(168, 143, formatTime(timeline.visibleStart) + " – " +
+              formatTime(end) + (timeline.dayPage ? "  ·  Nächste 24h" : "  ·  Aktuelle 24h"),
+              fontSmall, kFocus);
+        print(1050, 145, "Blau: Ansicht", fontSmall, kMuted);
+    }
+
+    int timelineX(time_t stamp, int trackX, int trackWidth) const
+    {
+        return trackX + int(double(stamp - timeline.visibleStart) *
+                 trackWidth / suiteosd::Timeline::kWindowSeconds);
+    }
+
+    void drawTimelineHorizontal()
+    {
+        const int channelX = 151;
+        const int trackX = 393;
+        const int trackWidth = 1171;
+        const int top = 198;
+        const int rowHeight = 83;
+        const int rowGap = 7;
+        panel(channelX, top, 222, 48, false, kSurface);
+        print(channelX + 14, top + 10, "KANAL", fontBody, kFocus);
+        panel(trackX, top, trackWidth, 48, false, kSurface);
+        const time_t end = timeline.visibleStart + suiteosd::Timeline::kWindowSeconds;
+        const time_t firstTick = ((timeline.visibleStart + 1799) / 1800) * 1800;
+        for (time_t tick = firstTick; tick < end; tick += 1800) {
+            const int x = timelineX(tick, trackX, trackWidth);
+            fill(x, top + 34, x + 1, 825, kLine);
+            print(x + 5, top + 10, formatTime(tick), fontSmall, kText, 86);
+        }
+
+        for (int n = 0; n < suiteosd::Timeline::kRows; ++n) {
+            const int index = timeline.firstChannel + n;
+            if (index >= int(timeline.channels.size()))
+                break;
+            const auto &channel = timeline.channels[index];
+            const int y = top + 55 + n * (rowHeight + rowGap);
+            const bool focusedChannel = index == timeline.channel;
+            panel(channelX, y, 222, rowHeight, focusedChannel, kSurface);
+            print(channelX + 13, y + 11, std::to_string(channel.number),
+                  fontSmall, kFocus, 53);
+            print(channelX + 13, y + 41, channel.name, fontBody, kText, 199);
+            panel(trackX, y, trackWidth, rowHeight, false, kBackground);
+            int shown = 0;
+            for (int eIndex = 0; eIndex < int(channel.events.size()); ++eIndex) {
+                const auto &e = channel.events[eIndex];
+                double left = 0, span = 0;
+                if (!timeline.Geometry(e, left, span))
+                    continue;
+                const int x = trackX + int(std::round(left * trackWidth));
+                const int w = std::min(trackWidth - (x - trackX),
+                                       std::max(3, int(std::round(span * trackWidth)) - 5));
+                if (w <= 0) continue;
+                const bool selected = focusedChannel && timeline.event == eIndex;
+                panel(x + 2, y + 8, w - 3, rowHeight - 16, selected,
+                      selected ? kHighlight : kCardAlt);
+                if (w >= 65)
+                    print(x + 12, y + 17, formatTime(e.start), fontSmall,
+                          selected ? kText : kMuted, w - 25);
+                if (w >= 85)
+                    print(x + 12, y + 41, e.title, fontBody, kText, w - 25);
+                ++shown;
+            }
+            if (!shown)
+                print(trackX + 17, y + 29, "Kein EPG im sichtbaren Zeitfenster",
+                      fontSmall, kMuted);
+        }
+        const time_t current = time(nullptr);
+        if (current >= timeline.visibleStart && current < end) {
+            const int x = timelineX(current, trackX, trackWidth);
+            fill(x, top + 33, x + 2, 824, 0xFFF97316);
+            print(x + 7, top - 4, "JETZT", fontSmall, 0xFFF97316, 83);
+        }
+    }
+
+    void drawTimelineVertical()
+    {
+        // Same alternative vertical-time mode as Webfrontend: channels at
+        // the top, time running downward. TV can show five channel columns.
+        const int startX = 300;
+        const int top = 259;
+        const int trackW = 252;
+        const int trackH = 538;
+        const int first = std::max(0, timeline.channel - 4);
+        panel(149, 205, 1420, 608, false, kBackground);
+        print(161, 231, "ZEIT", fontSmall, kFocus);
+        for (int i = 0; i < 5 && first + i < int(timeline.channels.size()); ++i) {
+            const int x = startX + i * trackW;
+            const int index = first + i;
+            const auto &channel = timeline.channels[index];
+            panel(x, 213, trackW - 5, 40, index == timeline.channel, kSurface);
+            print(x + 13, 224, std::to_string(channel.number) + "  " + channel.name,
+                  fontBody, kText, trackW - 28);
+            panel(x, top, trackW - 5, trackH, false, kBackground);
+            for (int j = 0; j < int(channel.events.size()); ++j) {
+                const auto &e = channel.events[j];
+                double rel = 0, span = 0;
+                if (!timeline.Geometry(e, rel, span)) continue;
+                const int y = top + int(rel * trackH);
+                const int h = std::min(trackH - (y - top),
+                    std::max(3, int(span * trackH) - 4));
+                panel(x + 3, y + 2, trackW - 12, std::max(1, h - 3),
+                      index == timeline.channel && timeline.event == j,
+                      kCardAlt);
+                if (h >= 30)
+                    print(x + 13, y + 8, e.title, fontSmall, kText, trackW - 35);
+            }
+        }
+        for (time_t tick = ((timeline.visibleStart + 1799) / 1800) * 1800;
+             tick < timeline.visibleStart + suiteosd::Timeline::kWindowSeconds;
+             tick += 1800) {
+            const int y = top + int(double(tick - timeline.visibleStart) * trackH /
+                                   suiteosd::Timeline::kWindowSeconds);
+            fill(281, y, 1550, y + 1, kLine);
+            print(160, y - 9, formatTime(tick), fontSmall);
+        }
+        const time_t current = time(nullptr);
+        if (current >= timeline.visibleStart &&
+            current < timeline.visibleStart + suiteosd::Timeline::kWindowSeconds) {
+            const int y = top + int(double(current - timeline.visibleStart) * trackH /
+                                   suiteosd::Timeline::kWindowSeconds);
+            fill(282, y, 1555, y + 2, 0xFFF97316);
+            print(159, y + 6, "JETZT", fontSmall, 0xFFF97316);
+        }
+    }
+
+    int timelineListEventIndex(const suiteosd::TimelineChannel &row) const
+    {
+        int present = -1;
+        int following = -1;
+        for (int i = 0; i < int(row.events.size()); ++i) {
+            const auto &e = row.events[i];
+            if (e.start <= timeline.now && e.end > timeline.now) {
+                present = i;
+                if (i + 1 < int(row.events.size()))
+                    following = i + 1;
+                break;
+            }
+            if (e.start > timeline.now) {
+                following = i;
+                break;
+            }
+        }
+        if (timeline.view == suiteosd::Timeline::View::Next)
+            return following;
+        return present;
+    }
+
+    void drawTimelineList()
+    {
+        const int top = 211;
+        for (int n = 0; n < suiteosd::Timeline::kRows; ++n) {
+            const int index = timeline.firstChannel + n;
+            if (index >= int(timeline.channels.size())) break;
+            const auto &ch = timeline.channels[index];
+            const int y = top + n * 87;
+            const bool selected = index == timeline.channel;
+            panel(153, y, 1409, 77, selected, kSurface);
+            print(177, y + 10, std::to_string(ch.number) + "   " + ch.name,
+                  fontBody, kFocus, 230);
+            const int eventIndex = timelineListEventIndex(ch);
+            if (eventIndex < 0) {
+                print(452, y + 17, "Keine Programminformation", fontBody, kMuted);
+                continue;
+            }
+            const auto &e = ch.events[eventIndex];
+            print(451, y + 13, e.title, fontBody, kText, 800);
+            print(451, y + 47, formatTime(e.start) + "–" + formatTime(e.end) +
+                  (e.subtitle.empty() ? "" : "  ·  " + e.subtitle),
+                  fontSmall, kMuted, 900);
+            if (timeline.view == suiteosd::Timeline::View::Live ||
+                timeline.view == suiteosd::Timeline::View::Now) {
+                const int progress = e.end > e.start ?
+                    std::clamp(int(100 * (timeline.now - e.start) / (e.end - e.start)), 0, 100) : 0;
+                fill(1302, y + 63, 1533, y + 67, kLine);
+                fill(1302, y + 63, 1302 + progress * 231 / 100, y + 67, kFocus);
+            }
+        }
+    }
+
+    const suiteosd::TimelineEvent *timelineSelectedEvent() const
+    {
+        if (timeline.view == suiteosd::Timeline::View::Horizontal ||
+            timeline.view == suiteosd::Timeline::View::Vertical)
+            return timeline.Selected();
+        if (timeline.channel < 0 || timeline.channel >= int(timeline.channels.size()))
+            return nullptr;
+        const auto &row = timeline.channels[timeline.channel];
+        const int index = timelineListEventIndex(row);
+        return index >= 0 ? &row.events[index] : nullptr;
+    }
+
+    void drawTimelineDetails()
+    {
+        if (!timelineDetails) return;
+        const auto *e = timelineSelectedEvent();
+        if (!e || timeline.channel >= int(timeline.channels.size()))
+            return;
+        panel(255, 157, 1102, 560, true, kSurface);
+        print(292, 181, e->title, fontTitle, kText, 1005);
+        print(293, 247, timeline.channels[timeline.channel].name + " · " +
+              formatTime(e->start) + " – " + formatTime(e->end),
+              fontBody, kFocus, 1010);
+        if (!e->subtitle.empty())
+            print(293, 296, e->subtitle, fontBody, kText, 1000);
+        std::string description = e->description.empty() ?
+            "Keine Beschreibung vorhanden." : e->description;
+        std::replace(description.begin(), description.end(), '\n', ' ');
+        std::istringstream words(description);
+        std::string line, word;
+        int y = 347;
+        while (words >> word && y < 660) {
+            const std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(1000)) {
+                print(292, y, line, fontBody, kText, 1010);
+                line = word;
+                y += 36;
+            } else
+                line = candidate;
+        }
+        if (!line.empty() && y < 670)
+            print(292, y, line, fontBody, kText, 1010);
+        print(294, 676, "OK / Info / Zurück: Schließen", fontSmall, kFocus);
+    }
+
+    void drawTimeline()
+    {
+        fill(0, 0, 1599, 899, kBackground);
+        drawTimelineHeader();
+        if (timeline.view == suiteosd::Timeline::View::Horizontal)
+            drawTimelineHorizontal();
+        else if (timeline.view == suiteosd::Timeline::View::Vertical)
+            drawTimelineVertical();
+        else
+            drawTimelineList();
+        fill(16, 843, 1584, 894, kSurface);
+        print(153, 851, "Pfeile: Sender / Sendung", fontSmall);
+        print(536, 851, "Rot: Jetzt", fontSmall);
+        print(749, 851, "Grün/Gelb: 24h", fontSmall);
+        print(1025, 851, "Blau: Ansicht", fontSmall);
+        print(1341, 851, "OK: Details", fontSmall);
+        drawTimelineDetails();
+        drawSidebar();
+    }
+
+    void openTimeline()
+    {
+        timeline = ReadNativeTimeline();
+        timelineActive = true;
+        timelineDetails = false;
+        notice.clear();
+    }
+
+    eOSState timelineKey(eKeys base)
+    {
+        if (timelineDetails) {
+            if (base == kBack || base == kInfo || base == kOk) {
+                timelineDetails = false;
+                draw();
+            }
+            return osContinue;
+        }
+        switch (base) {
+        case kBack:
+            timelineActive = false;
+            nav.sideFocused = false;
+            nav.section = 0;
+            draw();
+            return osContinue;
+        case kRed:
+            timeline.JumpNow();
+            break;
+        case kGreen:
+            timeline.SetPage(0);
+            break;
+        case kYellow:
+            timeline.SetPage(1);
+            if (timeline.view == suiteosd::Timeline::View::Now ||
+                timeline.view == suiteosd::Timeline::View::Next ||
+                timeline.view == suiteosd::Timeline::View::Live)
+                timeline.view = suiteosd::Timeline::View::Horizontal;
+            break;
+        case kBlue:
+            timeline.NextView();
+            break;
+        case kUp:
+            if (timeline.view == suiteosd::Timeline::View::Vertical)
+                timeline.MoveEvent(-1);
+            else
+                timeline.MoveChannel(-1);
+            break;
+        case kDown:
+            if (timeline.view == suiteosd::Timeline::View::Vertical)
+                timeline.MoveEvent(1);
+            else
+                timeline.MoveChannel(1);
+            break;
+        case kLeft:
+            if (timeline.view == suiteosd::Timeline::View::Vertical)
+                timeline.MoveChannel(-1);
+            else
+                timeline.MoveEvent(-1);
+            break;
+        case kRight:
+            if (timeline.view == suiteosd::Timeline::View::Vertical)
+                timeline.MoveChannel(1);
+            else
+                timeline.MoveEvent(1);
+            break;
+        case kInfo:
+        case kOk:
+            if (timelineSelectedEvent())
+                timelineDetails = true;
+            break;
+        default: return osContinue;
+        }
+        draw();
+        return osContinue;
     }
 
     void drawHeader()
@@ -449,6 +853,11 @@ private:
     {
         if (!osd)
             return;
+        if (timelineActive) {
+            drawTimeline();
+            osd->Flush();
+            return;
+        }
         fill(0, 0, 1599, 899, kBackground);
         drawHeader();
         const int scroll = nav.firstVisibleSection == 2 ? 402 : 0;
@@ -497,7 +906,7 @@ private:
             eKeys nativeKey = kNone;
             switch (nav.sideIndex) {
             case 1: return osEnd;       // Live-TV: return to current broadcast
-            case 2: nativeKey = kSchedule; break;   // EPG
+            case 2: openTimeline(); break; // Native VDR schedule, Suite Web timeline design
             case 3: nativeKey = kRecordings; break; // Recordings
             case 4: nativeKey = kTimers; break;     // Timers
             case 10: nativeKey = kSetup; break;     // VDR settings
@@ -570,6 +979,8 @@ public:
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        if (timelineActive)
+            return timelineKey(base);
         if (recordingDetails) {
             if (base == kInfo || base == kBack) {
                 recordingDetails = false;
