@@ -41,7 +41,7 @@ Bei **OK auf der eingeklappten/ausgeklappten Seitenleiste** startet die ausgewä
 | --- | --- |
 | Home | Suite-Home, Fokus wieder im Hauptinhalt |
 | Live-TV | Suite-OSD schließen, zum laufenden Bild |
-| EPG | VDR-Direktmenübefehl `kSchedule` |
+| EPG | Native Suite-EPG-Zeitleiste auf Basis lokaler VDR-Schedules, im bestehenden Webfrontend-Design; VDR-Programmführer bleibt separat verfügbar |
 | Aufnahmen | VDR-Direktmenübefehl `kRecordings` |
 | Timer | VDR-Direktmenübefehl `kTimers` |
 | Einstellungen | VDR-Direktmenübefehl `kSetup` |
@@ -71,3 +71,11 @@ Keine Änderung an der Public API v1 der übrigen Clients.
 - Zur Laufzeit bleiben fehlendes TVScraper-Plugin und ein leerer Metadatensatz unkritisch. Eine echte Darstellung mit Ausgabeplugin auf dem yaVDR ist noch **nicht getestet**. Die CI prüft nur Kompilierung unter 2.8.3/2.8.4 sowie JPEG/PNG-Decoding.
 
 Quellvertrag: [TVScraper Upstream-Service-Header](https://github.com/MarkusEh/vdr-plugin-tvscraper/blob/2e63f40aff747f6dd8786aa8c2c7a4ef65cd5f08/services.h), mit GPL-Provenienz im Repo. Die Runtime-ABI-Kompatibilität eines abweichenden lokal installierten TVScraper-Builds muss später am VDR geprüft werden.
+
+## EPG-Timeline – verbindliche Webfrontend-Vorlage (23.11.2026)
+
+Die Nutzerentscheidung ist **kein neuer EPG-Entwurf**: Die bestehende EPG-Zeitleiste des VDR-Suite-Webfrontends ist die Vorlage. Die Implementierung basiert auf `web/frontend/app.js` (`renderEpgTimeView`, `epgTimelineDisplayBounds`, `epgEventPositionForBounds`) und `web/frontend/style.css` (`epg-time-grid`, `epg-time-row`, `epg-now-line`).
+
+**Aktuell programmiert:** horizontale Zeitachse oben mit Kanalspalte links; zeitlich proportionale Sendungsblöcke; orange Jetzt-Markierung; blau markierte Auswahl; direkt aus VDR stammende Programmtexte; selbstständig nachgeführtes Sender-/Zeitfenster ohne sichtbaren Scrollbalken; optionaler vertikaler Zeitachsenmodus und Live-/Jetzt-/Nächste-Listen; native Detailansicht; Rückkehr zu Suite-Home. Das Frontend zeigt 24 Stunden als sehr breite scrollbare Zeitachse (2-Stunden-Markierungen, 15 Sender pro Seite). Das native TV-OSD nutzt dasselbe 24-Stunden-Paging in **lesbaren Vier-Stunden-Ausschnitten** mit 30-Minuten-Ticks und sieben sichtbaren Sendern. Das ist die Anpassung an Fernbedienung und Betrachtungsabstand, keine neue Designsprache.
+
+**Noch ausstehend:** pixel- und artworkbezogene TV-Abnahme, Senderlogos, TVScraper-EPG-Artwork, native Timer-Erstellung für einen ausgewählten Event, Kanalgruppenfilter, dynamische Echtzeitupdates sowie die optisch durchgängige VDR-Skin der tieferen Menüs. Die Webfrontend-Funktionen werden nicht als vollständig portiert ausgegeben. Kein HTTP und keine Public API v1 für VDR-eigene EPG-Daten.
