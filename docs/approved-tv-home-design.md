@@ -21,7 +21,7 @@
 
 1. **Jetzt:** nativer VDR-Menüeinstieg, Headless-Navigationsmodell, 32-Bit-OSD-Darstellung, reale lokale EPG-Daten und Aufnahmetitel. Die erste Umsetzung darf Text-/Farbflächen statt Artwork verwenden und kennzeichnet unverdrahtete Aktionen ausdrücklich.
 2. **Danach:** Live-TV-Bildeinbettung/Ausgabeplugin und Bild-/Artwork-Rendering **nur nach echter API-/Hardwareprüfung**; Fokushandoff zu Teletext und HbbTV ohne Fork.
-3. **Danach:** Suite Public API v1, gemeinsame Daten-/Rechte-Semantik, Aufnahme-/Timeraktionen, Media Tools, Image und weitere Addons.
+3. **Danach:** weitere direkte VDR-/Plugin-Menüs und -Aktionen, außerdem die bestehenden lokalen Suite-/Agent-Schnittstellen für Media Tools, Image und andere Suite-spezifische Addons. Public API v1 ist für VDR-eigene lokale Funktionen keine Voraussetzung.
 
 Das Projekt ist ohne angeschlossenes Ausgabeplugin **baubar und navigationsseitig testbar**, aber **nicht visuell auf einem realen TV abnehmbar**. Die aktuelle Implementierung zeichnet vorläufig ein explizit als solches gekennzeichnetes Live-TV-Vorschaufeld: Sie darf keinen fremden Streamplayer erfinden oder das ganze Fernsehbild als skaliertes Video ausgeben.
 
@@ -47,9 +47,16 @@ Bei **OK auf der eingeklappten/ausgeklappten Seitenleiste** startet die ausgewä
 | Einstellungen | VDR-Direktmenübefehl `kSetup` |
 | HbbTV | Vorhandenes `web`-Plugin, `cRemote::CallPlugin()` |
 | Teletext | Vorhandenes `osdteletext`-Plugin, `cRemote::CallPlugin()` |
+| Suchtimer | Lokales `epgsearchonly` (direktes Suchmenü) oder `epgsearch` (Hauptmenü), `cRemote::CallPlugin()` |
 
 Die Direktmenü-Befehle werden **in der VDR-Hauptschleife** verarbeitet; bloß `osSchedule` oder `osTimers` aus einer `cOsdObject`-Ansicht zurückzugeben, würde diese Menüs nicht öffnen. Der ursprüngliche Suite-Home-Screen bleibt bei dieser Übergabe unverändert; tiefere VDR-Menüs behalten vorerst ihre native Skin-Gestaltung. Die konsistente Rückkehr zu Suite-Home ist Teil der weiteren OSD-/Skin-Integration und ist **noch nicht** auf dem echten VDR getestet.
 
-**Noch offen:** Kontextbezogenes Öffnen einer ausgewählten „Als Nächstes“-Kachel als VDR-Sendungsdetail mit Timeraktion, Senderlogo- und Aufnahme-Artwork, Videovorschau als echtes Bild-in-Bild, Suite-Suchtimer und weitere Suite-Addons. Eine allgemeine EPG-Menüöffnung ist ausdrücklich **nicht** gleichbedeutend mit dem ausgewählten Sendungsdetail.
+**Noch offen:** Kontextbezogenes Öffnen einer ausgewählten „Als Nächstes“-Kachel als VDR-Sendungsdetail mit Timeraktion, Senderlogo- und Aufnahme-Artwork, Videovorschau als echtes Bild-in-Bild, eine einheitlich gestaltete native Suchtimer-Ansicht und weitere Suite-Addons. Eine allgemeine EPG-Menüöffnung ist ausdrücklich **nicht** gleichbedeutend mit dem ausgewählten Sendungsdetail.
 
 Die VDR-Hauptmenüs, Wiedergabe, Timer und HbbTV bleiben bei ihren bestehenden Eigentümern. Kein Fork von `vaapivideo`, keine zusätzliche Browser-/Playerinstanz und keine neue Autorisierungslogik.
+
+## Entscheidung: lokaler VDR statt Public API v1 für Suchtimer
+
+Das Suite-OSD läuft im selben VDR-Prozess wie die übrigen VDR-Plugins. Daher erfolgt die Suchtimer-Navigation **direkt lokal**, ohne HTTP oder Public API v1. Der Suchtimer-Eigentümer bleibt `epgsearch`; es wird kein eigener Suchalgorithmus und keine zweite Datenhaltung implementiert. `epgsearchonly` bietet, falls installiert, über `Epgsearch-searchmenu-v1.0` den direkten Sucheinstieg. Ohne dieses zusätzliche Plugin wird das reguläre `epgsearch`-Hauptmenü geöffnet; es ist nicht automatisch identisch mit der Suchtimer-Liste. Das genauere direkte Suchtimer-Menü inklusive konsistenter Suite-Navigation benötigt später einen belegten lokalen Plugin-Menüvertrag und einen echten VDR-Test.
+
+Keine Änderung an der Public API v1 der übrigen Clients.
