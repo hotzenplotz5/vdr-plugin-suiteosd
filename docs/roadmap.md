@@ -7,9 +7,9 @@ Stand: 2026-11-23 · Basis: separates `hotzenplotz5/vdr-plugin-suiteosd` Reposit
 | **OSD.0 – Dokumentation** | Ziel, Eigentümer, Addon-Arten, Hardware- und Autorisierungsgrenzen | README, Architektur, UI-Vertrag, Roadmap im Repo |
 | **OSD.1 – Minimales VDR-Plugin** | VDR-Plugin-Metadaten, Einstieg ins Hauptmenü, eigene native OSD-Ansicht, Standard-Makefile | Gegen installierte VDR-Header gebaut; Menü auf realem VDR sichtbar, Back funktioniert |
 | **OSD.2 – Suite-Skin** | VDR-`cSkin`-Implementierung für Standardmenüs, Status-/Wiedergabeanzeige, Theme; Fallback auf einfache OSD-Flächen | Keine Änderungen am Ausgabeplugin, korrekte Standardmenüs/TV-Rückkehr |
-| **OSD.3 – Suite-Integration** | Existierende SuiteBridge-/Public-v1-Datenflüsse und lokale Identität prüfen, Live-Daten in ausgewählten nativen Menüs anzeigen; Push/Readback | EPG/Timer/Aufnahmen/Suchtimer mit Webfrontend-Parität auf realer Installation |
+| **OSD.3 – Native VDR-Integration** | Lokale VDR-Kernmenüs und `epgsearch`-Suchtimer direkt anbinden, ohne Public API v1; echte Navigations- und Datenparität prüfen | EPG, Timer, Aufnahmen, Suchtimer auf realem VDR funktional, ohne HTTP-Umweg |
 | **OSD.4 – Plugin-Handoff** | Teletext- und HbbTV-Start-/Fokusrückgabe an die vorhandenen Plugins | Teletext-Farbtasten, HbbTV-Browser+Video, Exit und Live-TV stabil |
-| **OSD.5 – Medien** | Media Tools, Image-Galerie, Datei-/Stream-Wiedergabe, Player-Steuerung | Importstatus, Bildanzeige, Video-Wiedergabe, Audio/Seek und TV-Rückkehr |
+| **OSD.5 – Medien** | Media Tools und Image-Galerie über bestehende lokale Suite-Dienste; Datei-/Stream-Wiedergabe über den vorhandenen VDR-/Ausgabeplugin-Player | Importstatus, Bildanzeige, Video-Wiedergabe, Audio/Seek und TV-Rückkehr |
 | **OSD.6 – Addon-Erweiterbarkeit** | Einheitlicher UI-Katalog auf Basis tatsächlich vorhandener Capability-/Plugin-Informationen statt eigener Business-Logik | Neue Suite-Funktion kann mit dokumentiertem Präsentationsadapter hinzugefügt werden |
 | **OSD.7 – Paketierung & Abnahme** | Debian-/Ubuntu-Plugin-Paket, Source/ABI/Installer-/Real-VDR-Test | Install/Upgrade/Remove auf yaVDR; vaapivideo und alternativer OSD-Provider geprüft |
 
