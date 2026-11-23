@@ -5,6 +5,8 @@
  * This is not a cSkin replacement or an embedded HTML/video player.
  */
 #include "navigation.h"
+#include "artwork_decode.h"
+#include "vendor/tvscraper/services.h"
 
 #include <vdr/channels.h>
 #include <vdr/device.h>
@@ -21,10 +23,12 @@
 #include <array>
 #include <cstdio>
 #include <ctime>
+#include <map>
+#include <utility>
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.2.0";
+static const char *VERSION = "0.3.0";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace {
@@ -50,6 +54,14 @@ struct Recording {
     std::string time;
     std::string fileName;
 };
+struct RecordingMeta {
+    std::string title;
+    std::string episode;
+    std::string release;
+    std::string overview;
+    suiteosd::Artwork artwork;
+};
+
 struct Snapshot {
     Programme live;
     Programme liveNext;
@@ -149,6 +161,7 @@ private:
     cFont *fontSmall = nullptr;
     suiteosd::Navigation nav;
     Snapshot data;
+    std::map<std::string, RecordingMeta> recordingMeta;
     std::string notice;
     int width = 1600;
     int height = 900;
@@ -259,6 +272,67 @@ private:
             print(159, y + 94, "Keine EPG-Daten verfügbar", fontBody, kMuted);
     }
 
+    RecordingMeta loadRecordingMeta(const Recording &item)
+    {
+        RecordingMeta meta;
+        std::string imagePath;
+        cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
+        if (!scraper || item.fileName.empty())
+            return meta;
+
+        // The TVScraper service borrows the cRecording pointer. Read and
+        // copy every returned value while its VDR read lock is valid.
+        {
+            LOCK_RECORDINGS_READ;
+            const cRecording *recording = Recordings ?
+                Recordings->GetByName(item.fileName.c_str()) : nullptr;
+            if (!recording)
+                return meta;
+            cGetScraperVideo request(nullptr, recording);
+            if (!scraper->Service("GetScraperVideo", &request) || !request.m_scraperVideo)
+                return meta;
+            cScraperVideo *video = request.m_scraperVideo.get();
+            video->getOverview(&meta.title, &meta.episode, &meta.release,
+                               nullptr, nullptr, nullptr, nullptr);
+            video->getMovieOrTv(
+                nullptr, nullptr, nullptr, &meta.overview,
+                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                nullptr, nullptr, nullptr, nullptr, nullptr);
+            if (video->getVideoType() == tSeries) {
+                std::string episodeOverview;
+                if (video->getEpisode(nullptr, &episodeOverview, nullptr,
+                                      nullptr, nullptr, nullptr, nullptr, nullptr) &&
+                    !episodeOverview.empty())
+                    meta.overview = std::move(episodeOverview);
+            }
+            cTvMedia image = video->getImage(
+                cImageLevels(eImageLevel::episodeMovie,
+                             eImageLevel::seasonMovie,
+                             eImageLevel::tvShowCollection),
+                cOrientations(eOrientation::landscape,
+                              eOrientation::banner,
+                              eOrientation::portrait),
+                true);
+            imagePath = image.path; // TVScraper owns the scraper cache files.
+        }
+        // Image disk I/O and decode must not hold the VDR recordings lock.
+        if (!imagePath.empty())
+            meta.artwork = suiteosd::LoadArtwork(imagePath, X(164), Y(55));
+        return meta;
+    }
+
+    const RecordingMeta &metaFor(const Recording &item)
+    {
+        const auto cached = recordingMeta.find(item.fileName);
+        if (cached != recordingMeta.end())
+            return cached->second;
+        // Limit thumbnail memory while scrolling large recording libraries.
+        if (recordingMeta.size() >= 48)
+            recordingMeta.clear();
+        return recordingMeta.emplace(item.fileName, loadRecordingMeta(item)).first->second;
+    }
+
     void drawRecordings(int y)
     {
         if (y < 75 || y > 815)
@@ -272,10 +346,24 @@ private:
             const bool focus = !nav.sideFocused && nav.section == 3 &&
                                nav.card[3] == first + col;
             panel(x, y + 48, cw, 160, focus, kCardAlt);
-            fill(x + 12, y + 59, x + cw - 12, y + 112, kLine);
-            print(x + 25, y + 70, "AUFNAHME", fontSmall, kMuted);
-            print(x + 13, y + 122, item.title, fontBody, kText, cw - 24);
-            print(x + 13, y + 161, item.time, fontSmall, kMuted);
+            const RecordingMeta &meta = metaFor(item);
+            fill(x + 12, y + 59, x + cw - 12, y + 114, kLine);
+            if (meta.artwork.valid()) {
+                cImage picture(cSize(meta.artwork.width, meta.artwork.height),
+                               meta.artwork.argb.data());
+                const int left = X(x + 12) +
+                    (X(cw - 24) - meta.artwork.width) / 2;
+                const int top = Y(y + 59) +
+                    (Y(55) - meta.artwork.height) / 2;
+                osd->DrawImage(cPoint(left, top), picture);
+            } else
+                print(x + 25, y + 70, "AUFNAHME", fontSmall, kMuted);
+
+            const std::string &title = meta.title.empty() ? item.title : meta.title;
+            print(x + 13, y + 122, title, fontBody, kText, cw - 24);
+            const std::string detail = !meta.episode.empty() ? meta.episode :
+                                       !meta.release.empty() ? meta.release : item.time;
+            print(x + 13, y + 161, detail, fontSmall, kMuted, cw - 24);
         }
         if (data.recordings.empty())
             print(159, y + 94, "Keine Aufnahmen vorhanden", fontBody, kMuted);
@@ -439,6 +527,7 @@ public:
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
         if (base == kBlue) {
             data = readVdrSnapshot();
+            recordingMeta.clear(); // explicit refresh checks for updated scraper results
             nav.KeepVisible(7, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
             draw();
