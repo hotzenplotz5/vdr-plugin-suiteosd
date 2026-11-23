@@ -22,6 +22,8 @@ struct TimelineEvent {
 struct TimelineChannel {
     int number = 0;
     std::string name;
+    std::string shortName;
+    std::string group;
     std::vector<TimelineEvent> events;
 };
 
@@ -36,6 +38,9 @@ struct Timeline {
     enum class View { Horizontal, Vertical, Live, Now, Next };
 
     std::vector<TimelineChannel> channels;
+    std::vector<TimelineChannel> allChannels;
+    std::vector<std::string> groups;
+    int groupIndex = 0;
     time_t now = 0;
     time_t baseStart = 0;
     time_t visibleStart = 0;
@@ -63,6 +68,49 @@ struct Timeline {
             }
         PickAt(focusTime);
         KeepVisible();
+    }
+
+    void InitializeGroups()
+    {
+        allChannels = channels;
+        groups.clear();
+        groups.push_back("Alle Sender");
+        for (const TimelineChannel &ch : allChannels) {
+            const std::string group = ch.group.empty() ? "Weitere Sender" : ch.group;
+            if (std::find(groups.begin(), groups.end(), group) == groups.end())
+                groups.push_back(group);
+        }
+        groupIndex = 0;
+    }
+
+    void CycleGroup()
+    {
+        if (groups.size() <= 1) return;
+        const int previouslyTuned = channel >= 0 && channel < int(channels.size())
+                                    ? channels[channel].number : 0;
+        groupIndex = (groupIndex + 1) % int(groups.size());
+        channels.clear();
+        const std::string &filter = groups[groupIndex];
+        for (const TimelineChannel &ch : allChannels) {
+            const std::string name = ch.group.empty() ? "Weitere Sender" : ch.group;
+            if (groupIndex == 0 || name == filter)
+                channels.push_back(ch);
+        }
+        channel = 0;
+        firstChannel = 0;
+        for (int i = 0; i < int(channels.size()); ++i)
+            if (channels[i].number == previouslyTuned) {
+                channel = i;
+                break;
+            }
+        PickAt(focusTime);
+        KeepVisible();
+    }
+
+    std::string GroupLabel() const
+    {
+        return groupIndex >= 0 && groupIndex < int(groups.size())
+               ? groups[groupIndex] : "Alle Sender";
     }
 
     void KeepVisible()
