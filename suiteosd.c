@@ -15,6 +15,7 @@
 #include <vdr/osdbase.h>
 #include <vdr/plugin.h>
 #include <vdr/recording.h>
+#include <vdr/remote.h>
 
 #include <algorithm>
 #include <array>
@@ -131,12 +132,13 @@ Snapshot readVdrSnapshot()
     return snapshot;
 }
 
-const std::array<const char *, 10> kSidebar = {{
+const std::array<const char *, 11> kSidebar = {{
     "Home", "Live-TV", "EPG", "Aufnahmen", "Timer",
-    "Suchtimer", "HbbTV", "Teletext", "Bilder", "Media Tools"
+    "Suchtimer", "HbbTV", "Teletext", "Bilder", "Media Tools",
+    "Einstellungen"
 }};
-const std::array<const char *, 10> kSymbols = {{
-    "H", "TV", "E", "REC", "T", "S", "Hb", "TXT", "IMG", "M"
+const std::array<const char *, 11> kSymbols = {{
+    "H", "TV", "E", "REC", "T", "S", "Hb", "TXT", "IMG", "M", "SET"
 }};
 
 class cSuiteHome final : public cOsdObject {
@@ -351,7 +353,17 @@ private:
             notice = "Aufnahmewiedergabe aktuell nicht verfügbar";
             break;
         case suiteosd::Activation::Module:
-            notice = "Dieses Suite-Modul folgt in einem weiteren Integrationsschritt.";
+            // Reuse upstream VDR plugin menu actions. This intentionally
+            // does not implement a second HbbTV/teletext renderer.
+            if (nav.sideIndex == 6 || nav.sideIndex == 7) {
+                const char *plugin = nav.sideIndex == 6 ? "web" : "osdteletext";
+                if (cPluginManager::GetPlugin(plugin) && cRemote::CallPlugin(plugin))
+                    return osEnd;
+                notice = nav.sideIndex == 6
+                    ? "HbbTV-Plugin nicht verfügbar"
+                    : "Teletext-Plugin nicht verfügbar";
+            } else
+                notice = "Dieses Suite-Modul folgt in einem weiteren Integrationsschritt.";
             break;
         default: break;
         }
