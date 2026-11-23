@@ -10,6 +10,7 @@
 #include <vdr/device.h>
 #include <vdr/epg.h>
 #include <vdr/font.h>
+#include <vdr/menu.h>
 #include <vdr/osd.h>
 #include <vdr/osdbase.h>
 #include <vdr/plugin.h>
@@ -46,6 +47,7 @@ struct Programme {
 struct Recording {
     std::string title;
     std::string time;
+    std::string fileName;
 };
 struct Snapshot {
     Programme live;
@@ -119,6 +121,7 @@ Snapshot readVdrSnapshot()
                 Recording r;
                 r.title = rec->Name() ? rec->Name() : "";
                 r.time = formatTime(rec->Start());
+                r.fileName = rec->FileName() ? rec->FileName() : "";
                 snapshot.recordings.push_back(std::move(r));
                 if (snapshot.recordings.size() >= 100)
                     break;
@@ -319,24 +322,40 @@ private:
         osd->Flush();
     }
 
-    void action(suiteosd::Activation a)
+    eOSState action(suiteosd::Activation a)
     {
         switch (a) {
         case suiteosd::Activation::Hero:
-            notice = "Live-TV läuft über das VDR-Ausgabeplugin. Zurück schließt das OSD.";
+            return osEnd; // reveal the currently tuned broadcast
+        case suiteosd::Activation::ChannelNow: {
+            if (nav.card[1] >= 0 && nav.card[1] < int(data.now.size()) &&
+                cDevice::PrimaryDevice()) {
+                const int number = data.now[nav.card[1]].channelNumber;
+                LOCK_CHANNELS_READ;
+                if (Channels && Channels->SwitchTo(number))
+                    return osEnd;
+            }
+            notice = "Senderwechsel nicht verfügbar";
             break;
-        case suiteosd::Activation::ChannelNow:
+        }
         case suiteosd::Activation::ChannelNext:
-            notice = "Senderauswahl: Umschalten folgt mit der VDR-Anbindung.";
+            notice = "Sendungsdetails und Timer folgen mit der Suite-Integration.";
             break;
         case suiteosd::Activation::Recording:
-            notice = "Aufnahmewiedergabe folgt in der Player-Integration.";
+            if (nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) &&
+                cDevice::PrimaryDevice() &&
+                !data.recordings[nav.card[3]].fileName.empty()) {
+                cReplayControl::SetRecording(data.recordings[nav.card[3]].fileName.c_str());
+                return osReplay; // VDR launches its own canonical replay control
+            }
+            notice = "Aufnahmewiedergabe aktuell nicht verfügbar";
             break;
         case suiteosd::Activation::Module:
             notice = "Dieses Suite-Modul folgt in einem weiteren Integrationsschritt.";
             break;
         default: break;
         }
+        return osContinue;
     }
 
 public:
@@ -403,7 +422,9 @@ public:
             else if (nav.sideIndex == 2) target = 1;
             else if (nav.sideIndex == 3) target = 3;
         }
-        action(nav.Move(direction, count(target), 7));
+        const eOSState result = action(nav.Move(direction, count(target), 7));
+        if (result != osContinue)
+            return result;
         draw();
         return osContinue;
     }
