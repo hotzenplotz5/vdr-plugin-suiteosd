@@ -36,5 +36,15 @@ int main()
     assert(n.Move(Direction::Select, 1, 4) == Activation::None);
     assert(n.section == 0 && !n.sideFocused);
     assert(n.Move(Direction::Back, 1, 4) == Activation::Close);
+
+    Navigation direct;
+    direct.Move(Direction::Left, 1, 4);
+    direct.Move(Direction::Down, 1, 4);
+    direct.Move(Direction::Down, 1, 4);
+    direct.Move(Direction::Down, 1, 4);
+    assert(direct.sideIndex == 3);
+    assert(direct.Move(Direction::Select, 6, 4) == Activation::None);
+    assert(direct.section == 3);
+    assert(direct.firstVisibleSection == 2);
     return 0;
 }
