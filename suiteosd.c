@@ -104,7 +104,7 @@ Snapshot readVdrSnapshot()
                 const cEvent *now = schedule ? schedule->GetPresentEvent() : nullptr;
                 const cEvent *next = schedule ? schedule->GetFollowingEvent() : nullptr;
                 Programme current = fromEvent(ch, now);
-                if (snapshot.live.channel.empty() || ch->Number() == liveNumber)
+                if (liveNumber > 0 && ch->Number() == liveNumber)
                     snapshot.live = current;
                 // Keep VDR channel order and expose the complete rail;
                 // horizontal navigation pages through every channel.
