@@ -32,7 +32,7 @@ struct CoreAdminNavigation {
     void openLogin(CorePage next) {
         page = CorePage::Login;
         afterLogin = next;
-        selection = action = keyIndex = 0;
+        selected = action = keyIndex = 0;
         passwordField = false;
         uppercase = false;
         clearPassword();
