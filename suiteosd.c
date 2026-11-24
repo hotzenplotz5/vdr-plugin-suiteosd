@@ -56,6 +56,7 @@ struct Programme {
     std::string channel;
     std::string title;
     std::string time;
+    std::string description;
     int progress = 0;
 };
 struct Recording {
@@ -106,6 +107,7 @@ Programme fromEvent(const cChannel *ch, const cEvent *event)
     p.channel = ch->Name() ? ch->Name() : "";
     p.title = event ? event->Title() : "Keine Programminformation";
     p.time = eventTime(event);
+    p.description = event && event->Description() ? event->Description() : "";
     if (event && event->Duration() > 0) {
         const time_t now = time(nullptr);
         p.progress = std::clamp(int(100 * (now - event->StartTime()) / event->Duration()), 0, 100);
@@ -253,6 +255,7 @@ private:
     cRect scaledRect;
     std::string notice;
     bool recordingDetails = false;
+    bool homeProgrammeDetails = false;
     int width = 1600;
     int height = 900;
 
@@ -1464,6 +1467,48 @@ private:
         drawBrowserDeleteConfirm();
     }
 
+    const Programme *selectedHomeProgramme() const
+    {
+        switch (nav.section) {
+        case 0: return &data.live;
+        case 1:
+            return nav.card[1] >= 0 && nav.card[1] < int(data.now.size()) ?
+                &data.now[nav.card[1]] : nullptr;
+        case 2:
+            return nav.card[2] >= 0 && nav.card[2] < int(data.next.size()) ?
+                &data.next[nav.card[2]] : nullptr;
+        default: return nullptr;
+        }
+    }
+
+    void drawHomeProgrammeInfo()
+    {
+        if (!homeProgrammeDetails) return;
+        const Programme *p = selectedHomeProgramme();
+        if (!p) return;
+        panel(266, 163, 1087, 550, true, kSurface);
+        print(301, 190, p->title, fontTitle, kText, 980);
+        print(301, 256, p->channel + "  ·  " + p->time, fontBody, kFocus, 950);
+        std::string synopsis = p->description.empty() ?
+            "Keine EPG-Beschreibung vorhanden." : p->description;
+        std::replace(synopsis.begin(), synopsis.end(), '\n', ' ');
+        std::istringstream words(synopsis);
+        std::string line, word;
+        int y = 317;
+        while (words >> word && y < 655) {
+            const std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(972)) {
+                print(301, y, line, fontBody, kText, 988);
+                line = word;
+                y += 33;
+            } else
+                line = candidate;
+        }
+        if (!line.empty() && y <= 671)
+            print(301, y, line, fontBody, kText, 988);
+        print(301, 675, "Gelb / Info / Zurück: Schließen", fontSmall, kFocus);
+    }
+
     void drawSidebar()
     {
         // Expanded sidebar overlays the content; it never permanently
@@ -1489,7 +1534,7 @@ private:
         print(42, 852, "Pfeile: Navigation", fontSmall);
         print(365, 852, "OK: Auswählen", fontSmall);
         print(610, 852, "Zurück: TV", fontSmall);
-        print(850, 852, "Rot: Aufnahmen  ·  Grün: EPG  ·  Blau: Timer", fontSmall);
+        print(850, 852, "Rot: Aufnahmen · Grün: EPG · Gelb: Info · Blau: Timer", fontSmall);
         if (!notice.empty()) {
             fill(305, 790, 1570, 832, kSurface);
             print(329, 801, notice, fontSmall, kFocus, 1210);
@@ -1520,6 +1565,7 @@ private:
         drawFooter();
         drawSidebar();
         drawRecordingDetails();
+        drawHomeProgrammeInfo();
         osd->Flush();
     }
 
@@ -1641,6 +1687,13 @@ public:
             return browserKey(base);
         if (timelineActive)
             return timelineKey(base);
+        if (homeProgrammeDetails) {
+            if (base == kYellow || base == kInfo || base == kBack || base == kOk) {
+                homeProgrammeDetails = false;
+                draw();
+            }
+            return osContinue;
+        }
         if (recordingDetails) {
             if (base == kInfo || base == kBack) {
                 recordingDetails = false;
@@ -1648,9 +1701,12 @@ public:
             }
             return osContinue;
         }
-        if (base == kInfo && nav.section == 3 && !nav.sideFocused &&
-            nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size())) {
-            recordingDetails = true;
+        if ((base == kInfo || base == kYellow) && !nav.sideFocused) {
+            if (nav.section == 3 && nav.card[3] >= 0 &&
+                nav.card[3] < int(data.recordings.size()))
+                recordingDetails = true;
+            else if (selectedHomeProgramme())
+                homeProgrammeDetails = true;
             draw();
             return osContinue;
         }
