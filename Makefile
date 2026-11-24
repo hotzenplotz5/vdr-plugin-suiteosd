@@ -8,7 +8,7 @@ VDR_CFLAGS = $(shell $(PKG_CONFIG) --variable=cflags vdr)
 VDR_API_VERSION = $(shell $(PKG_CONFIG) --variable=apiversion vdr)
 
 SOFILE = libvdr-$(PLUGIN).so
-OBJECTS = suiteosd.o artwork_decode.o core_admin_client.o
+OBJECTS = suiteosd.o suite_skin.o artwork_decode.o core_admin_client.o
 # VDR_SOURCE_PARENT may point to the parent of a VDR 2.8.x source tree
 # named "vdr". Example: VDR_SOURCE_PARENT=upstream with upstream/vdr/plugin.h.
 SOURCE_FLAGS = $(if $(VDR_SOURCE_PARENT),-I$(VDR_SOURCE_PARENT))
@@ -25,6 +25,9 @@ $(SOFILE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -o $@ $^ $(ARTWORK_LIBS) $(CORE_LIBS)
 
 suiteosd.o: suiteosd.c navigation.h core_admin_client.h core_admin_navigation.h settings_navigation.h recording_browser.h epg_timeline.h logo_locator.h artwork_decode.h vendor/tvscraper/services.h
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
+
+suite_skin.o: suite_skin.c artwork_decode.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 core_admin_client.o: core_admin_client.c core_admin_client.h
