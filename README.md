@@ -13,7 +13,7 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.7.0, noch nicht auf TV abgenommen)
+## Aktueller Implementierungsstand (0.8.0, noch nicht auf TV abgenommen)
 
 - Native `cOsdObject`-Home-Ansicht mit fester Kopfzeile, schmaler Icon-Leiste und eingeblendeten **allen** Labels beim Navigieren auf die Sidebar.
 - Pfeiltasten, OK und Zurück sowie vertikale Home-Sektionen ohne sichtbaren Scrollbalken und horizontale Sender-/Aufnahmekacheln.
@@ -32,15 +32,20 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Aufnahmen 2.0:** Ein eigener TV-Kachelbrowser mit drei umschaltbaren Reitern **Ordner / Genre / Alle**. Die Ordner folgen direkt dem VDR-Aufnahmennamen einschließlich Unterordnern (`cRecording::BaseName()`); Genre-Gruppen beziehen mehrere Schlagwörter pro Aufnahme aus TVScraper, ohne etwas zu verschieben. Die Genre-Liste wird erst nach Aufrufen des Reiters befüllt, und fehlende Metadaten erscheinen unter „Ohne Genre“. Grid-Scrollen und Sortieren nach Datum/Name funktionieren ohne sichtbaren Scrollbalken.
 - **VDR-Fernbedienung:** Im Home öffnet `Rot` den Aufnahmenbrowser, `Grün` den Suite-EPG, `Gelb`/`Info` das Informationsfenster zur ausgewählten Sendung oder Aufnahme und `Blau` die native Timerübersicht. In Aufnahmen: Pfeile/OK für Tabs, Ordner und Wiedergabe; `Rot` startet die VDR-Wiedergabe, `Grün`/`0` wechseln Name/Datum, `Blau`/`Info` öffnen die Metadaten, `Gelb` fragt vor dem Löschen nach. `Zurück` springt im Ordnerbaum eine Ebene höher, vom Wurzelverzeichnis zurück zum Home. Bei laufenden oder gerade bearbeiteten Aufnahmen wird die komplexere Löschlogik an das vorhandene VDR-Aufnahmenmenü abgegeben.
 - **Optionale Live-Vorschau in Aufnahmen:** Das laufende Bild wird über die *native* Ausgabeplugin-Schnittstelle `cDevice::CanScaleVideo()` und `ScaleVideo()` auf die rechte Bildschirmseite verkleinert. Das TrueColor-OSD zeichnet dafür einen transparenten Ausschnitt. Beim Verlassen des Browsers oder Start der Wiedergabe wird das Bild mit `ScaleVideo(cRect::Null)` wiederhergestellt. Unterstützt ein Ausgabeplugin diese Funktion nicht, bleibt die Kachelansicht ohne Vorschau nutzbar. **Das Verhalten mit `vaapivideo` ist noch nicht auf dem realen yaVDR getestet.** Kein zusätzlicher TV-Stream oder Video-Decoder.
-- **Gemeinsames Einstellungs-Dashboard (0.7.0):** Das Sidebar-Symbol Einstellungen öffnet jetzt sechs Kategorien im Suite-Design: VDR, VDR-Suite, Plugins, TV-Oberfläche, Benutzer & Geräte, System. **VDR/Plugins** nutzen unverändert VDRs native `kSetup`-Menüs. Die TV-Oberfläche kann die Mini-Live-TV-Vorschau wirklich ein-/ausschalten; die Einstellung wird im **vorhandenen** VDR-Plugin-Setup (`suiteosd.LivePreview`) gespeichert und ist dort ebenfalls änderbar. Suite-Core-Einstellungen (Backend/Addons/Media Tools, Benutzer/Geräte) sind als Bereiche navigierbar, aber ihre Bearbeitung bleibt bis zur bestätigten lokalen Core-/Agent-Anbindung im bestehenden Webfrontend. Kein doppelter Konfigurationsspeicher.
+- **Gemeinsames Einstellungs-Dashboard (0.7.0):** Das Sidebar-Symbol Einstellungen öffnet jetzt sechs Kategorien im Suite-Design: VDR, VDR-Suite, Plugins, TV-Oberfläche, Benutzer & Geräte, System. **VDR/Plugins** nutzen unverändert VDRs native `kSetup`-Menüs. Die TV-Oberfläche kann die Mini-Live-TV-Vorschau wirklich ein-/ausschalten; die Einstellung wird im **vorhandenen** VDR-Plugin-Setup (`suiteosd.LivePreview`) gespeichert und ist dort ebenfalls änderbar. Seit 0.8.0 sind erste Suite-Core-Bearbeitungsfunktionen im TV-OSD erreichbar: Backend-Auswahl, Media-Tools-Aktivierung, H.264-/H.265-CRF, Account aktiv/inaktiv, Anzeigename und bestätigter Device-Widerruf. Der Zugang verwendet die **bestehende Human-Browser-Session mit CSRF und ETag**, ohne einen neuen Admin- oder Speicherweg. Weitere Rechte-/Pairing-/Account-Funktionen bleiben im Webfrontend; siehe [Core-Administration 0.8.0](docs/settings-core-administration.md).
+- **Core-Admin-Client ab 0.8.0:** Eine maskierte Fernbedienungs-Tastatur meldet den bestehenden Human Account über die vorhandene Core-Sitzung an. Die im VDR-Plugin-Setup einstellbare Core-URL hat den nachgewiesenen lokalen Standard http://127.0.0.1:18080. Passwort und Session werden nicht persistiert; beim Verlassen der Einstellungen erfolgt Logout. Kein pauschaler Public-API-v1-Umweg für VDR-eigene Funktionen.
 - Derzeit **keine** eingebettete Live-Vorschau im Home, keine gesonderte Skin-Implementierung und keine Public-API-v1-Anbindung. Das TV-Vorschaufeld im Home ist weiterhin ein ausdrücklich beschrifteter Platzhalter.
 - Ein echter Ausgabe-/OSD-Provider und passende VDR-ABI sind für eine Anzeige nötig; der Code ist **ohne vorhandenes Ausgabeplugin entwickel- und CI-testbar**, aber noch nicht visuell abgenommen.
 
-Die GitHub-Actions-Matrix kompiliert gegen den unveränderten Upstream-VDR-Quellstand der Tags **2.8.3** und **2.8.4** sowie separate Headless-Tests für Home-/EPG-/Aufnahmen- und Einstellungsnavigation, Kanalgruppen, lokale Logoauflösung und PNG-/JPEG-Bilddekodierung. Ein erfolgreicher Build bedeutet keine Funktionsabnahme auf dem realen yaVDR.
+Die GitHub-Actions-Matrix kompiliert gegen den unveränderten Upstream-VDR-Quellstand der Tags **2.8.3** und **2.8.4** sowie separate Headless-Tests für Home-/EPG-/Aufnahmen- und Einstellungsnavigation, TV-Admin-Tastatur und HTTP-Cookie/CSRF/ETag-Integration, Kanalgruppen, lokale Logoauflösung und PNG-/JPEG-Bilddekodierung. Ein erfolgreicher Build bedeutet keine Funktionsabnahme auf dem realen yaVDR.
 
 ## Zusätzliche Build-Abhängigkeiten ab 0.3.0
 
 `libpng-dev` und `libjpeg-dev` für das lokale Dekodieren von TVScraper-Bildern, sowie die bereits benötigten VDR-Entwicklungsheader. Das Projekt enthält ausschließlich den öffentlichen TVScraper-Service-Header mit Upstream-Provenienz und GPL-Hinweis unter [vendor/tvscraper](vendor/tvscraper/README.md); **keinen TVScraper-Fork**. Zur Laufzeit ist TVScraper optional. Test mit dem tatsächlich installierten TVScraper und OSD-Provider steht noch aus.
+
+## Core-Admin-Abhängigkeiten (0.8.0)
+
+Für die authentifizierte Suite-Verwaltung werden zusätzlich libcurl4-openssl-dev und libjson-c-dev beim Build benötigt. Die CI installiert diese Header für beide VDR-2.8-Versionen. Runtime benötigt die zugehörigen Bibliotheken; Paketierung und Real-Host-Einrichtung sind nicht Teil dieser Quellcode-CI.
 
 ## Dokumente
 
@@ -48,6 +53,7 @@ Die GitHub-Actions-Matrix kompiliert gegen den unveränderten Upstream-VDR-Quell
 - [Addon- und OSD-Interaktionsvertrag (Entwurf)](docs/addon-ui-contract.md)
 - [Roadmap und Abnahmekriterien](docs/roadmap.md)
 - [Gemeinsame VDR-/Suite-Einstellungen: Eigentümer und Bedienung](docs/settings-integration.md)
+- [Core-Administration direkt im TV-OSD (0.8.0)](docs/settings-core-administration.md)
 
 ## Quellen und Abhängigkeiten
 
