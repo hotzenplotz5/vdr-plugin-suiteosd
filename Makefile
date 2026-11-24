@@ -17,13 +17,13 @@ CXXFLAGS += -std=c++17 -fPIC $(SOURCE_FLAGS) $(VDR_CXXFLAGS) $(VDR_CFLAGS) $(she
 ARTWORK_LIBS = $(shell $(PKG_CONFIG) --libs libpng) -ljpeg
 DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"'
 
-.PHONY: all clean show-vdr-api check-navigation check-artwork check-epg-timeline check-logos check-recording-browser
+.PHONY: all clean show-vdr-api check-navigation check-artwork check-epg-timeline check-logos check-recording-browser check-settings-navigation
 all: $(SOFILE)
 
 $(SOFILE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -o $@ $^ $(ARTWORK_LIBS)
 
-suiteosd.o: suiteosd.c navigation.h recording_browser.h epg_timeline.h logo_locator.h artwork_decode.h vendor/tvscraper/services.h
+suiteosd.o: suiteosd.c navigation.h settings_navigation.h recording_browser.h epg_timeline.h logo_locator.h artwork_decode.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 artwork_decode.o: artwork_decode.c artwork_decode.h
@@ -44,9 +44,14 @@ check-epg-timeline:
 	./epg-timeline-test
 	rm -f epg-timeline-test
 
+check-settings-navigation:
+	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o settings-navigation-test tests/settings_navigation_test.cpp
+	./settings-navigation-test
+	rm -f settings-navigation-test
+
 check-recording-browser:
 	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o recording-browser-test tests/recording_browser_test.cpp
-	./recording-browser-test
+	./recording-browser-test settings-navigation-test
 	rm -f recording-browser-test
 
 check-navigation:
