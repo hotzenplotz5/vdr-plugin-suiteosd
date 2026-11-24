@@ -1122,7 +1122,7 @@ private:
                 nullptr, nullptr, nullptr, &meta.overview,
                 &meta.genres, nullptr, nullptr, nullptr, nullptr, nullptr,
                 &meta.rating, nullptr, nullptr, nullptr, nullptr,
-                nullptr, nullptr, nullptr, nullptr, nullptr);
+                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
             if (video->getVideoType() == tSeries) {
                 std::string episodeOverview;
                 int episodeRuntime = 0;
