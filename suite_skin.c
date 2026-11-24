@@ -118,6 +118,8 @@ class Canvas {
     cFont *small = nullptr;
     int width = 0;
     int height = 0;
+    std::string lastImagePath;
+    Artwork cachedImage;
 
 public:
     explicit Canvas(int nominalHeight)
@@ -173,11 +175,16 @@ public:
     void picture(const std::string &path)
     {
         if (!osd || path.empty()) return;
-        Artwork art = LoadArtwork(path, W(270), H(156));
-        if (!art.valid()) return;
-        cImage img(cSize(art.width, art.height), art.argb.data());
-        osd->DrawImage(cPoint(W(1275) + (W(270) - art.width) / 2,
-                              H(31) + (H(156) - art.height) / 2), img);
+        // Flush() is called frequently during replay. Reuse the small decoded
+        // image until TVScraper returns a different local image path.
+        if (lastImagePath != path) {
+            lastImagePath = path;
+            cachedImage = LoadArtwork(path, W(270), H(156));
+        }
+        if (!cachedImage.valid()) return;
+        cImage img(cSize(cachedImage.width, cachedImage.height), cachedImage.argb.data());
+        osd->DrawImage(cPoint(W(1275) + (W(270) - cachedImage.width) / 2,
+                              H(31) + (H(156) - cachedImage.height) / 2), img);
     }
     void progress(int x0, int y, int x1, int value)
     {
