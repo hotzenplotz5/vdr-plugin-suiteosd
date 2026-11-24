@@ -249,6 +249,196 @@ const std::array<const char *, 11> kSymbols = {{
     "H", "TV", "E", "REC", "T", "S", "Hb", "TXT", "IMG", "M", "SET"
 }};
 
+
+// This is the menu VDR asks for through cControl::GetInfo() when Info is
+// pressed during replay. It displays local TVScraper data but leaves the
+// playback engine and transport keys entirely with cReplayControl.
+class cSuiteReplayInfo final : public cOsdObject {
+    cOsd *view = nullptr;
+    cFont *titleFont = nullptr;
+    cFont *bodyFont = nullptr;
+    cFont *smallFont = nullptr;
+    int width = 1600, height = 900;
+    std::string title, episode, overview, release, genres;
+    std::string fanartPath, posterPath;
+    int runtime = 0;
+    int season = 0, episodeNumber = 0;
+    float rating = 0;
+
+    int X(int x) const { return x * width / 1600; }
+    int Y(int y) const { return y * height / 900; }
+    void box(int x0, int y0, int x1, int y1, tColor color)
+    {
+        if (view) view->DrawRectangle(X(x0), Y(y0), X(x1), Y(y1), color);
+    }
+    void label(int x, int y, const std::string &s, const cFont *font,
+               tColor fg = kText, int max = 0)
+    {
+        if (view && font && !s.empty())
+            view->DrawText(X(x), Y(y), s.c_str(), fg, clrTransparent,
+                           font, max ? X(max) : 0);
+    }
+    void artwork(const std::string &path, int x, int y, int w, int h)
+    {
+        if (!view || path.empty()) return;
+        suiteosd::Artwork image = suiteosd::LoadArtwork(path, X(w), Y(h));
+        if (!image.valid()) return;
+        cImage osdImage(cSize(image.width, image.height), image.argb.data());
+        view->DrawImage(cPoint(X(x) + (X(w) - image.width) / 2,
+                               Y(y) + (Y(h) - image.height) / 2), osdImage);
+    }
+
+public:
+    explicit cSuiteReplayInfo(const cRecording *recording)
+    {
+        // Caller holds LOCK_RECORDINGS_READ. Copy everything before it ends.
+        if (!recording) return;
+        cString baseName = recording->BaseName();
+        title = *baseName ? *baseName : (recording->Name() ? recording->Name() : "");
+        if (recording->Info()) {
+            if (recording->Info()->Title())
+                title = recording->Info()->Title();
+            if (recording->Info()->ShortText())
+                episode = recording->Info()->ShortText();
+            if (recording->Info()->Description())
+                overview = recording->Info()->Description();
+        }
+        cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
+        if (!scraper) return;
+        cGetScraperVideo request(nullptr, recording);
+        if (!scraper->Service("GetScraperVideo", &request) || !request.m_scraperVideo)
+            return;
+        cScraperVideo *video = request.m_scraperVideo.get();
+        std::string scrapedTitle, scrapedEpisode;
+        video->getOverview(&scrapedTitle, &scrapedEpisode, &release,
+                           &runtime, nullptr, nullptr, nullptr);
+        if (!scrapedTitle.empty()) title = std::move(scrapedTitle);
+        if (!scrapedEpisode.empty()) episode = std::move(scrapedEpisode);
+        std::vector<std::string> values;
+        std::string scraperOverview;
+        video->getMovieOrTv(nullptr, nullptr, nullptr, &scraperOverview,
+                            &values, nullptr, nullptr, nullptr,
+                            nullptr, nullptr, &rating, nullptr, nullptr,
+                            nullptr, nullptr, nullptr, nullptr, nullptr,
+                            nullptr, nullptr, nullptr);
+        if (!scraperOverview.empty()) overview = std::move(scraperOverview);
+        for (const std::string &genre : values) {
+            if (!genres.empty()) genres += "  ·  ";
+            genres += genre;
+            if (genres.size() > 90) break;
+        }
+        season = video->getSeasonNumber();
+        episodeNumber = video->getEpisodeNumber();
+        if (video->getVideoType() == tSeries) {
+            std::string episodeOverview;
+            int episodeRuntime = 0;
+            if (video->getEpisode(nullptr, &episodeOverview, nullptr, nullptr,
+                                  &episodeRuntime, nullptr, nullptr, nullptr)) {
+                if (!episodeOverview.empty()) overview = std::move(episodeOverview);
+                if (episodeRuntime > 0) runtime = episodeRuntime;
+            }
+        }
+        fanartPath = video->getImage(
+            cImageLevels(eImageLevel::episodeMovie,
+                         eImageLevel::seasonMovie, eImageLevel::tvShowCollection),
+            cOrientations(eOrientation::landscape, eOrientation::banner), true).path;
+        posterPath = video->getImage(
+            cImageLevels(eImageLevel::episodeMovie,
+                         eImageLevel::seasonMovie, eImageLevel::tvShowCollection),
+            cOrientations(eOrientation::portrait), true).path;
+    }
+
+    ~cSuiteReplayInfo() override
+    {
+        delete view;
+        delete titleFont;
+        delete bodyFont;
+        delete smallFont;
+    }
+    void Show() override
+    {
+        width = cOsd::OsdWidth();
+        height = cOsd::OsdHeight();
+        view = cOsdProvider::NewOsd(cOsd::OsdLeft(), cOsd::OsdTop());
+        if (!view) return;
+        const tArea full = {0, 0, width - 1, height - 1, 32};
+        if (view->SetAreas(&full, 1) != oeOk) {
+            delete view;
+            view = nullptr;
+            esyslog("suiteosd: TrueColor OSD unavailable for replay Info");
+            return;
+        }
+        titleFont = cFont::CreateFont("Sans:Bold", std::max(20, Y(49)));
+        bodyFont = cFont::CreateFont("Sans", std::max(14, Y(24)));
+        smallFont = cFont::CreateFont("Sans", std::max(12, Y(19)));
+        box(0, 0, 1599, 899, kBackground);
+        artwork(fanartPath, 520, 95, 1045, 383);
+        box(0, 0, 1599, 77, kSurface);
+        label(36, 16, "VDR", titleFont);
+        label(115, 16, "Suite", titleFont, kFocus);
+        label(286, 25, "WIEDERGABE  /  AUFNAHMEINFO", bodyFont, kMuted);
+        label(1430, 25, formatTime(time(nullptr)), bodyFont);
+
+        box(43, 119, 323, 500, kCard);
+        artwork(posterPath, 58, 132, 249, 351);
+        box(343, 120, 1545, 495, 0xDF071729);
+        label(377, 153, title, titleFont, kText, 1110);
+        label(377, 217, episode, bodyFont, kText, 1110);
+        std::string facts = "AUFNAHME";
+        if (season > 0) {
+            facts += "  ·  Staffel " + std::to_string(season);
+            if (episodeNumber > 0) facts += ", Folge " + std::to_string(episodeNumber);
+        }
+        if (!release.empty()) facts += "  ·  " + release;
+        if (runtime > 0) facts += "  ·  " + std::to_string(runtime) + " Min";
+        if (rating > 0) {
+            char buffer[28];
+            std::snprintf(buffer, sizeof(buffer), "  ·  %.1f/10", rating);
+            facts += buffer;
+        }
+        label(379, 279, facts, bodyFont, kFocus, 1100);
+        label(379, 337, genres, bodyFont, kMuted, 1090);
+        box(343, 509, 1545, 788, kSurface);
+        label(379, 536, "INHALT", bodyFont, kFocus);
+        if (overview.empty()) overview = "Keine Beschreibung vorhanden.";
+        std::replace(overview.begin(), overview.end(), '\n', ' ');
+        std::istringstream words(overview);
+        std::string line, word;
+        int y = 588;
+        while (words >> word && y < 746) {
+            std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && bodyFont && bodyFont->Width(candidate.c_str()) > X(1110)) {
+                label(378, y, line, bodyFont, kText, 1117);
+                y += 36;
+                line = word;
+            } else line = candidate;
+        }
+        if (!line.empty() && y < 770) label(378, y, line, bodyFont, kText, 1117);
+        box(17, 817, 1580, 889, kSurface);
+        label(56, 837, "OK / Info / Zurück: Weiter zur Aufnahme", bodyFont, kFocus);
+        view->Flush();
+    }
+    eOSState ProcessKey(eKeys key) override
+    {
+        const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        return base == kOk || base == kBack || base == kInfo ? osBack : osContinue;
+    }
+};
+
+class cSuiteReplayControl final : public cReplayControl {
+public:
+    cOsdObject *GetInfo() override
+    {
+        // As in VDR's default cReplayControl::GetInfo(), look up the
+        // current replay by its canonical name, not a parallel player.
+        LOCK_RECORDINGS_READ;
+        const char *path = cReplayControl::LastReplayed();
+        const cRecording *recording = path && Recordings ?
+            Recordings->GetByName(path) : nullptr;
+        return recording ? new cSuiteReplayInfo(recording) : nullptr;
+    }
+};
+
 class cSuiteHome final : public cOsdObject {
 private:
     cOsd *osd = nullptr;
@@ -865,7 +1055,8 @@ private:
         }
         restoreLivePreview(); // Fullscreen replay owns the video plane
         cReplayControl::SetRecording(rec->fileName.c_str());
-        return osReplay;
+        cControl::Launch(new cSuiteReplayControl());
+        return osEnd;
     }
 
     eOSState deleteBrowserRecording()
@@ -2457,7 +2648,8 @@ private:
                 cDevice::PrimaryDevice() &&
                 !data.recordings[nav.card[3]].fileName.empty()) {
                 cReplayControl::SetRecording(data.recordings[nav.card[3]].fileName.c_str());
-                return osReplay; // VDR launches its own canonical replay control
+                cControl::Launch(new cSuiteReplayControl());
+                return osEnd; // VDR launches its own canonical replay control
             }
             notice = "Aufnahmewiedergabe aktuell nicht verfügbar";
             break;
@@ -2572,7 +2764,8 @@ public:
                 nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) &&
                 !data.recordings[nav.card[3]].fileName.empty()) {
                 cReplayControl::SetRecording(data.recordings[nav.card[3]].fileName.c_str());
-                return osReplay;
+                cControl::Launch(new cSuiteReplayControl());
+                return osEnd;
             }
             if (base == kInfo || base == kBack) {
                 recordingDetails = false;
