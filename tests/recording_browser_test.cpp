@@ -57,7 +57,7 @@ int main()
     assert(b.entries.size() == 4);
     assert(b.entries[0].fileName == "four"); // newest
     b.tabsFocused = false;
-    b.Move(0, 1);
+    b.Move(0, -1);
     assert(b.tabsFocused); // first grid row -> tabs
 
     RecordingBrowser many;
