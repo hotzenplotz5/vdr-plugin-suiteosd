@@ -44,7 +44,7 @@ Bei **OK auf der eingeklappten/ausgeklappten Seitenleiste** startet die ausgewä
 | EPG | Native Suite-EPG-Zeitleiste auf Basis lokaler VDR-Schedules, im bestehenden Webfrontend-Design; VDR-Programmführer bleibt separat verfügbar |
 | Aufnahmen | Native Suite-Kachelansicht mit VDR-Ordnern, TVScraper-Genre, Detailansicht, Direktwiedergabe und optionaler Live-Vorschau via `ScaleVideo()` |
 | Timer | VDR-Direktmenübefehl `kTimers` |
-| Einstellungen | VDR-Direktmenübefehl `kSetup` |
+| Einstellungen | Gemeinsames natives Suite-OSD-Dashboard; VDR-Setup/Plugin-Setup weiter über `kSetup`, Suite-OSD-Vorschau über denselben VDR-Plugin-Setup-Schlüssel |
 | HbbTV | Vorhandenes `web`-Plugin, `cRemote::CallPlugin()` |
 | Teletext | Vorhandenes `osdteletext`-Plugin, `cRemote::CallPlugin()` |
 | Suchtimer | Lokales `epgsearchonly` (direktes Suchmenü) oder `epgsearch` (Hauptmenü), `cRemote::CallPlugin()` |
@@ -102,3 +102,7 @@ Die Nutzerentscheidung ist **kein neuer EPG-Entwurf**: Die bestehende EPG-Zeitle
 **Live-TV:** `cDevice::CanScaleVideo()` liefert die tatsächliche darstellbare Zielgröße. Bei Unterstützung verkleinert `ScaleVideo()` **das vorhandene** Fernsehbild; darüber liegt ein transparentes Loch im TrueColor-OSD. `ScaleVideo(cRect::Null)` setzt das normale Vollbild wieder ein beim Schließen, beim Wechsel in andere Ansichten und vor Wiedergabe, auch bei Destruktion. Bei fehlender Funktion oder Replay erscheint ein klarer Text-Fallback. Kein Eingriff in das Ausgabeplugin, keine zweite Videoquelle.
 
 **Abnahme noch offen:** VDR-Laufzeitprobe mit echtem TVScraper, Genreauflösung auf größeren Bibliotheken, Lösch-/Replay-Verhalten sowie Fähigkeit des installierten Ausgabeplugins zur Videoverkleinerung. Ein CI-Build gegen VDR-Header allein belegt keine reale Bildausgabe.
+
+## Gemeinsame Einstellungen (0.7.0, 24.11.2026)
+
+Anstelle des früheren direkten Sprungs zu `kSetup` öffnet die Suite-Sidebar jetzt ein Dashboard in derselben dunklen Designsprache. Die sechs Kategorien sind **VDR**, **VDR-Suite**, **Plugins**, **TV-Oberfläche**, **Benutzer & Geräte** und **System**. VDR und Plugins bleiben in ihren Originalmenüs; Suite-Core-/Agent-Daten behalten ihre vorhandene Autorität. Die lokale Mini-Live-TV-Vorschau wird als erste echte Suite-OSD-Option mit `SetupStore` im VDR-Plugin-Namespace gespeichert. Die Bereiche Suite-Core und Benutzer/Geräte sind vorerst bewusst als Informationen statt falscher editierbarer Felder dargestellt. Die nächste Integrationsstufe muss zunächst reale lokale Core-/Agent-Verträge nachweisen. Details und Abnahme: [Settings-Vertrag](settings-integration.md).
