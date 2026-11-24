@@ -22,6 +22,7 @@
 #include <vdr/recording.h>
 #include <vdr/remote.h>
 #include <vdr/timers.h>
+#include <vdr/videodir.h>
 #include <vdr/svdrp.h>
 
 #include <algorithm>
