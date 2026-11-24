@@ -19,6 +19,24 @@ jobs:
       - name: Verify local sender-logo name matching and safe fallback
         run: make check-logos
 
+  core-admin-navigation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Human login keyboard and TV admin navigation
+        run: make check-core-admin-navigation
+
+  core-admin-http:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install existing Core client HTTP and JSON libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libjson-c-dev
+      - name: Verify Human session, CSRF and ETag operations via mock Core
+        run: make check-core-admin-http
+
   settings-navigation:
     runs-on: ubuntu-24.04
     steps:
@@ -69,7 +87,7 @@ jobs:
       - name: Install toolchain and package metadata
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config vdr-dev libpng-dev libjpeg-dev
+          sudo apt-get install -y build-essential pkg-config vdr-dev libpng-dev libjpeg-dev libcurl4-openssl-dev libjson-c-dev
       - name: Compile plugin against exact upstream VDR header version
         run: |
           make VDR_SOURCE_PARENT=upstream -j2
