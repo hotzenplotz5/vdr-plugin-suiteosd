@@ -1,6 +1,6 @@
 # Suite-OSD – Roadmap
 
-Stand: 2026-11-23 · Basis: separates `hotzenplotz5/vdr-plugin-suiteosd` Repository, `main`. `vaapivideo` wird nicht geforkt.
+Stand: 2026-11-24 · Basis: separates `hotzenplotz5/vdr-plugin-suiteosd` Repository, `main`. `vaapivideo` wird nicht geforkt.
 
 | Slice | Umsetzung | Beobachtbarer Abschluss |
 | --- | --- | --- |
@@ -31,3 +31,7 @@ Als spätere Regressionen gelten: Rückkehr zum aktiven Kanal, Wechsel zwischen 
 ## Vergleich zur bestehenden Oberfläche
 
 Das vorhandene VDR-Suite-Webfrontend ist der funktionale Mindestumfang. Bei jedem TV-Feature die Eingaben, Gesamtanzahl/Sortierung, Titel/Metadaten, Paging, Errors, Berechtigungen und reale Aktionen gegenüber dem Webfrontend dokumentieren und testen. Kodi/Plex sind mögliche 10-Foot-UX-Referenzen; eine aktuelle Gegenüberstellung wurde noch nicht erhoben.
+
+## Fortschritt – Native Aufnahmen 2.0
+
+Der Kachelbrowser (Ordner/Genre/Alle), die Tastenbelegung, TVScraper-Genres, direkte Aufnahme-Wiedergabe und die optionale Ausgabeplugin-Videovoransicht sind auf `main` implementiert. CI-Proben gelten nur für Build und Headless-Modell; echte TV-Anzeige, Aufnahmelöschung und Video-Reset müssen am realen Gerät mit Ausgabeplugin getestet werden. Keine neue API v1 und kein `vaapivideo`-Fork.
