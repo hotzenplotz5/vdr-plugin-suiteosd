@@ -6,6 +6,7 @@
  */
 #include "navigation.h"
 #include "epg_timeline.h"
+#include "recording_browser.h"
 #include "logo_locator.h"
 #include "artwork_decode.h"
 #include "vendor/tvscraper/services.h"
@@ -28,13 +29,14 @@
 #include <cstdio>
 #include <cmath>
 #include <ctime>
+#include <cstring>
 #include <map>
 #include <sstream>
 #include <utility>
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.5.0";
+static const char *VERSION = "0.6.0";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace {
@@ -57,7 +59,9 @@ struct Programme {
 };
 struct Recording {
     std::string title;
+    std::string baseName;
     std::string time;
+    time_t start = 0;
     std::string fileName;
     std::string description;
 };
@@ -66,6 +70,7 @@ struct RecordingMeta {
     std::string episode;
     std::string release;
     std::string overview;
+    std::vector<std::string> genres;
     suiteosd::Artwork artwork;
 };
 
@@ -141,7 +146,10 @@ Snapshot readVdrSnapshot()
             for (const cRecording *rec = Recordings->First(); rec; rec = Recordings->Next(rec)) {
                 Recording r;
                 r.title = rec->Name() ? rec->Name() : "";
-                r.time = formatTime(rec->Start());
+                cString baseName = rec->BaseName();
+                r.baseName = *baseName ? *baseName : r.title;
+                r.start = rec->Start();
+                r.time = formatTime(r.start);
                 r.fileName = rec->FileName() ? rec->FileName() : "";
                 if (rec->Info() && rec->Info()->Description())
                     r.description = rec->Info()->Description();
@@ -234,6 +242,14 @@ private:
     std::map<std::string, suiteosd::Artwork> timelineArtwork;
     Snapshot data;
     std::map<std::string, RecordingMeta> recordingMeta;
+    std::map<std::string, std::vector<std::string>> recordingGenres;
+    suiteosd::RecordingBrowser recordingBrowser;
+    bool recordingsActive = false;
+    bool browserDetails = false;
+    bool browserDeleteConfirm = false;
+    std::string browserNotice;
+    cDevice *scaledDevice = nullptr;
+    cRect scaledRect;
     std::string notice;
     bool recordingDetails = false;
     int width = 1600;
@@ -888,7 +904,7 @@ private:
                                nullptr, nullptr, nullptr, nullptr);
             video->getMovieOrTv(
                 nullptr, nullptr, nullptr, &meta.overview,
-                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                &meta.genres, nullptr, nullptr, nullptr, nullptr, nullptr,
                 nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                 nullptr, nullptr, nullptr, nullptr, nullptr);
             if (video->getVideoType() == tSeries) {
@@ -923,6 +939,109 @@ private:
         if (recordingMeta.size() >= 48)
             recordingMeta.clear();
         return recordingMeta.emplace(item.fileName, loadRecordingMeta(item)).first->second;
+    }
+
+    const Recording *findRecording(const std::string &fileName) const
+    {
+        for (const Recording &item : data.recordings)
+            if (item.fileName == fileName)
+                return &item;
+        return nullptr;
+    }
+
+    const std::vector<std::string> &genresFor(const Recording &item)
+    {
+        const auto cached = recordingGenres.find(item.fileName);
+        if (cached != recordingGenres.end())
+            return cached->second;
+
+        std::vector<std::string> genres;
+        const auto art = recordingMeta.find(item.fileName);
+        if (art != recordingMeta.end()) {
+            genres = art->second.genres;
+        } else if (cPlugin *scraper = cPluginManager::GetPlugin("tvscraper")) {
+            // Genre is a native TVScraper attribute, not an HTTP metadata
+            // endpoint. Copy it under VDR's recordings read lock.
+            LOCK_RECORDINGS_READ;
+            const cRecording *rec = Recordings ?
+                Recordings->GetByName(item.fileName.c_str()) : nullptr;
+            if (rec) {
+                cGetScraperVideo request(nullptr, rec);
+                if (scraper->Service("GetScraperVideo", &request) && request.m_scraperVideo) {
+                    request.m_scraperVideo->getMovieOrTv(
+                        nullptr, nullptr, nullptr, nullptr,
+                        &genres, nullptr, nullptr, nullptr, nullptr, nullptr,
+                        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                        nullptr, nullptr, nullptr, nullptr, nullptr);
+                }
+            }
+        }
+        return recordingGenres.emplace(item.fileName, std::move(genres)).first->second;
+    }
+
+    void refreshBrowser()
+    {
+        recordingBrowser.source.clear();
+        recordingBrowser.source.reserve(data.recordings.size());
+        for (const Recording &item : data.recordings) {
+            suiteosd::BrowserRecording row;
+            row.fileName = item.fileName;
+            row.name = item.title;
+            row.title = item.baseName;
+            row.start = item.start;
+            // Loading genre data is demand-driven (only when the Genre tab
+            // is selected), never while opening Home or the Folder tab.
+            if (recordingBrowser.view == suiteosd::RecordingBrowser::View::Genres)
+                row.genres = genresFor(item);
+            recordingBrowser.source.push_back(std::move(row));
+        }
+        recordingBrowser.Refresh();
+    }
+
+    void startLivePreview()
+    {
+        if (scaledDevice) return;
+        cDevice *device = cDevice::PrimaryDevice();
+        if (!device || device->Replaying())
+            return;
+        const cRect requested(X(1197), Y(151), X(338), Y(190));
+        const cRect available = device->CanScaleVideo(requested);
+        if (available.IsEmpty())
+            return; // provider does not support video scaling
+        scaledDevice = device;
+        scaledRect = available;
+        device->ScaleVideo(available);
+    }
+
+    void restoreLivePreview()
+    {
+        if (!scaledDevice) return;
+        scaledDevice->ScaleVideo(cRect::Null);
+        scaledDevice = nullptr;
+        scaledRect = cRect::Null;
+    }
+
+    void openRecordingBrowser()
+    {
+        if (timelineActive) timelineActive = false;
+        recordingBrowser.ChangeView(suiteosd::RecordingBrowser::View::Folders);
+        recordingBrowser.tabsFocused = true;
+        browserDetails = browserDeleteConfirm = false;
+        browserNotice.clear();
+        data = readVdrSnapshot();
+        refreshBrowser();
+        recordingsActive = true;
+        startLivePreview();
+    }
+
+    void closeRecordingBrowser()
+    {
+        restoreLivePreview();
+        recordingsActive = false;
+        browserDetails = browserDeleteConfirm = false;
+        browserNotice.clear();
+        nav.sideFocused = false;
+        nav.section = 0;
     }
 
     void drawRecordings(int y)
