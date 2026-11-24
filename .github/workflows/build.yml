@@ -19,6 +19,13 @@ jobs:
       - name: Verify local sender-logo name matching and safe fallback
         run: make check-logos
 
+  recording-browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify folder/genre/all navigation and recording sorting
+        run: make check-recording-browser
+
   epg-timeline:
     runs-on: ubuntu-24.04
     steps:
