@@ -1,4 +1,6 @@
-# Gemeinsame Einstellungen: VDR und VDR-Suite (0.7.0)
+# Gemeinsame Einstellungen: VDR und VDR-Suite (Stufe 1, 0.7.0)
+
+**Historischer Stand der ersten Integrationsstufe:** Suite-OSD 0.8.0 ergänzt inzwischen authentifizierte Suite-Core-Verwaltung. Aktueller Vertrag: [Core-Administration am TV](settings-core-administration.md). Die nachstehenden 0.7.0-Angaben beschreiben bewusst den früheren Stand.
 
 ## Geltende Entscheidung
 
