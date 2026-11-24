@@ -14,7 +14,7 @@ Ein lokaler VDR-Prozess erhält durch seine Betriebssystemrechte keine zusätzli
 
 Die Zugangsdaten werden mit einer eingeblendeten Fernbedienungstastatur eingegeben. Das Passwort wird verdeckt angezeigt, nach dem Anmeldeversuch aus dem UI-Zustand gelöscht und nicht in der Plugin-Konfiguration gespeichert. Beim Verlassen des Einstellungsbereichs wird die Browser-Sitzung über POST /api/security/browser-sessions/logout abgemeldet.
 
-Die Core-Adresse ist im originalen VDR-Plugin-Setup unter suiteosd.CoreURL konfigurierbar. Vorgabe ist http://127.0.0.1:18080, entsprechend dem verifizierten Core-Runtime-Default. Für die Übertragung von Human-Anmeldedaten akzeptiert der Client HTTP nur auf Loopback oder HTTPS mit normaler Zertifikatsprüfung. Kein anonymer Administrations- oder lokaler Datenbankzugriff.
+Die Core-Adresse ist im originalen VDR-Plugin-Setup unter suiteosd.CoreURL konfigurierbar. Vorgabe ist http://127.0.0.1:18080, entsprechend dem verifizierten Core-Runtime-Default. Die vom Betreiber konfigurierte HTTP- oder HTTPS-Core-Adresse wird verwendet. Bei einer entfernten unverschlüsselten HTTP-Adresse zeigt das TV-OSD einen deutlichen Hinweis; für die Übertragung von Human-Anmeldedaten ist HTTPS empfohlen. Für HTTPS bleibt die normale Zertifikatsprüfung aktiv. Es wird keine zusätzliche Sperre über die vorhandene Core-Authentifizierung hinaus eingeführt. Kein anonymer Administrations- oder lokaler Datenbankzugriff.
 
 ## Implementierte TV-Funktionen
 
