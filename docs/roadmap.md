@@ -15,7 +15,7 @@ Stand: 2026-11-24 · Basis: separates `hotzenplotz5/vdr-plugin-suiteosd` Reposit
 
 ## Reihenfolge und Grenzen
 
-- Erst OSD.0, dann das kleinste echte Plugin-Skelett OSD.1. Spätere Slices sind **geplant**, nicht implementiert.
+- OSD.0/OSD.1 liegen im Quellcode vor; OSD.2 (Skin), OSD.3 (lokale Integration) und Teile der späteren Integration sind begonnen. Alle Phasen benötigen weiterhin ihre jeweils beschriebene echte Geräte-/Funktionsabnahme.
 - `vdr-plugin-suiteosd` braucht keine veränderte `vaapivideo`-Quelle. Es soll auch mit anderen VDR-OSD-Providern funktionieren.
 - Bei OSD.2 die verfügbaren OSD-Flächen/TrueColor-Fähigkeiten am echten Gerät nachweisen.
 - HbbTV bleibt in seinen bisherigen drei Komponenten. Die in VDR-Suite am 23.11.2026 zurückgestellte HbbTV-Extraktion wird nicht neu gestartet.
@@ -24,7 +24,7 @@ Stand: 2026-11-24 · Basis: separates `hotzenplotz5/vdr-plugin-suiteosd` Reposit
 
 ## Erste Akzeptanz und offener Hardware-Test
 
-**OSD.1** soll mit dem kleinsten VDR-Menüeintrag begonnen werden. Die erste Quellcode-Version darf als `unverified scaffold` vorliegen; **vollendet** ist OSD.1 erst nach echten VDR-Headern, fehlerfreiem Build und Bedienprobe mit der Fernbedienung. Bis dahin keine Installationszusage.
+**OSD.1** ist als native Home-Ansicht im Quellcode vorhanden und gegen VDR 2.8.3 und 2.8.4 per CI gebaut. **Vollendet** ist die Phase erst nach Bedienprobe am echten VDR mit Fernbedienung und Ausgabeplugin. Bis dahin keine Installationszusage.
 
 Als spätere Regressionen gelten: Rückkehr zum aktiven Kanal, Wechsel zwischen Teletext und HbbTV, VDR-Plugin-Konflikte, OSD-Auflösung, fehlendes Backend, Sessionwechsel, lange Media-Tools-Aufträge und Medienwiedergabe.
 
@@ -43,3 +43,10 @@ Native sechs Bereiche umfassende Einstellungen-Oberfläche ergänzt die Suite-Si
 ## Fortschritt – authentifizierte Suite-Core-Verwaltung (0.8.0)
 
 Die VDR-Suite-Einstellungsseite bietet nun eine echte Human-Browser-Session mit TV-Fernbedienung und erste Backend-/Media-Tools-/Konto-/Device-Mutationen über bestehende revisions- und CSRF-geschützte Core-Endpunkte. Headless HTTP-/Navigationstests und VDR-2.8-CI sind der Source-Nachweis; ein echter TV- und Servermutationstest sowie umfassende Rechte-/Pairing-Editoren fehlen. Keine neue Berechtigungsregel, Core-Datenbank oder Public-v1-Route wurde eingeführt.
+
+## Fortschritt – Suite-Skin und Aufnahme-Info (0.9.0, 24.11.2026)
+
+- `suite_skin.c` implementiert einen optional auswählbaren VDR-`cSkin` für Kanalinfo (OK bei Live-TV) und Replay-Fortschritt (OK während einer Aufnahme), jeweils mit lokaler TVScraper-Fanart, Metadaten und Fortschritt. Er ersetzt kein Ausgabeplugin und wird nicht stillschweigend zur aktiven VDR-Skin erklärt.
+- Suite-Home und Aufnahmebrowser öffnen per Info eine großflächige, native Detailseite im freigegebenen Webfrontend-Stil mit Poster, Fanart, Episodendaten, Genres, Laufzeit, Bewertung, Datum und Synopsis. OK/Rot startet dort die VDR-Wiedergabe.
+- Über `cReplayControl::GetInfo()` liefern **aus Suite-OSD gestartete Wiedergaben** bei Info diese native Detailansicht. Wiedergabesteuerung, Schnittfunktionen und Player bleiben VDR-eigen. Replay aus fremden Menüeinträgen nutzt weiterhin deren normale VDR-Infoansicht.
+- Die verbleibenden `cSkin`-Bereiche (vollständige native Menüs, Lautstärke, Audio und Meldungen) verwenden einstweilen eine vorhandene Skin; OSD.2 ist deshalb noch nicht vollständig. Kein TV-/Remote-Test erfolgt. Quellnachweis: [CI VDR 2.8.3/2.8.4 für Commit 073950e](https://github.com/hotzenplotz5/vdr-plugin-suiteosd/actions/runs/45481258523).
