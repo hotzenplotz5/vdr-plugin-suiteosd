@@ -42,7 +42,7 @@ Bei **OK auf der eingeklappten/ausgeklappten Seitenleiste** startet die ausgewä
 | Home | Suite-Home, Fokus wieder im Hauptinhalt |
 | Live-TV | Suite-OSD schließen, zum laufenden Bild |
 | EPG | Native Suite-EPG-Zeitleiste auf Basis lokaler VDR-Schedules, im bestehenden Webfrontend-Design; VDR-Programmführer bleibt separat verfügbar |
-| Aufnahmen | VDR-Direktmenübefehl `kRecordings` |
+| Aufnahmen | Native Suite-Kachelansicht mit VDR-Ordnern, TVScraper-Genre, Detailansicht, Direktwiedergabe und optionaler Live-Vorschau via `ScaleVideo()` |
 | Timer | VDR-Direktmenübefehl `kTimers` |
 | Einstellungen | VDR-Direktmenübefehl `kSetup` |
 | HbbTV | Vorhandenes `web`-Plugin, `cRemote::CallPlugin()` |
@@ -87,3 +87,18 @@ Die Nutzerentscheidung ist **kein neuer EPG-Entwurf**: Die bestehende EPG-Zeitle
 - **Kanalgruppen**: VDR-Gruppen aus `cChannel::GroupSep()`; Taste `0` wechselt den Filter. Wie im Webfrontend werden alle Sender und die vorhandenen Gruppennamen angeboten. Das lokale `Timeline`-Modell hält die unfiltrierten Daten als Snapshots und kopiert die sichtbare Gruppe. Headless-Regressionstest für Gruppenfolge und Fokus.
 - **Timer**: In der EPG-Detailansicht `Rot`/`Record` und anschließendes `OK` zur Bestätigung. Vor dem Schreiben wird das gewählte Ereignis über Sendernummer, Event-ID und Startzeit gegen die **aktuellen** VDR-Schedules geprüft. `cTimers` erstellt den Timer direkt mit den nativen VDR-Methoden, VDR-Timer-Defaults, doppelten Timerprüfungen und `HandleRemoteTimerModifications` bei Peer-Konfiguration. Fehler und Erfolgs-Readback bleiben in der Detailansicht sichtbar. Keine eigene Timertabelle oder HTTP-Schnittstelle.
 - **Noch offen**: Echte Timer-Readback-/Remote-Peer- und Bild-/Fernbedienungsabnahme am yaVDR mit Ausgabeplugin sowie reine SVG-Dateien. Erfolgreiche CI-Builds allein belegen keine reale Bildausgabe oder Timeranlage.
+
+## Aufnahmen 2.0 – Fernbedienung und native Preview (24.11.2026)
+
+**Verbindliche Darstellung:** Eigenständige Aufnahmen-Kachelansicht im **VDR-Suite-Webfrontend-Design**. Links die zusammenklappbare Suite-Sidebar; im Hauptbereich Ordner/Genre/Alle als umschaltbare Reiter sowie Cover-Kacheln; oben rechts optional ein kleines Live-TV-Bild. Die Ordneransicht ist der Startmodus. Keine neue Designvariante.
+
+**Daten und Navigation:**
+- Aufnahmen werden ausschließlich aus VDR-`cRecordings` gelesen; Unterordner aus dem VDR-Aufnahmenamen, Titel aus `cRecording::BaseName()`. Kein alternativer Index und kein Dateisystem-Scan.
+- TVScraper über den lokalen VDR-`GetScraperVideo`-Service: Film-/Serienmetadaten und Genrezuordnung. Mehrere Genres je Aufnahme zulässig; eine Aufnahme wird dabei nicht verschoben oder dupliziert. Ohne TVScraper fällt der Reiter „Genre“ auf „Ohne Genre“ zurück. Genreanfragen werden beim erstmaligen Genreaufruf gemacht und danach pro Dateinamen zwischengespeichert.
+- `recording_browser.h` kapselt Ordner-/Genre-/Alle-Filter, Auswahl, Paging und Datum-/Namenssortierung, ohne VDR-Pointer. Ein reiner C++-Test deckt mehrstufige Ordner, mehrere Genres, die Sortierung und das 4×3-Kachelgitter ab.
+
+**Gewohnte Bedienung:** `Rot` von Home öffnet Aufnahmen; `Grün` EPG; `Blau` Timer. In der Aufnahmenansicht: Pfeile/OK, `Rot` VDR-Wiedergabe, `Grün`/`0` Sortierung, `Blau`/`Info` Metadaten und `Gelb` Löschbestätigung. `Zurück` geht zum übergeordneten Ordner/Genre-Wurzel oder ins Home. Falls eine Aufnahme gerade läuft bzw. bearbeitet wird, wird der aufwendige Löschfall durch die native VDR-Aufnahmenverwaltung bearbeitet.
+
+**Live-TV:** `cDevice::CanScaleVideo()` liefert die tatsächliche darstellbare Zielgröße. Bei Unterstützung verkleinert `ScaleVideo()` **das vorhandene** Fernsehbild; darüber liegt ein transparentes Loch im TrueColor-OSD. `ScaleVideo(cRect::Null)` setzt das normale Vollbild wieder ein beim Schließen, beim Wechsel in andere Ansichten und vor Wiedergabe, auch bei Destruktion. Bei fehlender Funktion oder Replay erscheint ein klarer Text-Fallback. Kein Eingriff in das Ausgabeplugin, keine zweite Videoquelle.
+
+**Abnahme noch offen:** VDR-Laufzeitprobe mit echtem TVScraper, Genreauflösung auf größeren Bibliotheken, Lösch-/Replay-Verhalten sowie Fähigkeit des installierten Ausgabeplugins zur Videoverkleinerung. Ein CI-Build gegen VDR-Header allein belegt keine reale Bildausgabe.
