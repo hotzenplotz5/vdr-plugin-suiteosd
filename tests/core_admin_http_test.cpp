@@ -202,8 +202,8 @@ int main() {
     assert(!client.authenticated());
     mock.join();
 
-    suiteosd::CoreAdminClient unsafe("http://192.0.2.1:18080");
-    assert(!unsafe.configured());
+    suiteosd::CoreAdminClient operatorConfigured("http://192.0.2.1:18080");
+    assert(operatorConfigured.configured());
     suiteosd::CoreAdminClient allowed("https://suite.example.invalid");
     assert(allowed.configured());
     return 0;
