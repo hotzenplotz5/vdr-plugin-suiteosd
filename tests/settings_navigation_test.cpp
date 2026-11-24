@@ -39,10 +39,15 @@ int main() {
     nav.Move(0, -1);
     assert(nav.selected == SettingsNavigation::Suite);
     assert(nav.Select() == SettingsAction::None);
-    assert(nav.ActionCount() == 0);
-    assert(nav.Select() == SettingsAction::None);
+    assert(nav.ActionCount() == 1);
+    assert(nav.Select() == SettingsAction::OpenCoreBackend);
     assert(nav.Back());
     assert(!nav.Back());
+    nav.Open();
+    nav.Move(0, 2);
+    assert(nav.selected == SettingsNavigation::Accounts);
+    assert(nav.Select() == SettingsAction::None);
+    assert(nav.Select() == SettingsAction::OpenCoreAccounts);
     nav.Open();
     assert(nav.selected == SettingsNavigation::Vdr);
     assert(nav.Select() == SettingsAction::None);
