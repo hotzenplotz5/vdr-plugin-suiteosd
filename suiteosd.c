@@ -1813,6 +1813,230 @@ private:
         drawSidebar();
     }
 
+    void executeCoreConfirmation()
+    {
+        const auto confirm = coreNav.confirmation;
+        coreNav.confirmation = suiteosd::CoreConfirmation::None;
+        const suiteosd::CoreItem *current = coreSelectedItem();
+        suiteosd::CoreStatus result;
+
+        if (confirm == suiteosd::CoreConfirmation::ToggleAddon) {
+            if (!coreAddonLoaded) {
+                coreNotice = "Addon-Revision nicht verfügbar";
+                return;
+            }
+            suiteosd::CoreAddon updated;
+            result = coreAdmin.setAddon(coreAddon, !coreAddon.enabled, updated);
+            if (result.ok) {
+                coreAddon = updated;
+                coreNotice = updated.enabled ? "Media Tools aktiviert" :
+                                            "Media Tools deaktiviert";
+            } else coreReport(result);
+        } else if (confirm == suiteosd::CoreConfirmation::ToggleAccount) {
+            if (!current) return;
+            const suiteosd::CoreItem target = *current;
+            result = coreAdmin.changeAccount(target, "", true, !target.active);
+            if (result.ok) {
+                coreNav.page = suiteosd::CorePage::Accounts;
+                refreshCoreAdmin();
+                coreNav.page = suiteosd::CorePage::AccountDetails;
+                coreNotice = target.active ? "Konto deaktiviert" : "Konto aktiviert";
+            } else coreReport(result);
+        } else if (confirm == suiteosd::CoreConfirmation::RevokeDevice) {
+            if (!current) return;
+            const suiteosd::CoreItem target = *current;
+            result = coreAdmin.revokeDevice(target);
+            if (result.ok) {
+                coreNav.page = suiteosd::CorePage::Devices;
+                refreshCoreAdmin();
+                coreNav.page = suiteosd::CorePage::DeviceDetails;
+                coreNotice = "Gerätezugang widerrufen";
+            } else coreReport(result);
+        }
+    }
+
+    void submitCoreKeyboard()
+    {
+        if (coreNav.page == suiteosd::CorePage::Login) {
+            const suiteosd::CoreStatus result =
+                coreAdmin.login(coreNav.username, coreNav.password);
+            coreNav.clearPassword(); // credentials never persist on the TV
+            if (!result.ok) {
+                coreReport(result);
+                return;
+            }
+            coreNav.page = coreNav.afterLogin;
+            coreNav.selected = coreNav.action = 0;
+            refreshCoreAdmin();
+            if (coreAdmin.authenticated() && coreNav.page != suiteosd::CorePage::Login)
+                coreNotice = "Human-Admin-Sitzung authentifiziert";
+        } else if (coreNav.page == suiteosd::CorePage::Rename) {
+            const auto *item = coreSelectedItem();
+            if (!item) {
+                coreNotice = "Benutzerkonto nicht ausgewählt";
+                return;
+            }
+            const auto changed = coreAdmin.changeAccount(
+                *item, coreNav.editingName, false, false);
+            if (changed.ok) {
+                coreNav.page = suiteosd::CorePage::Accounts;
+                refreshCoreAdmin();
+                coreNav.page = suiteosd::CorePage::AccountDetails;
+                coreNav.editingName.clear();
+                coreNotice = "Anzeigename gespeichert";
+            } else coreReport(changed);
+        }
+    }
+
+    eOSState coreAdminKey(eKeys base)
+    {
+        using suiteosd::CorePage;
+        using suiteosd::CoreConfirmation;
+        if (coreNav.confirmation != CoreConfirmation::None) {
+            if (base == kOk)
+                executeCoreConfirmation();
+            else if (base == kBack || base == kRed)
+                coreNav.confirmation = CoreConfirmation::None;
+            else
+                return osContinue;
+            draw();
+            return osContinue;
+        }
+
+        if (coreNav.page == CorePage::Login || coreNav.page == CorePage::Rename) {
+            if (base == kBack) {
+                coreNav.back();
+            } else if (base == kGreen) {
+                if (coreNav.page == CorePage::Login)
+                    coreNav.passwordField = !coreNav.passwordField;
+                else
+                    coreNav.editingName.clear();
+            } else if (base == kBlue)
+                coreNav.uppercase = !coreNav.uppercase;
+            else if (base == kYellow)
+                coreNav.backspace();
+            else if (base == kRed)
+                submitCoreKeyboard();
+            else if (base == kOk)
+                coreNav.typeKey();
+            else if (base == kUp)
+                coreNav.moveKey(0, -1);
+            else if (base == kDown)
+                coreNav.moveKey(0, 1);
+            else if (base == kLeft)
+                coreNav.moveKey(-1, 0);
+            else if (base == kRight)
+                coreNav.moveKey(1, 0);
+            else {
+                char digit = '\0';
+                switch (base) {
+                case k0: digit = '0'; break;
+                case k1: digit = '1'; break;
+                case k2: digit = '2'; break;
+                case k3: digit = '3'; break;
+                case k4: digit = '4'; break;
+                case k5: digit = '5'; break;
+                case k6: digit = '6'; break;
+                case k7: digit = '7'; break;
+                case k8: digit = '8'; break;
+                case k9: digit = '9'; break;
+                default: return osContinue;
+                }
+                coreNav.digit(digit);
+            }
+            draw();
+            return osContinue;
+        }
+
+        if (base == kBack) {
+            coreNav.back();
+        } else if (coreNav.page == CorePage::Backends ||
+                   coreNav.page == CorePage::Accounts ||
+                   coreNav.page == CorePage::Devices) {
+            const int total = int(coreList().size());
+            if (base == kUp)
+                coreNav.selected = std::max(0, coreNav.selected - 1);
+            else if (base == kDown)
+                coreNav.selected = std::min(std::max(0,total - 1),coreNav.selected + 1);
+            else if (base == kLeft)
+                coreNav.selected = std::max(0, coreNav.selected - 8);
+            else if (base == kRight)
+                coreNav.selected = std::min(std::max(0,total - 1),coreNav.selected + 8);
+            else if (base == kBlue) {
+                if (coreNav.page == CorePage::Backends ||
+                    coreNav.page == CorePage::Devices)
+                    coreNav.page = CorePage::Accounts;
+                else
+                    coreNav.page = CorePage::Devices;
+                coreNav.selected = 0;
+                refreshCoreAdmin();
+            } else if (base == kYellow) {
+                coreAdmin.logout();
+                coreNav.clearPassword();
+                coreNav.page = CorePage::None;
+                coreNotice = "Abgemeldet";
+            } else if (base == kOk) {
+                if (coreSelectedItem()) {
+                    if (coreNav.page == CorePage::Backends) {
+                        coreNav.page = CorePage::BackendSettings;
+                        coreNav.action = 0;
+                        refreshCoreAdmin();
+                    } else {
+                        coreNav.page = coreNav.page == CorePage::Accounts ?
+                                       CorePage::AccountDetails : CorePage::DeviceDetails;
+                    }
+                }
+            } else return osContinue;
+        } else if (coreNav.page == CorePage::BackendSettings) {
+            if (base == kUp)
+                coreNav.action = std::max(0, coreNav.action - 1);
+            else if (base == kDown)
+                coreNav.action = std::min(4, coreNav.action + 1);
+            else if (base == kLeft || base == kRight) {
+                if (coreEncodingLoaded && (coreNav.action == 1 || coreNav.action == 2)) {
+                    int &crf = coreNav.action == 1 ?
+                        coreEncodingEdit.importCrf : coreEncodingEdit.shrinkCrf;
+                    crf = std::clamp(crf + (base == kRight ? 1 : -1), 0, 51);
+                }
+            } else if (base == kOk) {
+                if (coreNav.action == 0 && coreAddonLoaded) {
+                    coreNav.confirmation = CoreConfirmation::ToggleAddon;
+                } else if (coreNav.action == 3 && coreEncodingLoaded) {
+                    suiteosd::CoreEncoding updated;
+                    const auto result =
+                        coreAdmin.setEncoding(coreEncoding, coreEncodingEdit, updated);
+                    if (result.ok) {
+                        coreEncoding = coreEncodingEdit = updated;
+                        coreNotice = "Encoding für neue Aufträge gespeichert";
+                    } else coreReport(result);
+                } else if (coreNav.action == 4)
+                    refreshCoreAdmin();
+            } else return osContinue;
+        } else if (coreNav.page == CorePage::AccountDetails) {
+            if (base == kRed) {
+                if (coreSelectedItem())
+                    coreNav.confirmation = CoreConfirmation::ToggleAccount;
+            } else if (base == kGreen) {
+                if (const auto *item = coreSelectedItem()) {
+                    coreNav.editingName = item->name;
+                    coreNav.page = CorePage::Rename;
+                    coreNav.keyIndex = 0;
+                    coreNav.uppercase = false;
+                }
+            } else return osContinue;
+        } else if (coreNav.page == CorePage::DeviceDetails) {
+            if (base == kRed) {
+                if (const auto *item = coreSelectedItem()) {
+                    if (!item->revoked)
+                        coreNav.confirmation = CoreConfirmation::RevokeDevice;
+                    else coreNotice = "Dieses Gerät ist bereits widerrufen";
+                }
+            } else return osContinue;
+        } else return osContinue;
+        draw();
+        return osContinue;
+    }
+
     void drawSettings()
     {
         fill(0, 0, 1599, 899, kBackground);
