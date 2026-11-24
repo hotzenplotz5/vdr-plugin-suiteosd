@@ -86,7 +86,15 @@ struct RecordingMeta {
     std::string release;
     std::string overview;
     std::vector<std::string> genres;
+    int season = 0;
+    int episodeNumber = 0;
+    int runtime = 0;
+    float rating = 0;
     suiteosd::Artwork artwork;
+};
+struct RecordingDetailImage {
+    suiteosd::Artwork fanart;
+    suiteosd::Artwork poster;
 };
 
 struct Snapshot {
@@ -272,6 +280,7 @@ private:
     std::map<std::string, suiteosd::Artwork> timelineArtwork;
     Snapshot data;
     std::map<std::string, RecordingMeta> recordingMeta;
+    std::map<std::string, RecordingDetailImage> recordingDetailImages;
     std::map<std::string, std::vector<std::string>> recordingGenres;
     suiteosd::RecordingBrowser recordingBrowser;
     bool recordingsActive = false;
@@ -903,6 +912,7 @@ private:
             cVideoDiskUsage::ForceCheck();
             cRecordings::TouchUpdate();
             recordingMeta.erase(fileName);
+            recordingDetailImages.erase(fileName);
             recordingGenres.erase(fileName);
             data = readVdrSnapshot();
             refreshBrowser();
@@ -926,10 +936,16 @@ private:
             return osContinue;
         }
         if (browserDetails) {
-            if (base == kBack || base == kInfo || base == kBlue || base == kOk) {
+            if (base == kOk || base == kPlay || base == kRed) {
+                const eOSState result = playBrowserRecording();
+                if (result != osContinue) return result;
+            } else if (base == kYellow) {
                 browserDetails = false;
-                draw();
-            }
+                browserDeleteConfirm = browserSelectedRecording() != nullptr;
+            } else if (base == kBack || base == kInfo || base == kBlue) {
+                browserDetails = false;
+            } else return osContinue;
+            draw();
             return osContinue;
         }
         if (nav.sideFocused) {
@@ -1099,18 +1115,22 @@ private:
                 return meta;
             cScraperVideo *video = request.m_scraperVideo.get();
             video->getOverview(&meta.title, &meta.episode, &meta.release,
-                               nullptr, nullptr, nullptr, nullptr);
+                               &meta.runtime, nullptr, nullptr, nullptr);
+            meta.season = video->getSeasonNumber();
+            meta.episodeNumber = video->getEpisodeNumber();
             video->getMovieOrTv(
                 nullptr, nullptr, nullptr, &meta.overview,
                 &meta.genres, nullptr, nullptr, nullptr, nullptr, nullptr,
-                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                &meta.rating, nullptr, nullptr, nullptr, nullptr,
                 nullptr, nullptr, nullptr, nullptr, nullptr);
             if (video->getVideoType() == tSeries) {
                 std::string episodeOverview;
+                int episodeRuntime = 0;
                 if (video->getEpisode(nullptr, &episodeOverview, nullptr,
-                                      nullptr, nullptr, nullptr, nullptr, nullptr) &&
-                    !episodeOverview.empty())
-                    meta.overview = std::move(episodeOverview);
+                                      nullptr, &episodeRuntime, nullptr, nullptr, nullptr)) {
+                    if (!episodeOverview.empty()) meta.overview = std::move(episodeOverview);
+                    if (episodeRuntime > 0) meta.runtime = episodeRuntime;
+                }
             }
             cTvMedia image = video->getImage(
                 cImageLevels(eImageLevel::episodeMovie,
@@ -1280,43 +1300,128 @@ private:
             print(159, y + 94, "Keine Aufnahmen vorhanden", fontBody, kMuted);
     }
 
-    void drawRecordingDetails()
+
+    const RecordingDetailImage &detailImageFor(const Recording &rec)
     {
-        if (!recordingDetails || nav.section != 3 ||
-            nav.card[3] < 0 || nav.card[3] >= int(data.recordings.size()))
-            return;
-        const Recording &item = data.recordings[nav.card[3]];
-        const RecordingMeta &meta = metaFor(item);
-        panel(268, 164, 1082, 540, true, kSurface);
-        const std::string title = meta.title.empty() ? item.title : meta.title;
-        print(299, 188, title, fontTitle, kText, 1008);
-        print(299, 253, "Aufnahme  ·  " + item.time, fontSmall, kFocus);
-        if (!meta.release.empty())
-            print(299, 292, "Erscheinungsdatum: " + meta.release, fontBody, kMuted, 984);
-        if (!meta.episode.empty())
-            print(299, 332, "Episode: " + meta.episode, fontBody, kMuted, 984);
-        std::string overview = meta.overview.empty() ? item.description : meta.overview;
-        if (overview.empty())
-            overview = "Keine Beschreibung vorhanden";
-        std::replace(overview.begin(), overview.end(), '\n', ' ');
-        std::istringstream words(overview);
-        std::string line, word;
-        int y = 388;
-        int lineCount = 0;
-        while (words >> word && lineCount < 8) {
-            std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(950)) {
-                print(299, y, line, fontBody, kText, 961);
-                y += 33;
-                ++lineCount;
-                line = word;
-            } else {
-                line = std::move(candidate);
+        auto found = recordingDetailImages.find(rec.fileName);
+        if (found != recordingDetailImages.end()) return found->second;
+        if (recordingDetailImages.size() >= 3) recordingDetailImages.clear();
+        std::string fanartPath, posterPath;
+        // The VDR-owned cRecording and TVScraper service result are used only
+        // under VDR's read lock. Decoding follows outside the lock.
+        cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
+        if (scraper && !rec.fileName.empty()) {
+            {
+                LOCK_RECORDINGS_READ;
+                const cRecording *recording = Recordings ?
+                    Recordings->GetByName(rec.fileName.c_str()) : nullptr;
+                if (recording) {
+                    cGetScraperVideo request(nullptr, recording);
+                    if (scraper->Service("GetScraperVideo", &request) && request.m_scraperVideo) {
+                        cScraperVideo *video = request.m_scraperVideo.get();
+                        fanartPath = video->getImage(
+                            cImageLevels(eImageLevel::episodeMovie,
+                                         eImageLevel::seasonMovie,
+                                         eImageLevel::tvShowCollection),
+                            cOrientations(eOrientation::landscape, eOrientation::banner),
+                            true).path;
+                        posterPath = video->getImage(
+                            cImageLevels(eImageLevel::episodeMovie,
+                                         eImageLevel::seasonMovie,
+                                         eImageLevel::tvShowCollection),
+                            cOrientations(eOrientation::portrait), true).path;
+                    }
+                }
             }
         }
-        if (!line.empty() && lineCount < 8)
-            print(299, y, line, fontBody, kText, 961);
-        print(299, 662, "Info oder Zurück: Schließen", fontSmall, kFocus);
+        RecordingDetailImage image;
+        if (!fanartPath.empty())
+            image.fanart = suiteosd::LoadArtwork(fanartPath, X(980), Y(390));
+        if (!posterPath.empty())
+            image.poster = suiteosd::LoadArtwork(posterPath, X(250), Y(372));
+        return recordingDetailImages.emplace(rec.fileName, std::move(image)).first->second;
+    }
+
+    void drawRecordingDetailPage(const Recording &rec)
+    {
+        const RecordingMeta &meta = metaFor(rec);
+        const RecordingDetailImage &image = detailImageFor(rec);
+        fill(0, 0, 1599, 899, kBackground);
+        // A native artwork hero rather than a second player or HTTP image.
+        if (image.fanart.valid() && osd) {
+            cImage art(cSize(image.fanart.width, image.fanart.height), image.fanart.argb.data());
+            osd->DrawImage(cPoint(X(1585) - image.fanart.width, Y(91)), art);
+        }
+        fill(0, 0, 1599, 78, kSurface);
+        print(35, 17, "VDR", fontTitle);
+        print(117, 17, "Suite", fontTitle, kFocus);
+        print(284, 24, "AUFNAHMEN  /  DETAILS", fontBody, kMuted);
+        print(1440, 23, formatTime(time(nullptr)), fontLarge);
+
+        panel(43, 114, 280, 386, false, kCardAlt);
+        if (image.poster.valid() && osd) {
+            cImage poster(cSize(image.poster.width, image.poster.height),
+                          image.poster.argb.data());
+            osd->DrawImage(cPoint(X(58) + (X(250) - image.poster.width) / 2,
+                                  Y(124) + (Y(372) - image.poster.height) / 2), poster);
+        } else if (meta.artwork.valid() && osd) {
+            cImage poster(cSize(meta.artwork.width, meta.artwork.height),
+                          meta.artwork.argb.data());
+            osd->DrawImage(cPoint(X(99), Y(236)), poster);
+        } else print(68, 296, "Kein Poster vorhanden", fontBody, kMuted, 241);
+
+        panel(342, 116, 1203, 370, false, 0xDC08192A);
+        const std::string title = meta.title.empty() ? rec.baseName : meta.title;
+        print(371, 142, title, fontTitle, kText, 1128);
+        if (!meta.episode.empty())
+            print(372, 210, meta.episode, fontLarge, kText, 1097);
+        std::string facts = "Aufnahme  ·  " + rec.time;
+        if (meta.season > 0) facts += "  ·  S" + std::to_string(meta.season);
+        if (meta.episodeNumber > 0) facts += " E" + std::to_string(meta.episodeNumber);
+        print(371, 272, facts, fontBody, kFocus, 1120);
+        std::string metadata;
+        for (const std::string &genre : meta.genres)
+            metadata += (metadata.empty() ? "" : "  ·  ") + genre;
+        if (!meta.release.empty())
+            metadata += (metadata.empty() ? "" : "  ·  ") + meta.release;
+        if (meta.runtime > 0)
+            metadata += "  ·  " + std::to_string(meta.runtime) + " Min";
+        if (meta.rating > 0) {
+            char rating[30];
+            std::snprintf(rating, sizeof(rating), "  ·  %.1f/10", meta.rating);
+            metadata += rating;
+        }
+        print(372, 325, metadata, fontBody, kText, 1080);
+
+        panel(342, 506, 1203, 277, false, kSurface);
+        print(372, 524, "INHALT", fontBody, kFocus);
+        std::string summary = meta.overview.empty() ? rec.description : meta.overview;
+        if (summary.empty()) summary = "Keine Beschreibung vorhanden.";
+        std::replace(summary.begin(), summary.end(), '\n', ' ');
+        std::istringstream words(summary);
+        std::string line, word;
+        int y = 569;
+        while (words >> word && y < 737) {
+            const std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(1120)) {
+                print(372, y, line, fontBody, kText, 1131);
+                y += 36;
+                line = word;
+            } else line = candidate;
+        }
+        if (!line.empty() && y < 767)
+            print(372, y, line, fontBody, kText, 1131);
+        fill(18, 813, 1580, 892, kSurface);
+        print(52, 838, "OK / Rot: Wiedergabe", fontBody, kFocus);
+        print(436, 838, "Info / Zurück: Schließen", fontBody);
+        print(1055, 838, "Gelb: Löschen (Aufnahmen)", fontBody, kMuted);
+    }
+
+    void drawRecordingDetails()
+    {
+        if (recordingDetails && nav.section == 3 && nav.card[3] >= 0 &&
+            nav.card[3] < int(data.recordings.size()))
+            drawRecordingDetailPage(data.recordings[nav.card[3]]);
     }
 
     const Recording *browserSelectedRecording() const
@@ -1329,39 +1434,7 @@ private:
     void drawBrowserDetails()
     {
         const Recording *rec = browserSelectedRecording();
-        if (!rec || !browserDetails) return;
-        const RecordingMeta &meta = metaFor(*rec);
-        panel(267, 157, 1086, 555, true, kSurface);
-        const std::string title = meta.title.empty() ? rec->baseName : meta.title;
-        print(299, 186, title, fontTitle, kText, 1000);
-        print(299, 255, "Aufnahme · " + rec->time, fontSmall, kFocus);
-        if (!meta.episode.empty())
-            print(299, 301, meta.episode, fontBody, kText, 1000);
-        if (!meta.release.empty())
-            print(299, 334, "Erscheinung: " + meta.release, fontSmall, kMuted);
-        if (!meta.genres.empty()) {
-            std::string genres;
-            for (const auto &genre : meta.genres)
-                genres += (genres.empty() ? "" : " · ") + genre;
-            print(299, 366, genres, fontSmall, kFocus, 950);
-        }
-        std::string overview = meta.overview.empty() ? rec->description : meta.overview;
-        if (overview.empty()) overview = "Keine Beschreibung vorhanden";
-        std::replace(overview.begin(), overview.end(), '\n', ' ');
-        std::istringstream words(overview);
-        std::string line, word;
-        int y = 417;
-        while (words >> word && y < 642) {
-            const std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(975)) {
-                print(299, y, line, fontBody, kText, 987);
-                line = word;
-                y += 31;
-            } else line = candidate;
-        }
-        if (!line.empty() && y <= 646)
-            print(299, y, line, fontBody, kText, 987);
-        print(299, 680, "Blau / Info / Zurück: Schließen", fontSmall, kFocus);
+        if (rec && browserDetails) drawRecordingDetailPage(*rec);
     }
 
     void drawBrowserDeleteConfirm()
@@ -2495,6 +2568,12 @@ public:
             return osContinue;
         }
         if (recordingDetails) {
+            if ((base == kOk || base == kPlay || base == kRed) &&
+                nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) &&
+                !data.recordings[nav.card[3]].fileName.empty()) {
+                cReplayControl::SetRecording(data.recordings[nav.card[3]].fileName.c_str());
+                return osReplay;
+            }
             if (base == kInfo || base == kBack) {
                 recordingDetails = false;
                 draw();
@@ -2530,6 +2609,7 @@ public:
         if (base == k0) {
             data = readVdrSnapshot();
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
+            recordingDetailImages.clear();
             nav.KeepVisible(7, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
             draw();
