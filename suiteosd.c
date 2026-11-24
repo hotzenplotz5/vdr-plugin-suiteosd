@@ -6,6 +6,8 @@
  */
 #include "navigation.h"
 #include "settings_navigation.h"
+#include "core_admin_client.h"
+#include "core_admin_navigation.h"
 #include "epg_timeline.h"
 #include "recording_browser.h"
 #include "logo_locator.h"
@@ -41,7 +43,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.7.0";
+static const char *VERSION = "0.8.0";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace {
@@ -58,6 +60,7 @@ constexpr tColor kLine = 0xFF20506D;
 // Suite-OSD configuration is stored under the plugin owner in VDR setup.conf.
 // This variable is loaded by SetupParse and written only through SetupStore.
 int gLivePreviewEnabled = 1;
+char gCoreUrl[256] = "http://127.0.0.1:18080";
 
 struct Programme {
     int channelNumber = 0;
@@ -248,6 +251,17 @@ private:
     suiteosd::SettingsNavigation settingsNav;
     bool settingsActive = false;
     std::string settingsNotice;
+    suiteosd::CoreAdminClient coreAdmin{gCoreUrl};
+    suiteosd::CoreAdminNavigation coreNav;
+    std::vector<suiteosd::CoreItem> coreBackends;
+    std::vector<suiteosd::CoreItem> coreAccounts;
+    std::vector<suiteosd::CoreItem> coreDevices;
+    suiteosd::CoreAddon coreAddon;
+    suiteosd::CoreEncoding coreEncoding;
+    suiteosd::CoreEncoding coreEncodingEdit;
+    bool coreAddonLoaded = false;
+    bool coreEncodingLoaded = false;
+    std::string coreNotice;
     bool timelineActive = false;
     bool timelineDetails = false;
     bool timelineTimerConfirm = false;
@@ -732,6 +746,7 @@ private:
 
     void openTimeline()
     {
+        if (settingsActive) coreAdmin.logout();
         settingsActive = false;
         if (recordingsActive) closeRecordingBrowser();
         timeline = ReadNativeTimeline();
@@ -1204,6 +1219,7 @@ private:
 
     void openRecordingBrowser()
     {
+        if (settingsActive) coreAdmin.logout();
         settingsActive = false;
         if (timelineActive) timelineActive = false;
         recordingBrowser.ChangeView(suiteosd::RecordingBrowser::View::Folders);
@@ -1692,6 +1708,9 @@ private:
         homeProgrammeDetails = false;
         settingsActive = true;
         settingsNotice.clear();
+        coreAdmin.setOrigin(gCoreUrl);
+        coreNav.page = suiteosd::CorePage::None;
+        coreNav.clearPassword();
         settingsNav.Open();
         nav.sideFocused = false;
     }
@@ -1923,6 +1942,8 @@ private:
 public:
     ~cSuiteHome() override
     {
+        coreAdmin.logout();
+        coreNav.clearPassword();
         restoreLivePreview();
         delete osd;
         delete fontTitle;
@@ -2054,18 +2075,23 @@ public:
 class cMenuSuiteOsdSetup final : public cMenuSetupPage {
 private:
     int livePreview;
+    char coreUrl[256] = {};
 protected:
     void Store(void) override
     {
         gLivePreviewEnabled = livePreview;
         SetupStore("LivePreview", gLivePreviewEnabled);
+        std::snprintf(gCoreUrl, sizeof(gCoreUrl), "%s", coreUrl);
+        SetupStore("CoreURL", gCoreUrl);
     }
 public:
     cMenuSuiteOsdSetup(void)
         : livePreview(gLivePreviewEnabled)
     {
+        std::snprintf(coreUrl, sizeof(coreUrl), "%s", gCoreUrl);
         SetSection("VDR Suite-OSD");
         Add(new cMenuEditBoolItem("Live-TV im Aufnahmenbrowser", &livePreview));
+        Add(new cMenuEditStrItem("VDR-Suite Core URL", coreUrl, sizeof(coreUrl)));
     }
 };
 
@@ -2080,6 +2106,10 @@ public:
     {
         if (std::strcmp(Name, "LivePreview") == 0) {
             gLivePreviewEnabled = std::atoi(Value) != 0 ? 1 : 0;
+            return true;
+        }
+        if (std::strcmp(Name, "CoreURL") == 0) {
+            std::snprintf(gCoreUrl, sizeof(gCoreUrl), "%s", Value);
             return true;
         }
         return false;
