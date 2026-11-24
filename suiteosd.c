@@ -5,6 +5,7 @@
  * This is not a cSkin replacement or an embedded HTML/video player.
  */
 #include "navigation.h"
+#include "settings_navigation.h"
 #include "epg_timeline.h"
 #include "recording_browser.h"
 #include "logo_locator.h"
@@ -16,6 +17,8 @@
 #include <vdr/epg.h>
 #include <vdr/font.h>
 #include <vdr/menu.h>
+#include <vdr/menuitems.h>
+#include <vdr/config.h>
 #include <vdr/osd.h>
 #include <vdr/osdbase.h>
 #include <vdr/plugin.h>
@@ -26,6 +29,7 @@
 #include <vdr/svdrp.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cstdio>
 #include <cmath>
@@ -37,7 +41,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.6.0";
+static const char *VERSION = "0.7.0";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace {
@@ -50,6 +54,10 @@ constexpr tColor kHighlight = 0xFF056BA0;
 constexpr tColor kText = 0xFFF5F9FF;
 constexpr tColor kMuted = 0xFF9DB2C9;
 constexpr tColor kLine = 0xFF20506D;
+
+// Suite-OSD configuration is stored under the plugin owner in VDR setup.conf.
+// This variable is loaded by SetupParse and written only through SetupStore.
+int gLivePreviewEnabled = 1;
 
 struct Programme {
     int channelNumber = 0;
@@ -237,6 +245,9 @@ private:
     cFont *fontSmall = nullptr;
     suiteosd::Navigation nav;
     suiteosd::Timeline timeline;
+    suiteosd::SettingsNavigation settingsNav;
+    bool settingsActive = false;
+    std::string settingsNotice;
     bool timelineActive = false;
     bool timelineDetails = false;
     bool timelineTimerConfirm = false;
@@ -721,6 +732,7 @@ private:
 
     void openTimeline()
     {
+        settingsActive = false;
         if (recordingsActive) closeRecordingBrowser();
         timeline = ReadNativeTimeline();
         timelineActive = true;
@@ -1169,7 +1181,7 @@ private:
 
     void startLivePreview()
     {
-        if (scaledDevice) return;
+        if (!gLivePreviewEnabled || scaledDevice) return;
         cDevice *device = cDevice::PrimaryDevice();
         if (!device || device->Replaying())
             return;
@@ -1192,6 +1204,7 @@ private:
 
     void openRecordingBrowser()
     {
+        settingsActive = false;
         if (timelineActive) timelineActive = false;
         recordingBrowser.ChangeView(suiteosd::RecordingBrowser::View::Folders);
         recordingBrowser.tabsFocused = true;
@@ -1520,7 +1533,8 @@ private:
             const bool selected = nav.sideFocused && nav.sideIndex == i;
             if (selected)
                 panel(31, y, right - 51, 48, true, kHighlight);
-            else if (!nav.sideFocused && i == (timelineActive ? 2 : recordingsActive ? 3 : 0))
+            else if (!nav.sideFocused && i ==
+                     (settingsActive ? 10 : timelineActive ? 2 : recordingsActive ? 3 : 0))
                 panel(31, y, 52, 48, false, kHighlight);
             print(41, y + 13, kSymbols[i], fontSmall, kText, 56);
             if (nav.sideFocused)
