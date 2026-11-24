@@ -110,3 +110,15 @@ Anstelle des früheren direkten Sprungs zu `kSetup` öffnet die Suite-Sidebar je
 ## Core-Verwaltung 0.8.0
 
 Ergänzend zum vereinheitlichten VDR- und Suite-Menü bietet die native TV-Oberfläche einen vorhandenen Human-Account-Login mit verdecktem Passwortfeld. Backend-/Media-Tools-, Konto- und Device-Aktionen verwenden die bestehenden Core-HTTP-Owner und dessen CSRF-/ETag-/Grant-Verträge; VDR-eigene EPG-, Timer- und Aufnahmedaten bleiben weiterhin lokal. Diese Erweiterung ändert die freigegebene Gestaltung nicht. Noch nicht umgesetzt sind vollständige Konto-/Device-Grants, Kopplungsfreigaben und beliebige weitere Backend-/Addon-Einstellungen. Details: [Core-Verwaltung](settings-core-administration.md).
+
+## Suite-Skin 0.9.0: OK / Info bei Live-TV und Wiedergabe (24.11.2026)
+
+Die mit dem Nutzer abgestimmten Mockups führen zu drei getrennten nativen Bedienflächen:
+
+1. **OK im Live-TV**: Die VDR-`cSkinDisplayChannel`-Einblendung zeigt den Sender, die aktuelle und folgende Sendung samt Uhrzeiten, Programmfortschritt, Metadaten und lokaler TVScraper-Fanart. Das TV-Bild bleibt Eigentum des Ausgabeplugins.
+2. **OK bei laufender Aufnahme**: `cSkinDisplayReplay` zeichnet eine untere VDR-Suite-Wiedergabeleiste mit Titel, Position/Gesamtdauer, Wiedergabemodus, Metadaten und Fanart. Erneutes OK wird wie gewohnt vom VDR-Replay-Control verarbeitet.
+3. **Info bei einer Suite-Aufnahme**: Im Suite-Aufnahmenbrowser oder Home öffnet die Auswahl eine vollflächige native Detailansicht mit Fanart, Poster und TVScraper-Metadaten. Bei Wiedergaben, die aus diesen Suite-Menüs gestartet wurden, verwendet die erweiterte VDR-`cReplayControl`-Klasse deren `GetInfo()`-Einstieg, um die entsprechende Infoansicht während des Abspielens zu öffnen.
+
+Alle Bilddateien werden nur aus dem lokalen TVScraper-Cache gelesen. Pfade und Metadaten werden aus dem VDR-Service kopiert, solange die VDR-Quellzeiger gültig sind; JPEG-/PNG-Dekodierung geschieht über den vorhandenen Artwork-Decoder. Fehlende Fanart verhindert weder Senderinformation noch Wiedergabe. **Kein neuer Streamplayer, HTTP-EPG-Client oder API-v1-Zwang.**
+
+**Offene Abnahme:** Die neue Skin muss über VDRs OSD-Einstellungen ausgewählt werden; sie wird nicht ungefragt als Standard gesetzt. Native VDR-Menüs, Lautstärke, Audio/Spuren und Meldungen fallen derzeit auf eine vorhandene VDR-Skin zurück. TVScraper-ABI, Fanart-Darstellung, VDR-Rückkehr, Tastennavigation und Ausgabeplugin werden erst auf realem yaVDR abgenommen; ein grüner CI-Build ist hierfür kein Ersatz.
