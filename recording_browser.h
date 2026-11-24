@@ -5,6 +5,7 @@
 #include <ctime>
 #include <map>
 #include <utility>
+#include <unordered_map>
 #include <set>
 #include <string>
 #include <vector>
@@ -127,10 +128,15 @@ struct RecordingBrowser {
                 entries.push_back(std::move(entry));
             }
         }
-        auto startFor = [this](const BrowserEntry &entry) -> time_t {
-            for (const BrowserRecording &r : source)
-                if (r.fileName == entry.fileName) return r.start;
-            return 0;
+        // One index for the sort, instead of scanning the entire library in
+        // every comparator invocation (important with thousands of recordings).
+        std::unordered_map<std::string, time_t> startByFile;
+        startByFile.reserve(source.size());
+        for (const BrowserRecording &r : source)
+            startByFile.emplace(r.fileName, r.start);
+        auto startFor = [&startByFile](const BrowserEntry &entry) -> time_t {
+            const auto it = startByFile.find(entry.fileName);
+            return it == startByFile.end() ? 0 : it->second;
         };
         std::stable_sort(entries.begin(), entries.end(), [&](const BrowserEntry &a, const BrowserEntry &b) {
             if (a.kind != b.kind)
