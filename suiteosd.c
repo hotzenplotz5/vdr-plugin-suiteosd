@@ -1695,6 +1695,12 @@ private:
                 print(207, 200, "Anzeigename: " + coreNav.editingName,
                       fontBody, kText, 1270);
             }
+            if (login && std::string(gCoreUrl).compare(0, 7, "http://") == 0 &&
+                std::string(gCoreUrl).compare(0, 16, "http://127.0.0.1") != 0 &&
+                std::string(gCoreUrl).compare(0, 16, "http://localhost") != 0 &&
+                std::string(gCoreUrl).compare(0, 12, "http://[::1]") != 0)
+                print(194, 260, "Hinweis: Core-HTTP ohne TLS, HTTPS empfohlen",
+                      fontSmall, 0xFFFFB877, 1180);
             print(192, 281, coreNav.uppercase ? "GROSSBUCHSTABEN" :
                   "Kleinbuchstaben", fontSmall, kFocus);
             const std::string &chars = suiteosd::CoreAdminNavigation::keys();
@@ -1839,7 +1845,11 @@ private:
             if (result.ok) {
                 coreNav.page = suiteosd::CorePage::Accounts;
                 refreshCoreAdmin();
-                coreNav.page = suiteosd::CorePage::AccountDetails;
+                // Self-deactivation can revoke the Human Browser Session.
+                // Never replace a fresh login prompt with stale account detail.
+                if (coreAdmin.authenticated() &&
+                    coreNav.page == suiteosd::CorePage::Accounts)
+                    coreNav.page = suiteosd::CorePage::AccountDetails;
                 coreNotice = target.active ? "Konto deaktiviert" : "Konto aktiviert";
             } else coreReport(result);
         } else if (confirm == suiteosd::CoreConfirmation::RevokeDevice) {
