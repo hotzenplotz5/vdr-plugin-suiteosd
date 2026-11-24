@@ -69,14 +69,13 @@ bool safeOrigin(const std::string &origin) {
         origin.find('\r') != std::string::npos ||
         origin.find('\n') != std::string::npos)
         return false;
-    const bool tls = origin.compare(0, 8, "https://") == 0;
-    const bool local = origin.compare(0, 16, "http://127.0.0.1") == 0 &&
-                       (origin.size() == 16 || origin[16] == ':') ||
-                       origin.compare(0, 16, "http://localhost") == 0 &&
-                       (origin.size() == 16 || origin[16] == ':') ||
-                       origin.compare(0, 12, "http://[::1]") == 0 &&
-                       (origin.size() == 12 || origin[12] == ':');
-    return tls || local; // no cleartext Human admin passwords over the LAN
+    const bool tls = origin.compare(0, 8, "https://") == 0 &&
+                     origin.size() > 8;
+    const bool http = origin.compare(0, 7, "http://") == 0 &&
+                      origin.size() > 7;
+    // Use the operator-configured Core origin; do not add an independent
+    // activation gate. The UI warns about unencrypted remote HTTP.
+    return tls || http;
 }
 std::string headerTrim(std::string s) {
     const auto begin = s.find_first_not_of(" \t\r\n");
@@ -227,7 +226,7 @@ void CoreAdminClient::setOrigin(const std::string &value) {
     origin_ = safeOrigin(value) ? value : "";
     if (origin_.empty()) {
         last_.ok = false;
-        last_.message = "Core-URL: HTTPS oder lokaler Loopback nötig";
+        last_.message = "Core-URL ungültig (HTTP/HTTPS erwartet)";
     }
 }
 
