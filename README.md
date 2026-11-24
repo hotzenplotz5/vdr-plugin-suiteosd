@@ -13,7 +13,7 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.5.0, noch nicht auf TV abgenommen)
+## Aktueller Implementierungsstand (0.6.0, noch nicht auf TV abgenommen)
 
 - Native `cOsdObject`-Home-Ansicht mit fester Kopfzeile, schmaler Icon-Leiste und eingeblendeten **allen** Labels beim Navigieren auf die Sidebar.
 - Pfeiltasten, OK und Zurück sowie vertikale Home-Sektionen ohne sichtbaren Scrollbalken und horizontale Sender-/Aufnahmekacheln.
@@ -28,11 +28,14 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - Direkter VDR-Senderwechsel bei Auswahl einer Jetzt-Sendung und VDR-eigene Wiedergabe für ausgewählte Aufnahmen; kein zweiter Video-Player.
 - Menüübergabe an **bereits installierte** VDR-Plugins `web` (HbbTV), `osdteletext` und `epgsearch` (Suchtimer/Suche, optional `epgsearchonly`) per `cRemote::CallPlugin`. Verfügbarkeit und Fokus-/Rückkehrverhalten sind auf dem echten VDR noch zu testen.
 - **Aufnahmen mit TVScraper-Daten:** Die sieben gerade sichtbaren Aufnahmekacheln lesen lokal über den VDR-Service `GetScraperVideo` Filmtitel, Episodenname, Erscheinungsdatum, Beschreibung und Bildpfad. PNG-/JPEG-Artwork wird als kleines natives OSD-Bild eingeblendet; `Info` zeigt die Beschreibung und `Zurück` schließt die Detailansicht. Ohne installierten TVScraper oder bei nicht gefundenem Artwork bleiben Titel, Datum, VDR-Beschreibung und Wiedergabe verfügbar. Kein API-v1-Aufruf.
-- **Artwork-Speicher:** Nur sichtbare Aufnahmen werden angefragt, das Thumbnail-Cache ist auf 48 Einträge begrenzt; die blaue Taste verwirft den Cache und lädt die Daten neu.
-- Derzeit **keine** eingebettete Live-Vorschau, keine gesonderte Skin-Implementierung und keine Public-API-v1-Anbindung. Das TV-Vorschaufeld ist weiterhin ein ausdrücklich beschrifteter Platzhalter.
+- **Artwork-Speicher:** Nur sichtbare Aufnahmen werden angefragt, der Thumbnail-Cache ist auf 48 Einträge begrenzt. Bei Bedarf kann das Home mit Taste `0` neu eingelesen werden; in der Aufnahmenansicht zeigt `Blau` Metadaten.
+- **Aufnahmen 2.0:** Ein eigener TV-Kachelbrowser mit drei umschaltbaren Reitern **Ordner / Genre / Alle**. Die Ordner folgen direkt dem VDR-Aufnahmennamen einschließlich Unterordnern (`cRecording::BaseName()`); Genre-Gruppen beziehen mehrere Schlagwörter pro Aufnahme aus TVScraper, ohne etwas zu verschieben. Die Genre-Liste wird erst nach Aufrufen des Reiters befüllt, und fehlende Metadaten erscheinen unter „Ohne Genre“. Grid-Scrollen und Sortieren nach Datum/Name funktionieren ohne sichtbaren Scrollbalken.
+- **VDR-Fernbedienung:** Im Home öffnet `Rot` den Aufnahmenbrowser, `Grün` den Suite-EPG und `Blau` die native Timerübersicht. In Aufnahmen: Pfeile/OK für Tabs, Ordner und Wiedergabe; `Rot` startet die VDR-Wiedergabe, `Grün`/`0` wechseln Name/Datum, `Blau`/`Info` öffnen die Metadaten, `Gelb` fragt vor dem Löschen nach. `Zurück` springt im Ordnerbaum eine Ebene höher, vom Wurzelverzeichnis zurück zum Home. Bei laufenden oder gerade bearbeiteten Aufnahmen wird die komplexere Löschlogik an das vorhandene VDR-Aufnahmenmenü abgegeben.
+- **Optionale Live-Vorschau in Aufnahmen:** Das laufende Bild wird über die *native* Ausgabeplugin-Schnittstelle `cDevice::CanScaleVideo()` und `ScaleVideo()` auf die rechte Bildschirmseite verkleinert. Das TrueColor-OSD zeichnet dafür einen transparenten Ausschnitt. Beim Verlassen des Browsers oder Start der Wiedergabe wird das Bild mit `ScaleVideo(cRect::Null)` wiederhergestellt. Unterstützt ein Ausgabeplugin diese Funktion nicht, bleibt die Kachelansicht ohne Vorschau nutzbar. **Das Verhalten mit `vaapivideo` ist noch nicht auf dem realen yaVDR getestet.** Kein zusätzlicher TV-Stream oder Video-Decoder.
+- Derzeit **keine** eingebettete Live-Vorschau im Home, keine gesonderte Skin-Implementierung und keine Public-API-v1-Anbindung. Das TV-Vorschaufeld im Home ist weiterhin ein ausdrücklich beschrifteter Platzhalter.
 - Ein echter Ausgabe-/OSD-Provider und passende VDR-ABI sind für eine Anzeige nötig; der Code ist **ohne vorhandenes Ausgabeplugin entwickel- und CI-testbar**, aber noch nicht visuell abgenommen.
 
-Die GitHub-Actions-Matrix kompiliert gegen den unveränderten Upstream-VDR-Quellstand der Tags **2.8.3** und **2.8.4** sowie separate Headless-Tests für Home-/EPG-Navigation, Kanalgruppen, lokale Logoauflösung und PNG-/JPEG-Bilddekodierung. Ein erfolgreicher Build bedeutet keine Funktionsabnahme auf dem realen yaVDR.
+Die GitHub-Actions-Matrix kompiliert gegen den unveränderten Upstream-VDR-Quellstand der Tags **2.8.3** und **2.8.4** sowie separate Headless-Tests für Home-/EPG-/Aufnahmen-Navigation (inklusive Ordner/Genre/Alle), Kanalgruppen, lokale Logoauflösung und PNG-/JPEG-Bilddekodierung. Ein erfolgreicher Build bedeutet keine Funktionsabnahme auf dem realen yaVDR.
 
 ## Zusätzliche Build-Abhängigkeiten ab 0.3.0
 
