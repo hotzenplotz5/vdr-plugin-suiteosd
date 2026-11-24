@@ -106,3 +106,7 @@ Die Nutzerentscheidung ist **kein neuer EPG-Entwurf**: Die bestehende EPG-Zeitle
 ## Gemeinsame Einstellungen (0.7.0, 24.11.2026)
 
 Anstelle des früheren direkten Sprungs zu `kSetup` öffnet die Suite-Sidebar jetzt ein Dashboard in derselben dunklen Designsprache. Die sechs Kategorien sind **VDR**, **VDR-Suite**, **Plugins**, **TV-Oberfläche**, **Benutzer & Geräte** und **System**. VDR und Plugins bleiben in ihren Originalmenüs; Suite-Core-/Agent-Daten behalten ihre vorhandene Autorität. Die lokale Mini-Live-TV-Vorschau wird als erste echte Suite-OSD-Option mit `SetupStore` im VDR-Plugin-Namespace gespeichert. Die Bereiche Suite-Core und Benutzer/Geräte sind vorerst bewusst als Informationen statt falscher editierbarer Felder dargestellt. Die nächste Integrationsstufe muss zunächst reale lokale Core-/Agent-Verträge nachweisen. Details und Abnahme: [Settings-Vertrag](settings-integration.md).
+
+## Core-Verwaltung 0.8.0
+
+Ergänzend zum vereinheitlichten VDR- und Suite-Menü bietet die native TV-Oberfläche einen vorhandenen Human-Account-Login mit verdecktem Passwortfeld. Backend-/Media-Tools-, Konto- und Device-Aktionen verwenden die bestehenden Core-HTTP-Owner und dessen CSRF-/ETag-/Grant-Verträge; VDR-eigene EPG-, Timer- und Aufnahmedaten bleiben weiterhin lokal. Diese Erweiterung ändert die freigegebene Gestaltung nicht. Noch nicht umgesetzt sind vollständige Konto-/Device-Grants, Kopplungsfreigaben und beliebige weitere Backend-/Addon-Einstellungen. Details: [Core-Verwaltung](settings-core-administration.md).
