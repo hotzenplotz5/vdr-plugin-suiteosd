@@ -39,3 +39,7 @@ Der Kachelbrowser (Ordner/Genre/Alle), die Tastenbelegung, TVScraper-Genres, dir
 ## Stand – gemeinsame Einstellungen (0.7.0)
 
 Native sechs Bereiche umfassende Einstellungen-Oberfläche ergänzt die Suite-Sidebar; VDR/Plugins verwenden die vorhandenen nativen Setup-Menüs, und das kleine Live-TV-Fenster besitzt eine gemeinsame persistent gespeicherte VDR-Plugin-Option. Suite-Core-/Agent-/Benutzer-Einstellungen bleiben bis zu einem verifizierten lokalen Besitzervertrag im Webfrontend editierbar. Eigene TV-Editoren dafür sind **noch nicht umgesetzt**. Automatische Build-/Navigationsprüfungen ersetzen nicht die spätere echte TV-Abnahme.
+
+## Fortschritt – authentifizierte Suite-Core-Verwaltung (0.8.0)
+
+Die VDR-Suite-Einstellungsseite bietet nun eine echte Human-Browser-Session mit TV-Fernbedienung und erste Backend-/Media-Tools-/Konto-/Device-Mutationen über bestehende revisions- und CSRF-geschützte Core-Endpunkte. Headless HTTP-/Navigationstests und VDR-2.8-CI sind der Source-Nachweis; ein echter TV- und Servermutationstest sowie umfassende Rechte-/Pairing-Editoren fehlen. Keine neue Berechtigungsregel, Core-Datenbank oder Public-v1-Route wurde eingeführt.
