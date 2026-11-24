@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <strings.h>
 #include <memory>
 #include <mutex>
 #include <utility>
