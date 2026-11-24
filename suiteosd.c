@@ -717,6 +717,7 @@ private:
 
     void openTimeline()
     {
+        if (recordingsActive) closeRecordingBrowser();
         timeline = ReadNativeTimeline();
         timelineActive = true;
         timelineDetails = false;
@@ -808,6 +809,170 @@ private:
             }
             break;
         default: return osContinue;
+        }
+        draw();
+        return osContinue;
+    }
+
+    eOSState playBrowserRecording()
+    {
+        const Recording *rec = browserSelectedRecording();
+        if (!rec || rec->fileName.empty()) {
+            browserNotice = "Bitte eine Aufnahme auswählen";
+            return osContinue;
+        }
+        restoreLivePreview(); // Fullscreen replay owns the video plane
+        cReplayControl::SetRecording(rec->fileName.c_str());
+        return osReplay;
+    }
+
+    eOSState deleteBrowserRecording()
+    {
+        const Recording *rec = browserSelectedRecording();
+        if (!rec) return osContinue;
+        const std::string fileName = rec->fileName;
+        // VDR's existing recordings menu owns the more complex "currently
+        // recording", remote timer and background editing workflows. Hand
+        // those cases to it rather than implement a conflicting deletion path.
+        if (cRecordControls::GetRecordControl(fileName.c_str()) ||
+            RecordingsHandler.GetUsage(fileName.c_str())) {
+            browserNotice = "Laufende/Bearbeitete Aufnahme: VDR-Verwaltung öffnen";
+            if (cRemote::Put(kRecordings, true)) {
+                restoreLivePreview();
+                return osEnd;
+            }
+            return osContinue;
+        }
+        RecordingsHandler.Del(fileName.c_str()); // never while holding list locks
+        bool removed = false;
+        {
+            cStateKey writeKey, deletedKey;
+            cRecordings *recordings = cRecordings::GetRecordingsWrite(writeKey);
+            cRecordings *deleted = cRecordings::GetDeletedRecordingsWrite(deletedKey);
+            if (recordings && deleted) {
+                cRecording *recording = recordings->GetByName(fileName.c_str());
+                if (recording && recording->Delete()) {
+                    cReplayControl::ClearLastReplayed(fileName.c_str());
+                    if (cReplayControl::NowReplaying() &&
+                        std::strcmp(cReplayControl::NowReplaying(), fileName.c_str()) == 0)
+                        cControl::Shutdown();
+                    recordings->Del(recording, false);
+                    deleted->Add(recording);
+                    recordings->SetModified();
+                    deleted->SetModified();
+                    removed = true;
+                }
+            }
+            deletedKey.Remove();
+            writeKey.Remove();
+        }
+        if (removed) {
+            cVideoDiskUsage::ForceCheck();
+            cRecordings::TouchUpdate();
+            recordingMeta.erase(fileName);
+            recordingGenres.erase(fileName);
+            data = readVdrSnapshot();
+            refreshBrowser();
+            browserNotice = "Aufnahme gelöscht";
+        } else
+            browserNotice = "VDR konnte die Aufnahme nicht löschen";
+        return osContinue;
+    }
+
+    eOSState browserKey(eKeys base)
+    {
+        if (browserDeleteConfirm) {
+            if (base == kBack || base == kYellow) {
+                browserDeleteConfirm = false;
+            } else if (base == kOk) {
+                browserDeleteConfirm = false;
+                const eOSState result = deleteBrowserRecording();
+                if (result != osContinue) return result;
+            } else return osContinue;
+            draw();
+            return osContinue;
+        }
+        if (browserDetails) {
+            if (base == kBack || base == kInfo || base == kBlue || base == kOk) {
+                browserDetails = false;
+                draw();
+            }
+            return osContinue;
+        }
+        if (nav.sideFocused) {
+            if (base == kBack || base == kRight) {
+                nav.sideFocused = false;
+                draw();
+                return osContinue;
+            }
+            if (base == kUp)
+                nav.Move(suiteosd::Direction::Up, 1, 4);
+            else if (base == kDown)
+                nav.Move(suiteosd::Direction::Down, 1, 4);
+            else if (base == kOk) {
+                const int target = nav.sideIndex;
+                nav.sideFocused = false;
+                if (target == 3) {
+                    recordingBrowser.tabsFocused = true;
+                } else if (target == 0) {
+                    closeRecordingBrowser();
+                } else {
+                    closeRecordingBrowser();
+                    const eOSState result = action(suiteosd::Activation::Module);
+                    if (result != osContinue) return result;
+                }
+            }
+            draw();
+            return osContinue;
+        }
+
+        if (base == kBack) {
+            if (!recordingBrowser.Back())
+                closeRecordingBrowser();
+        } else if (base == kGreen || base == k0) {
+            recordingBrowser.ToggleSort();
+            browserNotice.clear();
+        } else if (base == kInfo || base == kBlue) {
+            if (browserSelectedRecording()) browserDetails = true;
+        } else if (base == kYellow) {
+            if (browserSelectedRecording()) browserDeleteConfirm = true;
+        } else if (base == kRed || base == kPlay) {
+            const eOSState result = playBrowserRecording();
+            if (result != osContinue) return result;
+        } else if (recordingBrowser.tabsFocused) {
+            if (base == kLeft) {
+                if (recordingBrowser.view == suiteosd::RecordingBrowser::View::Folders) {
+                    nav.sideFocused = true;
+                    nav.sideIndex = 3;
+                } else {
+                    recordingBrowser.ChangeView(static_cast<suiteosd::RecordingBrowser::View>(
+                        int(recordingBrowser.view) - 1));
+                    refreshBrowser();
+                }
+            } else if (base == kRight) {
+                if (recordingBrowser.view != suiteosd::RecordingBrowser::View::All) {
+                    recordingBrowser.ChangeView(static_cast<suiteosd::RecordingBrowser::View>(
+                        int(recordingBrowser.view) + 1));
+                    refreshBrowser();
+                }
+            } else if (base == kDown || base == kOk)
+                recordingBrowser.tabsFocused = false;
+        } else {
+            switch (base) {
+            case kLeft: recordingBrowser.Move(-1, 0); break;
+            case kRight: recordingBrowser.Move(1, 0); break;
+            case kUp: recordingBrowser.Move(0, -1); break;
+            case kDown: recordingBrowser.Move(0, 1); break;
+            case kOk: {
+                const std::string fileName = recordingBrowser.Open();
+                if (!fileName.empty()) {
+                    const eOSState result = playBrowserRecording();
+                    if (result != osContinue) return result;
+                }
+                break;
+            }
+            default: return osContinue;
+            }
         }
         draw();
         return osContinue;
@@ -1323,7 +1488,7 @@ private:
         print(42, 852, "Pfeile: Navigation", fontSmall);
         print(365, 852, "OK: Auswählen", fontSmall);
         print(610, 852, "Zurück: TV", fontSmall);
-        print(850, 852, "Blau: Aktualisieren", fontSmall);
+        print(850, 852, "Rot: Aufnahmen  ·  Grün: EPG  ·  Blau: Timer", fontSmall);
         if (!notice.empty()) {
             fill(305, 790, 1570, 832, kSurface);
             print(329, 801, notice, fontSmall, kFocus, 1210);
@@ -1393,7 +1558,7 @@ private:
             switch (nav.sideIndex) {
             case 1: return osEnd;       // Live-TV: return to current broadcast
             case 2: openTimeline(); break; // Native VDR schedule, Suite Web timeline design
-            case 3: nativeKey = kRecordings; break; // Recordings
+            case 3: openRecordingBrowser(); return osContinue; // Native Suite recording grid
             case 4: nativeKey = kTimers; break;     // Timers
             case 10: nativeKey = kSetup; break;     // VDR settings
             default: break;
@@ -1466,6 +1631,13 @@ public:
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        if (base == kRecordings) {
+            if (!recordingsActive) openRecordingBrowser();
+            draw();
+            return osContinue;
+        }
+        if (recordingsActive)
+            return browserKey(base);
         if (timelineActive)
             return timelineKey(base);
         if (recordingDetails) {
@@ -1481,7 +1653,24 @@ public:
             draw();
             return osContinue;
         }
+        if (base == kRed) {
+            openRecordingBrowser();
+            draw();
+            return osContinue;
+        }
+        if (base == kGreen) {
+            openTimeline();
+            draw();
+            return osContinue;
+        }
         if (base == kBlue) {
+            if (cRemote::Put(kTimers, true))
+                return osEnd;
+            notice = "VDR-Timerverwaltung nicht verfügbar";
+            draw();
+            return osContinue;
+        }
+        if (base == k0) {
             data = readVdrSnapshot();
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
             nav.KeepVisible(7, count(nav.section));
