@@ -6,7 +6,8 @@
 namespace suiteosd {
 
 enum class SettingsAction {
-    None, OpenVdrSetup, OpenPluginSetup, ToggleLivePreview
+    None, OpenVdrSetup, OpenPluginSetup, ToggleLivePreview,
+    OpenCoreBackend, OpenCoreAccounts
 };
 
 // Presentation-only navigation. VDR owns VDR settings, the installed plugins
@@ -27,6 +28,8 @@ struct SettingsNavigation {
     int ActionCount() const {
         switch (selected) {
         case Vdr: return 1;
+        case Suite: return 1;
+        case Accounts: return 1;
         case Plugins: return 1;
         case Television: return 2;
         default: return 0; // read-only sections remain navigable
@@ -65,6 +68,8 @@ struct SettingsNavigation {
         }
         switch (selected) {
         case Vdr: return SettingsAction::OpenVdrSetup;
+        case Suite: return SettingsAction::OpenCoreBackend;
+        case Accounts: return SettingsAction::OpenCoreAccounts;
         case Plugins: return SettingsAction::OpenPluginSetup;
         case Television:
             return action == 0 ? SettingsAction::ToggleLivePreview :
