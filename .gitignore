@@ -10,3 +10,5 @@ logo-locator-test
 suiteosd-test-logos/
 recording-browser-test
 settings-navigation-test
+core-admin-navigation-test
+core-admin-http-test
