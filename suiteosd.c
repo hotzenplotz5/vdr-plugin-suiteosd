@@ -43,8 +43,10 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.8.0";
+static const char *VERSION = "0.9.0";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
+
+namespace suiteosd { void RegisterSuiteSkin(); }
 
 namespace {
 constexpr tColor kBackground = 0xF9040A19;
@@ -2591,6 +2593,7 @@ public:
 
 class cPluginSuiteOsd final : public cPlugin {
 public:
+    bool Start() override { suiteosd::RegisterSuiteSkin(); return true; }
     const char *Version() override { return VERSION; }
     const char *Description() override { return tr(DESCRIPTION); }
     const char *MainMenuEntry() override { return tr("VDR Suite"); }
