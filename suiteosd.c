@@ -1572,6 +1572,247 @@ private:
         }
     }
 
+    const std::vector<suiteosd::CoreItem> &coreList() const
+    {
+        return coreNav.page == suiteosd::CorePage::Backends ||
+               coreNav.page == suiteosd::CorePage::BackendSettings ?
+            coreBackends : coreNav.page == suiteosd::CorePage::Devices ||
+                           coreNav.page == suiteosd::CorePage::DeviceDetails ?
+            coreDevices : coreAccounts;
+    }
+
+    const suiteosd::CoreItem *coreSelectedItem() const
+    {
+        const auto &items = coreList();
+        return coreNav.selected >= 0 && coreNav.selected < int(items.size())
+            ? &items[coreNav.selected] : nullptr;
+    }
+
+    void coreReport(const suiteosd::CoreStatus &result,
+                    const std::string &success = "")
+    {
+        coreNotice = result.ok ? success :
+            (result.message.empty() ? "Core-Aktion fehlgeschlagen" : result.message);
+    }
+
+    void refreshCoreAdmin()
+    {
+        const auto page = coreNav.page;
+        suiteosd::CoreStatus result;
+        if (page == suiteosd::CorePage::Backends) {
+            result = coreAdmin.backends(coreBackends);
+        } else if (page == suiteosd::CorePage::Accounts) {
+            result = coreAdmin.accounts(coreAccounts);
+        } else if (page == suiteosd::CorePage::Devices) {
+            result = coreAdmin.devices(coreDevices);
+        } else if (page == suiteosd::CorePage::BackendSettings) {
+            const auto *item = coreSelectedItem();
+            if (!item) return;
+            const std::string id = item->id;
+            const auto addon = coreAdmin.addon(id, coreAddon);
+            coreAddonLoaded = addon.ok;
+            const auto encoding = coreAdmin.encoding(id, coreEncoding);
+            coreEncodingLoaded = encoding.ok;
+            if (coreEncodingLoaded)
+                coreEncodingEdit = coreEncoding;
+            if (!addon.ok && !encoding.ok)
+                result = addon;
+            else if (!addon.ok)
+                result = addon;
+            else if (!encoding.ok)
+                result = encoding;
+            else
+                result = {true, 200, ""};
+        } else return;
+        coreReport(result, result.ok ? "Core-Daten aktualisiert" : "");
+        if (!coreAdmin.authenticated()) {
+            // A stale Human session is not a mutation credential. Present the
+            // existing login again, preserving no password or stale authority.
+            coreNav.openLogin(page == suiteosd::CorePage::BackendSettings ?
+                              suiteosd::CorePage::Backends : page);
+        }
+        if (coreNav.selected >= int(coreList().size()))
+            coreNav.selected = std::max(0, int(coreList().size()) - 1);
+    }
+
+    void openCoreAdmin(suiteosd::CorePage target)
+    {
+        coreAdmin.setOrigin(gCoreUrl);
+        coreNotice.clear();
+        coreNav.selected = coreNav.action = 0;
+        coreNav.confirmation = suiteosd::CoreConfirmation::None;
+        if (!coreAdmin.authenticated()) {
+            coreNav.openLogin(target);
+        } else {
+            coreNav.page = target;
+            refreshCoreAdmin();
+        }
+    }
+
+    static const char *corePageName(suiteosd::CorePage page)
+    {
+        switch (page) {
+        case suiteosd::CorePage::Login: return "Human-Admin-Anmeldung";
+        case suiteosd::CorePage::Backends: return "Backend auswählen";
+        case suiteosd::CorePage::BackendSettings: return "Backend und Addons";
+        case suiteosd::CorePage::Accounts: return "Benutzerkonten";
+        case suiteosd::CorePage::AccountDetails: return "Konto bearbeiten";
+        case suiteosd::CorePage::Devices: return "Gekoppelte TV-Geräte";
+        case suiteosd::CorePage::DeviceDetails: return "Gerät verwalten";
+        case suiteosd::CorePage::Rename: return "Anzeigename ändern";
+        default: return "VDR-Suite Core";
+        }
+    }
+
+    void drawCoreAdmin()
+    {
+        fill(0, 0, 1599, 899, kBackground);
+        fill(0, 0, 1599, 76, kSurface);
+        print(33, 18, "VDR", fontTitle);
+        print(117, 18, "Suite", fontTitle, kFocus);
+        print(279, 23, corePageName(coreNav.page), fontLarge);
+        print(1250, 29, "Core-Verwaltung", fontSmall, kMuted);
+        panel(148, 113, 1417, 700, false, kSurface);
+
+        const bool editing = coreNav.page == suiteosd::CorePage::Login ||
+                             coreNav.page == suiteosd::CorePage::Rename;
+        if (editing) {
+            const bool login = coreNav.page == suiteosd::CorePage::Login;
+            print(189, 140, login ?
+                  "Bestehende Human-Account-Anmeldung (keine Device-Identität)" :
+                  "Anzeigename des ausgewählten Benutzerkontos",
+                  fontBody, kFocus, 1280);
+            if (login) {
+                panel(183, 187, 659, 63, !coreNav.passwordField, kCard);
+                panel(868, 187, 658, 63, coreNav.passwordField, kCard);
+                print(199, 198, "Benutzer: " + coreNav.username, fontBody, kText, 625);
+                print(882, 198, "Passwort: " +
+                      std::string(std::min(size_t(52),coreNav.password.size()), '*'),
+                      fontBody, kText, 608);
+            } else {
+                panel(185, 187, 1326, 64, true, kCard);
+                print(207, 200, "Anzeigename: " + coreNav.editingName,
+                      fontBody, kText, 1270);
+            }
+            print(192, 281, coreNav.uppercase ? "GROSSBUCHSTABEN" :
+                  "Kleinbuchstaben", fontSmall, kFocus);
+            const std::string &chars = suiteosd::CoreAdminNavigation::keys();
+            for (int i = 0; i < int(chars.size()); ++i) {
+                const int x = 193 + (i % 10) * 130;
+                const int y = 319 + (i / 10) * 79;
+                panel(x, y, 111, 67, i == coreNav.keyIndex, kCardAlt);
+                char c = chars[i];
+                if (coreNav.uppercase && c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
+                print(x + 39, y + 15, c == ' ' ? "␣" : std::string(1,c),
+                      fontBody, kText, 79);
+            }
+            print(193, 740, login ?
+                  "OK: Zeichen  ·  Grün: Benutzer/Passwort  ·  Rot: Anmelden" :
+                  "OK: Zeichen  ·  Grün: Feld leeren  ·  Rot: Namen speichern",
+                  fontSmall, kText, 1200);
+            print(193, 777, "Gelb: Löschen  ·  Blau: Groß/Klein  ·  Zifferntasten: Direkt",
+                  fontSmall, kMuted, 1220);
+        } else if (coreNav.page == suiteosd::CorePage::Backends ||
+                   coreNav.page == suiteosd::CorePage::Accounts ||
+                   coreNav.page == suiteosd::CorePage::Devices) {
+            const auto &items = coreList();
+            print(185, 144, "Anmeldung aktiv · Daten direkt von VDR-Suite Core",
+                  fontBody, kFocus, 1280);
+            const int rows = 8;
+            const int first = coreNav.selected / rows * rows;
+            for (int i = 0; i < rows && first + i < int(items.size()); ++i) {
+                const int index = first + i;
+                const auto &item = items[index];
+                const int y = 212 + i * 68;
+                panel(183, y, 1327, 58, index == coreNav.selected, kCardAlt);
+                print(206, y + 11, item.name, fontBody, kText, 768);
+                print(1044, y + 12,
+                      item.revoked ? "Widerrufen" :
+                      (item.active ? "Aktiv" : "Inaktiv"),
+                      fontSmall, item.revoked ? kMuted : kFocus, 200);
+                print(1235, y + 16, item.id, fontSmall, kMuted, 230);
+            }
+            if (items.empty())
+                print(211, 298, "Keine Einträge gefunden", fontBody, kMuted, 1000);
+            print(189, 775, "OK: Öffnen   ·   Blau: Konten / Geräte   ·   Gelb: Abmelden",
+                  fontSmall, kFocus, 1210);
+        } else {
+            const auto *item = coreSelectedItem();
+            if (item) {
+                print(189, 150, item->name, fontTitle, kText, 1255);
+                print(190, 214, "ID: " + item->id, fontSmall, kMuted, 1200);
+            }
+            if (coreNav.page == suiteosd::CorePage::BackendSettings) {
+                const std::string addonValue = coreAddonLoaded ?
+                    (coreAddon.enabled ? "Aktiviert" : "Deaktiviert") :
+                    "Aktivierung derzeit nicht lesbar";
+                const std::string encodingValue = coreEncodingLoaded ?
+                    "Import H.264 CRF: " + std::to_string(coreEncodingEdit.importCrf) :
+                    "Import CRF nicht lesbar";
+                const std::string shrinkValue = coreEncodingLoaded ?
+                    "Shrink H.265 CRF: " + std::to_string(coreEncodingEdit.shrinkCrf) :
+                    "Shrink CRF nicht lesbar";
+                const std::array<std::string, 5> actions = {{
+                    "Media Tools: " + addonValue + " (OK: Umschalten)",
+                    encodingValue + " (Links/Rechts)",
+                    shrinkValue + " (Links/Rechts)",
+                    "Encoding für neue Aufträge speichern",
+                    "Status vom Core neu laden"
+                }};
+                print(189, 267, "Originalwerte und Revision vom Core / Agent",
+                      fontBody, kFocus);
+                for (int i = 0; i < int(actions.size()); ++i) {
+                    const int y = 331 + i * 88;
+                    panel(184, y, 1315, 75, coreNav.action == i, kCardAlt);
+                    print(207, y + 20, actions[i], fontBody, kText, 1210);
+                }
+                print(197, 781, "OK: Aktion  ·  Pfeile: CRF ändern  ·  Zurück: Backends",
+                      fontSmall, kMuted);
+            } else if (coreNav.page == suiteosd::CorePage::AccountDetails) {
+                print(191, 294, std::string("Kontostatus: ") +
+                      (item && item->active ? "Aktiv" : "Inaktiv"), fontBody, kFocus);
+                print(191, 366, "Rot: Konto aktivieren / deaktivieren",
+                      fontBody, kText);
+                print(191, 421, "Grün: Anzeigenamen ändern", fontBody, kText);
+                print(191, 507, "Prüfung von ETag, Rechten und letztem Admin: VDR-Suite Core",
+                      fontSmall, kMuted, 1200);
+            } else if (coreNav.page == suiteosd::CorePage::DeviceDetails) {
+                print(190, 291, item && item->revoked ? "Gerät widerrufen" :
+                      item && item->active ? "Gerät aktiv" : "Gerät inaktiv",
+                      fontBody, kFocus);
+                print(190, 376, "Rot: Gerätezugang widerrufen (alle Credentials)",
+                      fontBody, kText);
+                print(190, 449, "Widerruf ist nicht rückgängig zu machen.",
+                      fontBody, kMuted);
+                print(190, 511, "Aktuelle Geräte-ID und ETag werden vor Änderung geprüft.",
+                      fontSmall, kFocus, 1150);
+            }
+        }
+        fill(16, 832, 1581, 895, kSurface);
+        print(164, 850, "Zurück: Vorherige Seite", fontSmall, kMuted);
+        if (!coreNotice.empty()) {
+            fill(162, 782, 1540, 829, kCard);
+            print(188, 795, coreNotice, fontSmall, kFocus, 1310);
+        }
+        if (coreNav.confirmation != suiteosd::CoreConfirmation::None) {
+            panel(333, 289, 928, 303, true, kSurface);
+            std::string question;
+            if (coreNav.confirmation == suiteosd::CoreConfirmation::ToggleAddon)
+                question = coreAddon.enabled ? "Media Tools deaktivieren?" :
+                                              "Media Tools aktivieren?";
+            else if (coreNav.confirmation == suiteosd::CoreConfirmation::ToggleAccount)
+                question = item && item->active ? "Konto deaktivieren?" :
+                                                   "Konto aktivieren?";
+            else
+                question = "Ausgewähltes Gerät unwiderruflich widerrufen?";
+            print(378, 354, question, fontLarge, kText, 829);
+            if (item) print(379, 416, item->id, fontSmall, kMuted, 820);
+            print(377, 514, "OK: Bestätigen     Zurück: Abbrechen",
+                  fontBody, kFocus);
+        }
+        drawSidebar();
+    }
+
     void drawSettings()
     {
         fill(0, 0, 1599, 899, kBackground);
