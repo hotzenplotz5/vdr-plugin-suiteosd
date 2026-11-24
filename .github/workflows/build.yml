@@ -19,6 +19,13 @@ jobs:
       - name: Verify local sender-logo name matching and safe fallback
         run: make check-logos
 
+  settings-navigation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify VDR/Suite settings owner navigation and native actions
+        run: make check-settings-navigation
+
   recording-browser:
     runs-on: ubuntu-24.04
     steps:
