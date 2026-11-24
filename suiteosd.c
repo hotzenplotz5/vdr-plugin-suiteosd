@@ -1674,6 +1674,7 @@ private:
         print(1250, 29, "Core-Verwaltung", fontSmall, kMuted);
         panel(148, 113, 1417, 700, false, kSurface);
 
+        const auto *item = coreSelectedItem();
         const bool editing = coreNav.page == suiteosd::CorePage::Login ||
                              coreNav.page == suiteosd::CorePage::Rename;
         if (editing) {
@@ -1737,7 +1738,6 @@ private:
             print(189, 775, "OK: Öffnen   ·   Blau: Konten / Geräte   ·   Gelb: Abmelden",
                   fontSmall, kFocus, 1210);
         } else {
-            const auto *item = coreSelectedItem();
             if (item) {
                 print(189, 150, item->name, fontTitle, kText, 1255);
                 print(190, 214, "ID: " + item->id, fontSmall, kMuted, 1200);
