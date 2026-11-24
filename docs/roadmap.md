@@ -35,3 +35,7 @@ Das vorhandene VDR-Suite-Webfrontend ist der funktionale Mindestumfang. Bei jede
 ## Fortschritt – Native Aufnahmen 2.0
 
 Der Kachelbrowser (Ordner/Genre/Alle), die Tastenbelegung, TVScraper-Genres, direkte Aufnahme-Wiedergabe und die optionale Ausgabeplugin-Videovoransicht sind auf `main` implementiert. CI-Proben gelten nur für Build und Headless-Modell; echte TV-Anzeige, Aufnahmelöschung und Video-Reset müssen am realen Gerät mit Ausgabeplugin getestet werden. Keine neue API v1 und kein `vaapivideo`-Fork.
+
+## Stand – gemeinsame Einstellungen (0.7.0)
+
+Native sechs Bereiche umfassende Einstellungen-Oberfläche ergänzt die Suite-Sidebar; VDR/Plugins verwenden die vorhandenen nativen Setup-Menüs, und das kleine Live-TV-Fenster besitzt eine gemeinsame persistent gespeicherte VDR-Plugin-Option. Suite-Core-/Agent-/Benutzer-Einstellungen bleiben bis zu einem verifizierten lokalen Besitzervertrag im Webfrontend editierbar. Eigene TV-Editoren dafür sind **noch nicht umgesetzt**. Automatische Build-/Navigationsprüfungen ersetzen nicht die spätere echte TV-Abnahme.
