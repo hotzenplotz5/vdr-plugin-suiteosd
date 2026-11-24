@@ -55,6 +55,8 @@ int main()
 
     b.ChangeView(RecordingBrowser::View::All);
     assert(b.entries.size() == 4);
+    assert(b.sort == RecordingBrowser::Sort::Name); // view change retains sort
+    b.ToggleSort();
     assert(b.entries[0].fileName == "four"); // newest
     b.tabsFocused = false;
     b.Move(0, -1);
