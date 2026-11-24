@@ -1522,6 +1522,263 @@ private:
         print(301, 675, "Gelb / Info / Zurück: Schließen", fontSmall, kFocus);
     }
 
+    static const char *settingsTitle(int id)
+    {
+        static const char *const titles[] = {
+            "VDR", "VDR-Suite", "Plugins", "TV-Oberfläche",
+            "Benutzer & Geräte", "System"
+        };
+        return id >= 0 && id < 6 ? titles[id] : "Einstellungen";
+    }
+
+    static const char *settingsSubtitle(int id)
+    {
+        static const char *const titles[] = {
+            "OSD · EPG · DVB · Aufnahmen · Wiedergabe",
+            "Backend · Addons · Media Tools",
+            "Einstellungen installierter VDR-Plugins",
+            "Suite-OSD · Vorschau · Sprache",
+            "Konten · Rechte · TV-Kopplung",
+            "Versionen · VDR-Pluginstatus"
+        };
+        return id >= 0 && id < 6 ? titles[id] : "";
+    }
+
+    static const char *settingsOwner(int id)
+    {
+        switch (id) {
+        case suiteosd::SettingsNavigation::Vdr: return "Eigentümer: VDR-Kern";
+        case suiteosd::SettingsNavigation::Suite: return "Eigentümer: VDR-Suite Core / Agent";
+        case suiteosd::SettingsNavigation::Plugins: return "Eigentümer: jeweiliges VDR-Plugin";
+        case suiteosd::SettingsNavigation::Television: return "Eigentümer: Suite-OSD / VDR";
+        case suiteosd::SettingsNavigation::Accounts: return "Eigentümer: VDR-Suite Core";
+        default: return "Lokale VDR-Systeminformationen";
+        }
+    }
+
+    void drawSettings()
+    {
+        fill(0, 0, 1599, 899, kBackground);
+        fill(0, 0, 1599, 76, kSurface);
+        print(33, 18, "VDR", fontTitle);
+        print(117, 18, "Suite", fontTitle, kFocus);
+        print(274, 23, "Einstellungen", fontLarge);
+        print(1154, 27, "VDR + Suite", fontBody, kMuted);
+
+        if (!settingsNav.detail) {
+            print(160, 111, "Eine Oberfläche · Bestehende Konfigurationen",
+                  fontBody, kMuted, 1160);
+            for (int i = 0; i < suiteosd::SettingsNavigation::kCategories; ++i) {
+                const int x = 159 + (i % 2) * 698;
+                const int y = 183 + (i / 2) * 210;
+                const bool focus = !nav.sideFocused && settingsNav.selected == i;
+                panel(x, y, 661, 186, focus, focus ? kHighlight : kCardAlt);
+                print(x + 28, y + 28, settingsTitle(i), fontLarge, kText, 598);
+                print(x + 28, y + 83, settingsSubtitle(i), fontBody, kMuted, 598);
+                print(x + 28, y + 138, settingsOwner(i), fontSmall,
+                      focus ? kText : kFocus, 602);
+            }
+        } else {
+            const int category = settingsNav.selected;
+            print(164, 113, std::string("Einstellungen  /  ") +
+                  settingsTitle(category), fontBody, kFocus, 1240);
+            panel(152, 168, 1410, 641, false, kSurface);
+            print(194, 196, settingsTitle(category), fontTitle, kText, 1200);
+            print(194, 258, settingsOwner(category), fontBody, kMuted, 1100);
+
+            switch (category) {
+            case suiteosd::SettingsNavigation::Vdr:
+                print(194, 329, "VDR verwaltet seine Einstellungen selbst.",
+                      fontBody, kText, 1120);
+                print(194, 368, "OSD, EPG, DVB, LNB, CAM, Aufnahmen, Wiedergabe und Plugins",
+                      fontBody, kMuted, 1190);
+                break;
+            case suiteosd::SettingsNavigation::Suite:
+                print(194, 327, "Backend, Addons und Media Tools bleiben bei VDR-Suite.",
+                      fontBody, kText, 1160);
+                print(194, 368, "Verwaltung derzeit über die Einstellungen im Suite-Webfrontend.",
+                      fontBody, kMuted, 1200);
+                print(194, 418, "Keine duplizierte Backend-Konfiguration im VDR-Plugin.",
+                      fontSmall, kFocus, 1160);
+                break;
+            case suiteosd::SettingsNavigation::Plugins: {
+                print(194, 325, "Plugin-Einstellungen über das native VDR-Menü.",
+                      fontBody, kText, 1160);
+                print(194, 366, "Nach dem Öffnen: Einstellungen  >  Plugins auswählen.",
+                      fontBody, kMuted, 1170);
+                std::string installed;
+                for (const char *name : {"tvscraper", "epgsearch", "web", "osdteletext"}) {
+                    if (cPluginManager::GetPlugin(name)) {
+                        if (!installed.empty()) installed += "  ·  ";
+                        installed += name;
+                    }
+                }
+                print(194, 414, "Installiert (Auswahl): " +
+                      (installed.empty() ? "keine der vier geprüften Plugins" : installed),
+                      fontSmall, kFocus, 1150);
+                break;
+            }
+            case suiteosd::SettingsNavigation::Television:
+                print(194, 327, "VDR-Suite-Design und Fernbedienungsnavigation.",
+                      fontBody, kText, 1100);
+                print(194, 366, "Die Live-TV-Vorschau nutzt die native Videoausgabe.",
+                      fontBody, kMuted, 1130);
+                print(194, 409, "Die VDR-Sprache und OSD-Grundeinstellungen bleiben bei VDR.",
+                      fontSmall, kMuted, 1160);
+                break;
+            case suiteosd::SettingsNavigation::Accounts:
+                print(194, 328, "Benutzer, Rollen und TV-Geräte gehören zu VDR-Suite.",
+                      fontBody, kText, 1150);
+                print(194, 369, "Konten und Gerätekopplungen im Suite-Webfrontend verwalten.",
+                      fontBody, kMuted, 1170);
+                print(194, 420, "Es wird hier kein zweiter Benutzer- oder Rechtebestand angelegt.",
+                      fontSmall, kFocus, 1190);
+                break;
+            case suiteosd::SettingsNavigation::System:
+                print(194, 325, std::string("Suite-OSD-Version: ") + VERSION,
+                      fontBody, kText);
+                print(194, 372, std::string("Kompiliert für VDR: ") + VDRVERSION,
+                      fontBody, kText);
+                print(194, 419, std::string("TVScraper: ") +
+                      (cPluginManager::GetPlugin("tvscraper") ? "installiert" : "nicht geladen"),
+                      fontBody, kMuted);
+                print(194, 462, std::string("Epgsearch: ") +
+                      (cPluginManager::GetPlugin("epgsearch") ? "installiert" : "nicht geladen"),
+                      fontBody, kMuted);
+                print(194, 514, "Backend-Status wird hier noch nicht aus Core gelesen.",
+                      fontSmall, kFocus, 1170);
+                break;
+            }
+
+            if (settingsNav.ActionCount() > 0) {
+                for (int i = 0; i < settingsNav.ActionCount(); ++i) {
+                    const int y = 512 + i * 94;
+                    const bool selected = settingsNav.action == i && !nav.sideFocused;
+                    panel(190, y, 1180, 69, selected, selected ? kHighlight : kCard);
+                    std::string title;
+                    if (category == suiteosd::SettingsNavigation::Vdr)
+                        title = "VDR-Einstellungen öffnen";
+                    else if (category == suiteosd::SettingsNavigation::Plugins)
+                        title = "VDR-Setup mit Plugin-Einstellungen öffnen";
+                    else if (category == suiteosd::SettingsNavigation::Television)
+                        title = i == 0 ?
+                            std::string("Live-TV-Fenster in Aufnahmen: ") +
+                                (gLivePreviewEnabled ? "Ein" : "Aus") :
+                            "VDR-OSD und Spracheinstellungen öffnen";
+                    print(218, y + 16, title, fontBody, kText, 1096);
+                }
+            } else
+                print(194, 665, "Informationen · Weitere Änderungen im Suite-Webfrontend",
+                      fontSmall, kFocus, 1180);
+        }
+
+        fill(16, 837, 1581, 893, kSurface);
+        print(151, 852, "Pfeile: Navigation", fontSmall);
+        print(518, 852, "OK: Öffnen / Ändern", fontSmall);
+        print(992, 852, "Zurück: Übersicht / Home", fontSmall);
+        if (!settingsNotice.empty()) {
+            fill(155, 785, 1552, 833, kSurface);
+            print(177, 795, settingsNotice, fontSmall, kFocus, 1280);
+        }
+        drawSidebar();
+    }
+
+    void openSettings()
+    {
+        if (recordingsActive)
+            closeRecordingBrowser(); // restore scaled video before changing views
+        timelineActive = false;
+        recordingDetails = false;
+        homeProgrammeDetails = false;
+        settingsActive = true;
+        settingsNotice.clear();
+        settingsNav.Open();
+        nav.sideFocused = false;
+    }
+
+    bool toggleLivePreviewSetting()
+    {
+        cPlugin *owner = cPluginManager::GetPlugin("suiteosd");
+        if (!owner) {
+            settingsNotice = "VDR-Suite-Plugin-Konfiguration nicht verfügbar";
+            return false;
+        }
+        const int previous = gLivePreviewEnabled;
+        const int next = previous ? 0 : 1;
+        // Reuse VDR's authoritative plugin section in setup.conf.
+        owner->SetupStore("LivePreview", next);
+        if (!Setup.Save()) {
+            owner->SetupStore("LivePreview", previous);
+            settingsNotice = "VDR konnte die Einstellung nicht speichern";
+            return false;
+        }
+        gLivePreviewEnabled = next;
+        settingsNotice = next ? "Live-TV-Vorschau eingeschaltet" :
+                                "Live-TV-Vorschau ausgeschaltet";
+        return true;
+    }
+
+    eOSState settingsKey(eKeys key)
+    {
+        if (nav.sideFocused) {
+            switch (key) {
+            case kUp: nav.Move(suiteosd::Direction::Up, 1, 2); break;
+            case kDown: nav.Move(suiteosd::Direction::Down, 1, 2); break;
+            case kLeft:
+            case kBack:
+            case kRight: nav.sideFocused = false; break;
+            case kOk: {
+                const int dest = nav.sideIndex;
+                nav.sideFocused = false;
+                if (dest == 10) {
+                    settingsNav.Open();
+                } else if (dest == 0) {
+                    settingsActive = false;
+                } else {
+                    settingsActive = false;
+                    const eOSState state = action(suiteosd::Activation::Module);
+                    if (state != osContinue) return state;
+                }
+                break;
+            }
+            default: return osContinue;
+            }
+        } else if (key == kBack) {
+            if (!settingsNav.Back())
+                settingsActive = false;
+        } else if (key == kUp)
+            settingsNav.Move(0, -1);
+        else if (key == kDown)
+            settingsNav.Move(0, 1);
+        else if (key == kLeft) {
+            if (!settingsNav.detail &&
+                settingsNav.selected % suiteosd::SettingsNavigation::kColumns == 0) {
+                nav.sideIndex = 10;
+                nav.sideFocused = true;
+            } else
+                settingsNav.Move(-1, 0);
+        } else if (key == kRight)
+            settingsNav.Move(1, 0);
+        else if (key == kOk) {
+            const suiteosd::SettingsAction selected = settingsNav.Select();
+            if (selected == suiteosd::SettingsAction::OpenVdrSetup ||
+                selected == suiteosd::SettingsAction::OpenPluginSetup) {
+                // VDR owns Setup and plugin setup pages. The public VDR OSD
+                // API doesn't provide a direct link to its private submenus.
+                // Never claim a direct plugin submenu jump.
+                if (cRemote::Put(kSetup, true))
+                    return osEnd;
+                settingsNotice = "VDR-Einstellungen konnten nicht geöffnet werden";
+            } else if (selected == suiteosd::SettingsAction::ToggleLivePreview)
+                toggleLivePreviewSetting();
+            else
+                settingsNotice.clear();
+        } else
+            return osContinue;
+        draw();
+        return osContinue;
+    }
+
     void drawSidebar()
     {
         // Expanded sidebar overlays the content; it never permanently
@@ -1559,6 +1816,11 @@ private:
     {
         if (!osd)
             return;
+        if (settingsActive) {
+            drawSettings();
+            osd->Flush();
+            return;
+        }
         if (recordingsActive) {
             drawRecordingBrowser();
             osd->Flush();
@@ -1621,7 +1883,7 @@ private:
             case 2: openTimeline(); break; // Native VDR schedule, Suite Web timeline design
             case 3: openRecordingBrowser(); return osContinue; // Native Suite recording grid
             case 4: nativeKey = kTimers; break;     // Timers
-            case 10: nativeKey = kSetup; break;     // VDR settings
+            case 10: openSettings(); return osContinue; // Unified VDR+Suite settings
             default: break;
             }
             if (nativeKey != kNone) {
@@ -1692,6 +1954,11 @@ public:
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        if (base == kSetup) {
+            openSettings();
+            draw();
+            return osContinue;
+        }
         if (base == kRecordings) {
             if (!recordingsActive) openRecordingBrowser();
             draw();
@@ -1701,6 +1968,8 @@ public:
             return browserKey(base);
         if (timelineActive)
             return timelineKey(base);
+        if (settingsActive)
+            return settingsKey(base);
         if (homeProgrammeDetails) {
             if (base == kYellow || base == kInfo || base == kBack || base == kOk) {
                 homeProgrammeDetails = false;
