@@ -2039,6 +2039,10 @@ private:
 
     void drawSettings()
     {
+        if (coreNav.page != suiteosd::CorePage::None) {
+            drawCoreAdmin();
+            return;
+        }
         fill(0, 0, 1599, 899, kBackground);
         fill(0, 0, 1599, 76, kSurface);
         print(33, 18, "VDR", fontTitle);
@@ -2075,11 +2079,11 @@ private:
                       fontBody, kMuted, 1190);
                 break;
             case suiteosd::SettingsNavigation::Suite:
-                print(194, 327, "Backend, Addons und Media Tools bleiben bei VDR-Suite.",
+                print(194, 327, "Backend, Addons und Media Tools direkt im Core verwalten.",
                       fontBody, kText, 1160);
-                print(194, 368, "Verwaltung derzeit über die Einstellungen im Suite-Webfrontend.",
+                print(194, 368, "Anmeldung mit bestehendem VDR-Suite Benutzerkonto.",
                       fontBody, kMuted, 1200);
-                print(194, 418, "Keine duplizierte Backend-Konfiguration im VDR-Plugin.",
+                print(194, 418, "Core: " + std::string(gCoreUrl),
                       fontSmall, kFocus, 1160);
                 break;
             case suiteosd::SettingsNavigation::Plugins: {
@@ -2108,11 +2112,11 @@ private:
                       fontSmall, kMuted, 1160);
                 break;
             case suiteosd::SettingsNavigation::Accounts:
-                print(194, 328, "Benutzer, Rollen und TV-Geräte gehören zu VDR-Suite.",
+                print(194, 328, "Konten und TV-Geräte direkt im Suite-Core verwalten.",
                       fontBody, kText, 1150);
-                print(194, 369, "Konten und Gerätekopplungen im Suite-Webfrontend verwalten.",
+                print(194, 369, "Kontenstatus, Anzeigenamen und gekoppelte Geräte.",
                       fontBody, kMuted, 1170);
-                print(194, 420, "Es wird hier kein zweiter Benutzer- oder Rechtebestand angelegt.",
+                print(194, 420, "Rechte / CSRF / ETag prüft der bestehende Core.",
                       fontSmall, kFocus, 1190);
                 break;
             case suiteosd::SettingsNavigation::System:
@@ -2139,6 +2143,10 @@ private:
                     std::string title;
                     if (category == suiteosd::SettingsNavigation::Vdr)
                         title = "VDR-Einstellungen öffnen";
+                    else if (category == suiteosd::SettingsNavigation::Suite)
+                        title = "Backend und Media Tools im Core verwalten";
+                    else if (category == suiteosd::SettingsNavigation::Accounts)
+                        title = "Benutzer und gekoppelte Geräte verwalten";
                     else if (category == suiteosd::SettingsNavigation::Plugins)
                         title = "VDR-Setup mit Plugin-Einstellungen öffnen";
                     else if (category == suiteosd::SettingsNavigation::Television)
@@ -2204,6 +2212,8 @@ private:
 
     eOSState settingsKey(eKeys key)
     {
+        if (coreNav.page != suiteosd::CorePage::None)
+            return coreAdminKey(key);
         if (nav.sideFocused) {
             switch (key) {
             case kUp: nav.Move(suiteosd::Direction::Up, 1, 2); break;
@@ -2255,10 +2265,19 @@ private:
                 settingsNotice = "VDR-Einstellungen konnten nicht geöffnet werden";
             } else if (selected == suiteosd::SettingsAction::ToggleLivePreview)
                 toggleLivePreviewSetting();
+            else if (selected == suiteosd::SettingsAction::OpenCoreBackend)
+                openCoreAdmin(suiteosd::CorePage::Backends);
+            else if (selected == suiteosd::SettingsAction::OpenCoreAccounts)
+                openCoreAdmin(suiteosd::CorePage::Accounts);
             else
                 settingsNotice.clear();
         } else
             return osContinue;
+        if (!settingsActive) {
+            coreAdmin.logout(); // never carry a Human session into Home or Live-TV
+            coreNav.clearPassword();
+            coreNav.page = suiteosd::CorePage::None;
+        }
         draw();
         return osContinue;
     }
