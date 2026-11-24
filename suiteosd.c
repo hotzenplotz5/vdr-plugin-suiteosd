@@ -1119,6 +1119,185 @@ private:
         print(299, 662, "Info oder Zurück: Schließen", fontSmall, kFocus);
     }
 
+    const Recording *browserSelectedRecording() const
+    {
+        const suiteosd::BrowserEntry *entry = recordingBrowser.Selected();
+        return entry && entry->kind == suiteosd::BrowserEntry::Kind::Recording ?
+               findRecording(entry->fileName) : nullptr;
+    }
+
+    void drawBrowserDetails()
+    {
+        const Recording *rec = browserSelectedRecording();
+        if (!rec || !browserDetails) return;
+        const RecordingMeta &meta = metaFor(*rec);
+        panel(267, 157, 1086, 555, true, kSurface);
+        const std::string title = meta.title.empty() ? rec->baseName : meta.title;
+        print(299, 186, title, fontTitle, kText, 1000);
+        print(299, 255, "Aufnahme · " + rec->time, fontSmall, kFocus);
+        if (!meta.episode.empty())
+            print(299, 301, meta.episode, fontBody, kText, 1000);
+        if (!meta.release.empty())
+            print(299, 334, "Erscheinung: " + meta.release, fontSmall, kMuted);
+        if (!meta.genres.empty()) {
+            std::string genres;
+            for (const auto &genre : meta.genres)
+                genres += (genres.empty() ? "" : " · ") + genre;
+            print(299, 366, genres, fontSmall, kFocus, 950);
+        }
+        std::string overview = meta.overview.empty() ? rec->description : meta.overview;
+        if (overview.empty()) overview = "Keine Beschreibung vorhanden";
+        std::replace(overview.begin(), overview.end(), '\n', ' ');
+        std::istringstream words(overview);
+        std::string line, word;
+        int y = 417;
+        while (words >> word && y < 642) {
+            const std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(975)) {
+                print(299, y, line, fontBody, kText, 987);
+                line = word;
+                y += 31;
+            } else line = candidate;
+        }
+        if (!line.empty() && y <= 646)
+            print(299, y, line, fontBody, kText, 987);
+        print(299, 680, "Blau / Info / Zurück: Schließen", fontSmall, kFocus);
+    }
+
+    void drawBrowserDeleteConfirm()
+    {
+        if (!browserDeleteConfirm) return;
+        const Recording *rec = browserSelectedRecording();
+        if (!rec) return;
+        panel(370, 325, 859, 240, true, kSurface);
+        print(409, 366, "Aufnahme löschen?", fontTitle, kText);
+        print(409, 435, rec->baseName, fontBody, kMuted, 776);
+        print(409, 512, "OK: Löschen   ·   Zurück: Abbrechen", fontBody, kFocus);
+    }
+
+    void drawRecordingBrowser()
+    {
+        fill(0, 0, 1599, 899, kBackground);
+        fill(0, 0, 1599, 76, kSurface);
+        print(33, 18, "VDR", fontTitle);
+        print(117, 18, "Suite", fontTitle, kFocus);
+        print(276, 23, "Aufnahmen", fontLarge);
+        print(1059, 23, std::to_string(data.recordings.size()) + " Aufnahmen", fontBody, kMuted);
+
+        const std::array<const char *, 3> views = {{"Ordner", "Genre", "Alle"}};
+        for (int i = 0; i < 3; ++i) {
+            const int x = 157 + i * 173;
+            const bool selected = int(recordingBrowser.view) == i;
+            panel(x, 107, 157, 51,
+                  recordingBrowser.tabsFocused && selected && !nav.sideFocused,
+                  selected ? kHighlight : kSurface);
+            print(x + 28, 120, views[i], fontBody, selected ? kText : kMuted);
+        }
+        const std::string sortText =
+            recordingBrowser.sort == suiteosd::RecordingBrowser::Sort::Newest ?
+            "Neueste zuerst" : "Nach Namen";
+        print(794, 123, "Sortierung: " + sortText, fontSmall, kMuted, 335);
+
+        std::string crumb = recordingBrowser.view ==
+            suiteosd::RecordingBrowser::View::Folders ?
+            recordingBrowser.folder : recordingBrowser.genre;
+        std::replace(crumb.begin(), crumb.end(), '~', '/');
+        if (crumb.empty())
+            crumb = recordingBrowser.view == suiteosd::RecordingBrowser::View::Folders ?
+                    "Alle Ordner" :
+                    recordingBrowser.view == suiteosd::RecordingBrowser::View::Genres ?
+                    "Alle Genres" : "Alle Aufnahmen";
+        print(166, 185, crumb, fontBody, kFocus, 900);
+
+        constexpr int columns = suiteosd::RecordingBrowser::kColumns;
+        for (int i = 0; i < suiteosd::RecordingBrowser::kVisibleItems; ++i) {
+            const int index = recordingBrowser.firstVisible + i;
+            if (index >= int(recordingBrowser.entries.size())) break;
+            const auto &entry = recordingBrowser.entries[index];
+            const int x = 157 + (i % columns) * 247;
+            const int y = 236 + (i / columns) * 187;
+            const bool focus = !nav.sideFocused && !recordingBrowser.tabsFocused &&
+                               index == recordingBrowser.selected;
+            panel(x, y, 224, 167, focus, kCardAlt);
+            if (entry.kind != suiteosd::BrowserEntry::Kind::Recording) {
+                fill(x + 12, y + 12, x + 211, y + 93, kLine);
+                print(x + 27, y + 26,
+                      entry.kind == suiteosd::BrowserEntry::Kind::Folder ?
+                      "ORDNER" : "GENRE", fontBody, kFocus);
+                print(x + 16, y + 105, entry.title, fontBody, kText, 197);
+                print(x + 16, y + 143, std::to_string(entry.count) + " Aufnahmen",
+                      fontSmall, kMuted, 194);
+                continue;
+            }
+            const Recording *rec = findRecording(entry.fileName);
+            if (!rec) continue;
+            const RecordingMeta &meta = metaFor(*rec);
+            fill(x + 13, y + 10, x + 211, y + 106, kLine);
+            if (meta.artwork.valid()) {
+                const suiteosd::Artwork &art = meta.artwork;
+                cImage image(cSize(art.width, art.height), art.argb.data());
+                const int centerX = X(x + 112) - art.width / 2;
+                const int centerY = Y(y + 58) - art.height / 2;
+                osd->DrawImage(cPoint(centerX, centerY), image);
+            } else
+                print(x + 27, y + 37, "AUFNAHME", fontBody, kMuted);
+            print(x + 15, y + 113, meta.title.empty() ? entry.title : meta.title,
+                  fontBody, kText, 192);
+            print(x + 15, y + 144,
+                  meta.episode.empty() ? rec->time : meta.episode,
+                  fontSmall, kMuted, 194);
+        }
+        if (recordingBrowser.entries.empty())
+            print(178, 345, "Keine Aufnahmen in dieser Ansicht", fontBody, kMuted, 922);
+
+        // Live-TV preview is VDR's existing primary video plane, not a
+        // streamed thumbnail or another player.
+        panel(1184, 105, 372, 667, false, kSurface);
+        print(1207, 115, "LIVE-TV", fontBody, kFocus);
+        if (scaledDevice && !scaledRect.IsEmpty()) {
+            // Carve an actual transparent OSD hole above the scaled video.
+            // This must happen AFTER the background was painted.
+            osd->DrawRectangle(
+                scaledRect.X(), scaledRect.Y(),
+                scaledRect.X() + scaledRect.Width() - 1,
+                scaledRect.Y() + scaledRect.Height() - 1, clrTransparent);
+        } else {
+            panel(1197, 151, 338, 190, false, kCard);
+            print(1217, 211, "TV-Vorschau nicht verfügbar", fontBody, kMuted, 300);
+            print(1217, 254, "Sender läuft unverändert weiter", fontSmall, kMuted, 298);
+        }
+        print(1202, 365, data.live.channel.empty() ? "Live-TV" : data.live.channel,
+              fontBody, kText, 322);
+        print(1202, 403, data.live.title, fontSmall, kMuted, 322);
+        const Recording *selected = browserSelectedRecording();
+        if (selected) {
+            const RecordingMeta &meta = metaFor(*selected);
+            print(1202, 466, "AUSGEWÄHLT", fontSmall, kFocus);
+            print(1202, 498, meta.title.empty() ? selected->baseName : meta.title,
+                  fontBody, kText, 320);
+            print(1202, 544, selected->time, fontSmall, kMuted);
+            if (!meta.genres.empty()) {
+                std::string joined;
+                for (const auto &name : meta.genres)
+                    joined += (joined.empty() ? "" : ", ") + name;
+                print(1202, 589, joined, fontSmall, kMuted, 323);
+            }
+        }
+        fill(16, 835, 1581, 895, kSurface);
+        print(155, 848, "Rot: Abspielen", fontSmall);
+        print(397, 848, "Grün: Sortieren", fontSmall);
+        print(650, 848, "Gelb: Löschen", fontSmall);
+        print(885, 848, "Blau: Info", fontSmall);
+        print(1105, 848, "0: Sortierung  ·  Zurück: Ordner/Home", fontSmall);
+        if (!browserNotice.empty()) {
+            fill(159, 782, 1563, 823, kSurface);
+            print(180, 791, browserNotice, fontSmall, kFocus, 1340);
+        }
+        drawSidebar();
+        drawBrowserDetails();
+        drawBrowserDeleteConfirm();
+    }
+
     void drawSidebar()
     {
         // Expanded sidebar overlays the content; it never permanently
@@ -1130,7 +1309,7 @@ private:
             const bool selected = nav.sideFocused && nav.sideIndex == i;
             if (selected)
                 panel(31, y, right - 51, 48, true, kHighlight);
-            else if (!nav.sideFocused && i == (timelineActive ? 2 : 0))
+            else if (!nav.sideFocused && i == (timelineActive ? 2 : recordingsActive ? 3 : 0))
                 panel(31, y, 52, 48, false, kHighlight);
             print(41, y + 13, kSymbols[i], fontSmall, kText, 56);
             if (nav.sideFocused)
@@ -1155,6 +1334,11 @@ private:
     {
         if (!osd)
             return;
+        if (recordingsActive) {
+            drawRecordingBrowser();
+            osd->Flush();
+            return;
+        }
         if (timelineActive) {
             drawTimeline();
             osd->Flush();
@@ -1251,6 +1435,7 @@ private:
 public:
     ~cSuiteHome() override
     {
+        restoreLivePreview();
         delete osd;
         delete fontTitle;
         delete fontLarge;
