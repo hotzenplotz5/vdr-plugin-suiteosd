@@ -2048,12 +2048,42 @@ public:
     }
 };
 
+// Also expose the same preference through VDR's original plugin setup menu.
+// Both entry points persist the exact same setting under the suiteosd plugin
+// namespace; no parallel settings file or database is created.
+class cMenuSuiteOsdSetup final : public cMenuSetupPage {
+private:
+    int livePreview;
+protected:
+    void Store(void) override
+    {
+        gLivePreviewEnabled = livePreview;
+        SetupStore("LivePreview", gLivePreviewEnabled);
+    }
+public:
+    cMenuSuiteOsdSetup(void)
+        : livePreview(gLivePreviewEnabled)
+    {
+        SetSection("VDR Suite-OSD");
+        Add(new cMenuEditBoolItem("Live-TV im Aufnahmenbrowser", &livePreview));
+    }
+};
+
 class cPluginSuiteOsd final : public cPlugin {
 public:
     const char *Version() override { return VERSION; }
     const char *Description() override { return tr(DESCRIPTION); }
     const char *MainMenuEntry() override { return tr("VDR Suite"); }
     cOsdObject *MainMenuAction() override { return new cSuiteHome(); }
+    cMenuSetupPage *SetupMenu() override { return new cMenuSuiteOsdSetup(); }
+    bool SetupParse(const char *Name, const char *Value) override
+    {
+        if (std::strcmp(Name, "LivePreview") == 0) {
+            gLivePreviewEnabled = std::atoi(Value) != 0 ? 1 : 0;
+            return true;
+        }
+        return false;
+    }
 };
 } // namespace
 
