@@ -150,7 +150,6 @@ class SuiteMenu final : public cSkinDisplayMenu {
     eMessageType messageType = mtStatus;
     eMenuCategory category = mcUnknown;
     eMenuSortMode sorting = msmUnknown;
-    std::array<int, 5> tabStops = {{0, 0, 0, 0, 0}};
     int totalItems = 0, firstItem = 0, currentIndex = -1;
     Body mode = Body::Items;
     Preview preview;
@@ -267,9 +266,9 @@ class SuiteMenu final : public cSkinDisplayMenu {
                                                      std::string::npos : pos - start);
             int offset = 0;
             if (column > 0) {
-                int tab = tabStops[std::min(column - 1, 4)];
-                // VDR tabs may represent characters or negative pixel offsets.
-                offset = tab < 0 ? -tab : tab * std::max(8, bodyFont ? bodyFont->Width("0") : 10);
+                // Tab() contains VDR's cumulative pixel position, including
+                // negative absolute-pixel tab stops and repeated offsets.
+                offset = Tab(column);
                 if (offset <= 0) offset = column * nominal / 3;
                 offset = std::min(offset, nominal - X(48));
             }
@@ -394,6 +393,9 @@ public:
 
     bool valid() const { return osd != nullptr && bodyFont != nullptr; }
     int MaxItems() override { return maxRows; }
+    int GetTextAreaWidth() const override { return X(1400); }
+    const cFont *GetTextAreaFont(bool FixedFont) const override
+    { return FixedFont ? small : bodyFont; }
 
     void SetMenuCategory(eMenuCategory value) override
     {
@@ -404,7 +406,7 @@ public:
     void SetTabs(int a, int b = 0, int c = 0, int d = 0, int e = 0) override
     {
         cSkinDisplayMenu::SetTabs(a, b, c, d, e);
-        tabStops = {{a, b, c, d, e}};
+        SetEditableWidth(std::max(X(160), X(930) - Tab(1)));
     }
     void Clear() override
     {
