@@ -251,10 +251,9 @@ class SuiteMenu final : public cSkinDisplayMenu {
         rect(0, 0, 1600, 900, kBase);
         rect(0, 0, 1600, 80, kSurface);
         rect(25, 18, 5, 44, kCyan);
-        text(47, 15, "VDR", heading, kWhite, 115);
-        text(146, 15, "Suite", heading, kCyan, 180);
+        text(47, 24, "VDR Suite", bodyFont, kWhite, 268);
         text(356, 24, title, bodyFont, kWhite, 960);
-        text(1420, 26, shortTime(time(nullptr)), bodyFont, kMuted, 145);
+        text(1390, 26, shortTime(time(nullptr)), bodyFont, kMuted, 175);
         rect(24, 81, 1551, 2, kLine);
 
         rect(18, 828, 1564, 62, kSurface);
