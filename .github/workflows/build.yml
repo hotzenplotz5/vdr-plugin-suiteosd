@@ -58,6 +58,13 @@ jobs:
       - name: Verify image_next source, folder, and paging navigation
         run: make check-photo-gallery
 
+  photo-carousel:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify inward-facing perspective and cross-fade pixel geometry
+        run: make check-photo-carousel
+
   epg-timeline:
     runs-on: ubuntu-24.04
     steps:
