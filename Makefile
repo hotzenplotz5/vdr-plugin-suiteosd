@@ -30,7 +30,7 @@ suiteosd.o: suiteosd.c navigation.h core_admin_client.h core_admin_navigation.h 
 suite_menu.o: suite_menu.c artwork_decode.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
-suite_skin.o: suite_skin.c artwork_decode.h vendor/tvscraper/services.h
+suite_skin.o: suite_skin.c artwork_decode.h logo_locator.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 core_admin_client.o: core_admin_client.c core_admin_client.h
