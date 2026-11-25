@@ -21,6 +21,7 @@
 #include <vector>
 
 namespace suiteosd {
+cSkinDisplayMenu *CreateSuiteMenu();
 namespace {
 constexpr tColor bg = 0xE9091729;
 constexpr tColor dark = 0xF6071426;
@@ -322,8 +323,7 @@ public:
 };
 
 class SuiteSkin final : public cSkin {
-    // Keep native VDR/plugin menus working unchanged until the separate
-    // Suite menu-display implementation is complete.
+    // A provider without TrueColor keeps the original VDR skin as fallback.
     cSkin *fallback()
     {
         for (cSkin *skin = Skins.First(); skin; skin = Skins.Next(skin))
@@ -332,11 +332,14 @@ class SuiteSkin final : public cSkin {
     }
 public:
     SuiteSkin() : cSkin("suiteosd") {}
-    const char *Description() override { return "VDR Suite (TV und Wiedergabe)"; }
+    const char *Description() override { return "VDR Suite"; }
     cSkinDisplayChannel *DisplayChannel(bool withInfo) override
     { return new class DisplayChannel(withInfo); }
     cSkinDisplayMenu *DisplayMenu() override
-    { return fallback() ? fallback()->DisplayMenu() : nullptr; }
+    {
+        if (cSkinDisplayMenu *menu = CreateSuiteMenu()) return menu;
+        return fallback() ? fallback()->DisplayMenu() : nullptr;
+    }
     cSkinDisplayReplay *DisplayReplay(bool modeOnly) override
     { return new class DisplayReplay(modeOnly); }
     cSkinDisplayVolume *DisplayVolume() override
