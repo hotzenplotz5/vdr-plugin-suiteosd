@@ -11,6 +11,7 @@
 #include "epg_timeline.h"
 #include "recording_browser.h"
 #include "photo_gallery.h"
+#include "photo_carousel.h"
 #include "logo_locator.h"
 #include "artwork_decode.h"
 #include "vendor/tvscraper/services.h"
@@ -36,6 +37,7 @@
 #include <array>
 #include <cstdio>
 #include <cmath>
+#include <chrono>
 #include <ctime>
 #include <cstring>
 #include <map>
@@ -63,6 +65,8 @@ constexpr tColor kLine = 0xFF20506D;
 // Suite-OSD configuration is stored under the plugin owner in VDR setup.conf.
 // This variable is loaded by SetupParse and written only through SetupStore.
 int gLivePreviewEnabled = 1;
+// Persisted through suiteosd.PhotoView: 0 = grid, 1 = carousel.
+int gPhotoViewMode = 1;
 char gCoreUrl[256] = "http://127.0.0.1:18080";
 
 struct Programme {
@@ -477,6 +481,13 @@ private:
     bool recordingsActive = false;
     bool photosActive = false;
     suiteosd::PhotoGallery photoGallery;
+    bool photoInfoVisible = false;
+    float photoVisualCenter = 0.0f;
+    float photoAnimationFrom = 0.0f;
+    float photoAnimationTo = 0.0f;
+    bool photoAnimating = false;
+    std::chrono::steady_clock::time_point photoAnimationStart{};
+    std::chrono::steady_clock::time_point photoLastFrame{};
     std::string photoNotice;
     std::map<std::string, imagenext::Thumbnail> photoThumbnails;
     bool browserDetails = false;
@@ -2589,6 +2600,8 @@ private:
             return false;
         }
         photoGallery.SetSources(std::move(request.sources));
+        photoVisualCenter = 0.0f;
+        photoAnimating = false;
         photoNotice.clear();
         if (photoGallery.sources.empty())
             photoNotice = "Keine Bildquellen konfiguriert (imagesources.conf)";
@@ -2615,6 +2628,8 @@ private:
             return false;
         }
         photoGallery.SetEntries(std::move(request.entries));
+        photoVisualCenter = 0.0f;
+        photoAnimating = false;
         photoNotice = photoGallery.entries.empty() ? "Dieser Ordner enthält keine Bilder" : "";
         return true;
     }
@@ -2629,6 +2644,9 @@ private:
         homeProgrammeDetails = false;
         recordingDetails = false;
         photosActive = true;
+        photoInfoVisible = false;
+        photoGallery.SetView(gPhotoViewMode ? suiteosd::PhotoGallery::View::Carousel :
+                                             suiteosd::PhotoGallery::View::Grid);
         nav.sideIndex = 8;
         nav.sideFocused = false;
         loadPhotoSources();
@@ -2642,9 +2660,17 @@ private:
         if (!provider || photoGallery.InSources())
             return false;
         bool changed = false;
-        const int last = std::min(photoGallery.Count(),
-                                  photoGallery.firstVisible + suiteosd::PhotoGallery::kVisible);
-        for (int i = photoGallery.firstVisible; i < last; ++i) {
+        const bool carousel = photoGallery.view == suiteosd::PhotoGallery::View::Carousel;
+        const int first = carousel ?
+            std::max(0, std::min(photoGallery.selected,
+                                  int(std::floor(photoVisualCenter))) - 3) :
+            photoGallery.firstVisible;
+        const int last = carousel ?
+            std::min(photoGallery.Count(),
+                     std::max(photoGallery.selected, int(std::ceil(photoVisualCenter))) + 4) :
+            std::min(photoGallery.Count(),
+                     photoGallery.firstVisible + suiteosd::PhotoGallery::kVisible);
+        for (int i = first; i < last; ++i) {
             const auto &item = photoGallery.entries[i];
             if (item.cover.empty()) continue;
             const std::string key = std::to_string(photoGallery.source) + ":" + item.cover;
@@ -2652,8 +2678,8 @@ private:
             imagenext::Thumbnail request;
             request.source = photoGallery.source;
             request.path = item.cover;
-            request.maxWidth = std::max(1, X(166));
-            request.maxHeight = std::max(1, Y(106));
+            request.maxWidth = std::min(896, std::max(1, X(carousel ? 720 : 266)));
+            request.maxHeight = std::min(896, std::max(1, Y(carousel ? 450 : 140)));
             if (provider->Service(imagenext::kThumbnail, &request) && request.ready) {
                 if (photoThumbnails.size() >= 20)
                     photoThumbnails.clear(); // bound the foreground ARGB copies
