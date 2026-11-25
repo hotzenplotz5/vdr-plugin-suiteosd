@@ -1442,14 +1442,23 @@ private:
     {
         if (!gLivePreviewEnabled || scaledDevice) return;
         cDevice *device = cDevice::PrimaryDevice();
-        if (!device || device->Replaying())
+        // Live DVB transfer mode has an attached player too. Only exclude
+        // real recording replay, not the transfer player used for live TV.
+        if (!device || (device->Replaying() && !device->Transferring()))
             return;
-        const cRect requested(X(1197), Y(151), X(338), Y(190));
+        const int left = cOsd::OsdLeft();
+        const int top = cOsd::OsdTop();
+        const cRect requested(left + X(1197), top + Y(151), X(338), Y(190));
         const cRect available = device->CanScaleVideo(requested);
-        if (available.IsEmpty())
-            return; // provider does not support video scaling
+        if (available.IsEmpty() ||
+            available.X() < requested.X() || available.Y() < requested.Y() ||
+            available.X() + available.Width() > requested.X() + requested.Width() ||
+            available.Y() + available.Height() > requested.Y() + requested.Height())
+            return; // never cover surrounding controls with the video plane
         scaledDevice = device;
-        scaledRect = available;
+        // The device uses screen coordinates, the OSD draws locally.
+        scaledRect = cRect(available.X() - left, available.Y() - top,
+                           available.Width(), available.Height());
         device->ScaleVideo(available);
     }
 
