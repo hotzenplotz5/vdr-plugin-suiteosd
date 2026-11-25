@@ -2858,44 +2858,163 @@ private:
         return osContinue;
     }
 
-    void drawPhotoGallery()
+    std::string photoFolderTitle() const
     {
-        fill(0, 0, 1599, 899, kBackground);
-        fill(0, 0, 1599, 76, kSurface);
-        print(33, 18, "VDR", fontTitle);
-        print(117, 18, "Suite", fontTitle, kFocus);
-        print(275, 23, "Bildergalerie", fontLarge);
-        print(1228, 26, "image_next", fontBody, kMuted);
-        panel(154, 98, 1006, 84, false, kSurface);
-        const std::string location = photoGallery.InSources() ?
-            "Bildquelle auswählen" :
-            (photoGallery.directory.empty() ? "Bilder" :
-             photoGallery.directory);
-        print(173, 115, location, fontBody, kText, 900);
-        print(173, 154, photoGallery.InSources() ? "Konfigurierte Quellen" :
-              std::to_string(photoGallery.Count()) + " Einträge",
-              fontSmall, kFocus);
+        if (photoGallery.InSources())
+            return "Bildquellen";
+        std::string source = "Bilder";
+        for (const auto &item : photoGallery.sources) {
+            if (item.index == photoGallery.source) {
+                source = item.title;
+                break;
+            }
+        }
+        return photoGallery.directory.empty() ?
+               source : source + " / " + photoGallery.directory;
+    }
 
-        const int start = photoGallery.firstVisible;
-        const int last = std::min(photoGallery.Count(), start + suiteosd::PhotoGallery::kVisible);
-        for (int index = start; index < last; ++index) {
-            const int visible = index - start;
-            const int x = 158 + (visible % suiteosd::PhotoGallery::kColumns) * 199;
-            const int y = 224 + (visible / suiteosd::PhotoGallery::kColumns) * 180;
-            const bool focused = !nav.sideFocused && index == photoGallery.selected;
-            panel(x, y, 184, 158, focused, focused ? kCardAlt : kCard);
-            fill(x + 10, y + 10, x + 174, y + 110, kLine);
+    void drawPhotoCarousel()
+    {
+        // The gallery uses all available width. The floor/reflections are
+        // native true-colour OSD pixels; there is no browser or GPU dependency.
+        for (int y = 568; y < 810; y += 12) {
+            const int intensity = std::max(0, 0x34 - (y - 568) / 5);
+            fill(0, y, 1599, y + 11,
+                 (0xD0U << 24) | (uint32_t(intensity / 3) << 16) |
+                 (uint32_t(intensity) << 8) | uint32_t(intensity + 12));
+        }
 
-            std::string name;
-            bool folder = true;
+        // Photos farther away are painted first, so arriving photos appear
+        // to travel in front of the receding ones, towards the centre.
+        const float centre = photoVisualCenter;
+        std::vector<int> visible;
+        const int first = std::max(0, int(std::floor(centre)) - 3);
+        const int last = std::min(photoGallery.Count(), int(std::ceil(centre)) + 4);
+        for (int index = first; index < last; ++index)
+            if (std::fabs(float(index) - centre) <= 2.22f)
+                visible.push_back(index);
+        std::stable_sort(visible.begin(), visible.end(), [centre](int a, int b) {
+            return std::fabs(float(a) - centre) > std::fabs(float(b) - centre);
+        });
+
+        for (int index : visible) {
+            const auto slot = suiteosd::CarouselGeometry(float(index) - centre);
+            if (slot.width < 1 || slot.height < 1) continue;
+            const bool foreground =
+                std::fabs(float(index) - centre) < 0.5f;
+            const int drawX = X(slot.x);
+            const int drawY = Y(slot.y);
+            const int drawW = std::max(1, X(slot.width));
+            const int drawH = std::max(1, Y(slot.height));
+
+            std::string label;
             std::string cover;
+            bool folder = true;
+            if (photoGallery.InSources()) {
+                label = photoGallery.sources[index].title;
+            } else {
+                const auto &item = photoGallery.entries[index];
+                label = item.name;
+                cover = item.cover;
+                folder = item.directory;
+            }
+
+            // Deep cyan focus surround; side cards have quieter blue edges.
+            if (foreground) {
+                fill(slot.x - 9, slot.y - 9,
+                     slot.x + slot.width + 9, slot.y + slot.height + 9,
+                     0x6637C8EE);
+                fill(slot.x - 4, slot.y - 4,
+                     slot.x + slot.width + 4, slot.y + slot.height + 4,
+                     kFocus);
+            }
+
+            const std::string key = std::to_string(photoGallery.source) + ":" + cover;
+            const auto found = cover.empty() ? photoThumbnails.end() :
+                              photoThumbnails.find(key);
+            bool rendered = false;
+            if (found != photoThumbnails.end() && found->second.ready &&
+                !found->second.argb.empty()) {
+                const auto &thumb = found->second;
+                const auto picture = suiteosd::WarpCarousel(
+                    thumb.argb.data(), thumb.width, thumb.height,
+                    drawW, drawH, slot.side, slot.inset, slot.opacity);
+                if (picture.valid()) {
+                    cImage image(cSize(picture.width, picture.height),
+                                 picture.argb.data());
+                    osd->DrawImage(cPoint(drawX, drawY), image);
+                    const auto reflection = suiteosd::ReflectCarousel(
+                        picture, std::max(1, Y(foreground ? 72 : 48)));
+                    if (reflection.valid()) {
+                        cImage mirror(cSize(reflection.width, reflection.height),
+                                      reflection.argb.data());
+                        osd->DrawImage(cPoint(drawX, drawY + drawH + Y(9)), mirror);
+                    }
+                    rendered = true;
+                }
+            }
+            if (!rendered) {
+                fill(slot.x + 1, slot.y + 1,
+                     slot.x + slot.width - 1, slot.y + slot.height - 1,
+                     foreground ? kCardAlt : kCard);
+                print(slot.x + 16, slot.y + slot.height / 2 - 20,
+                      folder ? "ORDNER" : "FOTO", fontBody,
+                      foreground ? kFocus : kMuted,
+                      std::max(1, slot.width - 28));
+                if (foreground)
+                    print(slot.x + 17, slot.y + slot.height / 2 + 16,
+                          label, fontSmall, kText, slot.width - 35);
+            }
+        }
+
+        std::string name;
+        if (photoGallery.InSources()) {
+            const auto *entry = photoGallery.SelectedSource();
+            if (entry) name = entry->title;
+        } else {
+            const auto *entry = photoGallery.SelectedEntry();
+            if (entry) name = entry->name;
+        }
+        if (photoGallery.Count()) {
+            print(454, 694, name, fontLarge, kText, 692);
+            print(678, 745, "<   " +
+                  std::to_string(photoGallery.selected + 1) + " / " +
+                  std::to_string(photoGallery.Count()) + "   >",
+                  fontBody, kMuted, 250);
+            // Five position markers underneath the focussed photo.
+            for (int i = -2; i <= 2; ++i)
+                fill(795 + i * 36, 793, 808 + i * 36, 801,
+                     i == 0 ? kFocus : kLine);
+        } else if (photoNotice.empty()) {
+            print(376, 480, "Dieser Ordner enthält keine Fotos",
+                  fontLarge, kMuted, 890);
+        }
+    }
+
+    void drawPhotoGrid()
+    {
+        // The original grid remains available and uses the same cached
+        // image_next thumbnails, now without an unnecessary right panel.
+        const int start = photoGallery.firstVisible;
+        const int last = std::min(photoGallery.Count(),
+                                  start + suiteosd::PhotoGallery::kVisible);
+        for (int index = start; index < last; ++index) {
+            const int cell = index - start;
+            const int x = 41 + (cell % suiteosd::PhotoGallery::kColumns) * 310;
+            const int y = 210 + (cell / suiteosd::PhotoGallery::kColumns) * 194;
+            const bool focused = index == photoGallery.selected;
+            panel(x, y, 291, 176, focused, kCardAlt);
+            fill(x + 10, y + 10, x + 280, y + 133, kLine);
+            std::string name;
+            std::string cover;
+            bool folder = true;
             if (photoGallery.InSources()) {
                 name = photoGallery.sources[index].title;
             } else {
                 const auto &item = photoGallery.entries[index];
                 name = item.name;
-                folder = item.directory;
                 cover = item.cover;
+                folder = item.directory;
             }
             const auto found = photoThumbnails.find(
                 std::to_string(photoGallery.source) + ":" + cover);
@@ -2903,54 +3022,64 @@ private:
                 found->second.ready && !found->second.argb.empty()) {
                 const auto &thumb = found->second;
                 cImage picture(cSize(thumb.width, thumb.height), thumb.argb.data());
-                osd->DrawImage(cPoint(X(x + 92) - thumb.width / 2,
-                                      Y(y + 60) - thumb.height / 2), picture);
-            } else {
-                print(x + 29, y + 45, folder ? "ORDNER" : "BILD",
-                      fontBody, focused ? kFocus : kMuted, 140);
-            }
-            print(x + 11, y + 121, name, fontSmall, kText, 161);
+                osd->DrawImage(cPoint(X(x + 145) - thumb.width / 2,
+                                      Y(y + 70) - thumb.height / 2), picture);
+            } else
+                print(x + 32, y + 53, folder ? "ORDNER" : "FOTO",
+                      fontBody, focused ? kFocus : kMuted, 221);
+            print(x + 13, y + 144, name, fontSmall, kText, 263);
         }
+        if (!photoGallery.Count() && photoNotice.empty())
+            print(200, 410, "Keine Bilder vorhanden", fontLarge, kMuted);
+    }
 
-        panel(1182, 99, 376, 678, false, kSurface);
-        print(1204, 122, "AUSGEWÄHLT", fontSmall, kFocus);
-        std::string title = "";
-        std::string kind = "";
-        if (photoGallery.InSources()) {
-            const auto *src = photoGallery.SelectedSource();
-            if (src) { title = src->title; kind = "Bildquelle"; }
-        } else {
-            const auto *photo = photoGallery.SelectedEntry();
-            if (photo) {
-                title = photo->name;
-                kind = photo->directory ? "Ordner" : "Bilddatei";
+    void drawPhotoGallery()
+    {
+        fill(0, 0, 1599, 899, kBackground);
+        fill(0, 0, 1599, 76, kSurface);
+        print(32, 18, "VDR", fontTitle);
+        print(120, 18, "SuiteOSD", fontTitle, kFocus);
+        print(355, 24, "Bilder", fontLarge, kMuted);
+        print(1468, 27, formatTime(time(nullptr)), fontBody, kText);
+
+        // The title bar contains only the currently selected folder/source.
+        panel(20, 94, 1560, 63, false, kSurface);
+        print(76, 105, photoFolderTitle(), fontLarge, kText, 1430);
+
+        if (photoGallery.view == suiteosd::PhotoGallery::View::Carousel)
+            drawPhotoCarousel();
+        else
+            drawPhotoGrid();
+
+        // One compact footer; no sidebar, permanent info panel or menus.
+        panel(20, 827, 1560, 66, false, kSurface);
+        fill(81, 845, 129, 875, 0xFFE42330);
+        print(91, 846, "OK", fontSmall, kText);
+        print(151, 846, "Vollbild", fontSmall, kText);
+        fill(366, 845, 410, 875, 0xFF138D35);
+        print(377, 847, ">", fontSmall, kText);
+        print(425, 846, "Diashow", fontSmall, kText);
+        fill(682, 845, 722, 875, 0xFFEAC10C);
+        print(698, 846, "i", fontSmall, kBackground);
+        print(738, 846, "Info", fontSmall, kText);
+        fill(909, 845, 949, 875, 0xFF1468D9);
+        print(919, 846, "1", fontSmall, kText);
+        print(969, 846,
+              photoGallery.view == suiteosd::PhotoGallery::View::Carousel ?
+              "Raster wählen" : "Karussell wählen", fontSmall, kText, 265);
+        print(1328, 846, "Zurück: Ordner", fontSmall, kMuted, 248);
+
+        if (photoInfoVisible) {
+            const auto *entry = photoGallery.SelectedEntry();
+            if (entry) {
+                fill(235, 775, 1390, 814, kSurface);
+                print(257, 784, entry->path, fontSmall, kText, 1100);
             }
         }
-        print(1204, 167, title, fontBody, kText, 324);
-        print(1204, 210, kind, fontSmall, kMuted);
-        if (photoGallery.Count()) {
-            print(1204, 274, "Eintrag " + std::to_string(photoGallery.selected + 1) +
-                  " / " + std::to_string(photoGallery.Count()), fontSmall, kMuted);
-        }
-        print(1204, 365, "Bildquelle: image_next", fontSmall, kFocus);
-        print(1204, 405, "Vorschauen: Image Next Cache", fontSmall, kMuted);
-        print(1204, 446, "Wiedergabe: Image Next", fontSmall, kMuted);
-        if (!photoGallery.InSources())
-            print(1204, 538, "OK  Bild öffnen", fontBody, kText);
-        print(1204, 577, "Grün  Diashow starten", fontSmall, kMuted);
-        print(1204, 620, "Zurück  Ordner / Home", fontSmall, kMuted);
-
-        fill(16, 836, 1583, 894, kSurface);
-        print(154, 849, "OK/Rot: Öffnen", fontSmall);
-        print(412, 849, "Grün: Diashow", fontSmall);
-        print(680, 849, "Gelb: Info", fontSmall);
-        print(921, 849, "Blau: Zurück", fontSmall);
-        print(1194, 849, "0: Aktualisieren", fontSmall);
         if (!photoNotice.empty()) {
-            fill(163, 788, 1554, 833, kSurface);
-            print(180, 798, photoNotice, fontSmall, kFocus, 1300);
+            fill(161, 777, 1480, 820, kSurface);
+            print(188, 785, photoNotice, fontSmall, kFocus, 1262);
         }
-        drawSidebar();
     }
 
     void drawSidebar()
