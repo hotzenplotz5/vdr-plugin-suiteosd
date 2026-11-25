@@ -2563,6 +2563,310 @@ private:
         return osContinue;
     }
 
+    // SuiteOSD only presents and navigates; image_next owns configured
+    // sources, directory enumeration, decoding and the VDR photo player.
+    cPlugin *imageNext() const
+    {
+        return cPluginManager::GetPlugin("image_next");
+    }
+
+    bool loadPhotoSources()
+    {
+        photoThumbnails.clear();
+        imagenext::Browse request;
+        cPlugin *provider = imageNext();
+        if (!provider || !provider->Service(imagenext::kBrowse, &request) ||
+            !request.success) {
+            photoGallery.SetSources({});
+            photoNotice = provider ? "image_next: Galerie-Service nicht verfügbar" :
+                                     "image_next ist nicht installiert oder geladen";
+            return false;
+        }
+        photoGallery.SetSources(std::move(request.sources));
+        photoNotice.clear();
+        if (photoGallery.sources.empty())
+            photoNotice = "Keine Bildquellen konfiguriert (imagesources.conf)";
+        else if (photoGallery.sources.size() == 1) {
+            const int source = photoGallery.sources.front().index;
+            photoGallery.OpenSource(source);
+            return loadPhotoDirectory();
+        }
+        return true;
+    }
+
+    bool loadPhotoDirectory()
+    {
+        photoThumbnails.clear();
+        imagenext::Browse request;
+        request.source = photoGallery.source;
+        request.directory = photoGallery.directory;
+        cPlugin *provider = imageNext();
+        if (!provider || !provider->Service(imagenext::kBrowse, &request) ||
+            !request.success) {
+            photoGallery.SetEntries({});
+            photoNotice = request.error.empty() ? "Bilderordner nicht verfügbar" :
+                                                request.error;
+            return false;
+        }
+        photoGallery.SetEntries(std::move(request.entries));
+        photoNotice = photoGallery.entries.empty() ? "Dieser Ordner enthält keine Bilder" : "";
+        return true;
+    }
+
+    void openPhotoGallery()
+    {
+        if (settingsActive) coreAdmin.logout();
+        settingsActive = false;
+        if (recordingsActive) closeRecordingBrowser();
+        timelineActive = false;
+        timelineDetails = false;
+        homeProgrammeDetails = false;
+        recordingDetails = false;
+        photosActive = true;
+        nav.sideIndex = 8;
+        nav.sideFocused = false;
+        loadPhotoSources();
+    }
+
+    // Requests the visible bitmaps only. image_next returns not-ready
+    // immediately and completes the load on its existing thumbnail worker.
+    bool pollPhotoThumbnails()
+    {
+        cPlugin *provider = imageNext();
+        if (!provider || photoGallery.InSources())
+            return false;
+        bool changed = false;
+        const int last = std::min(photoGallery.Count(),
+                                  photoGallery.firstVisible + suiteosd::PhotoGallery::kVisible);
+        for (int i = photoGallery.firstVisible; i < last; ++i) {
+            const auto &item = photoGallery.entries[i];
+            if (item.cover.empty()) continue;
+            const std::string key = std::to_string(photoGallery.source) + ":" + item.cover;
+            if (photoThumbnails.find(key) != photoThumbnails.end()) continue;
+            imagenext::Thumbnail request;
+            request.source = photoGallery.source;
+            request.path = item.cover;
+            request.maxWidth = std::max(1, X(166));
+            request.maxHeight = std::max(1, Y(106));
+            if (provider->Service(imagenext::kThumbnail, &request) && request.ready) {
+                if (photoThumbnails.size() >= 20)
+                    photoThumbnails.clear(); // bound the foreground ARGB copies
+                photoThumbnails.emplace(key, std::move(request));
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    eOSState playPhoto(bool slideshow)
+    {
+        const imagenext::Entry *selected = photoGallery.SelectedEntry();
+        if (!selected || selected->directory)
+            return osContinue;
+        imagenext::Play request;
+        request.source = photoGallery.source;
+        request.path = selected->path;
+        request.slideshow = slideshow;
+        cPlugin *provider = imageNext();
+        if (provider && provider->Service(imagenext::kPlay, &request) && request.started)
+            return osEnd; // The existing image_next cControl now owns playback.
+        photoNotice = "Bild konnte nicht mit image_next geöffnet werden";
+        draw();
+        return osContinue;
+    }
+
+    eOSState photoKey(eKeys base)
+    {
+        if (base == kNone) {
+            if (pollPhotoThumbnails()) draw();
+            return osContinue;
+        }
+        if (nav.sideFocused) {
+            if (base == kUp)
+                nav.sideIndex = std::max(0, nav.sideIndex - 1);
+            else if (base == kDown)
+                nav.sideIndex = std::min(suiteosd::Navigation::kSidebarItems - 1,
+                                         nav.sideIndex + 1);
+            else if (base == kRight || base == kBack)
+                nav.sideFocused = false;
+            else if (base == kOk) {
+                nav.sideFocused = false;
+                if (nav.sideIndex != 8) {
+                    photosActive = false;
+                    photoThumbnails.clear();
+                    if (nav.sideIndex == 0) {
+                        nav.section = 0;
+                        draw();
+                        return osContinue;
+                    }
+                    const eOSState next = action(suiteosd::Activation::Module);
+                    if (next != osContinue)
+                        return next;
+                }
+            }
+            draw();
+            return osContinue;
+        }
+
+        if (base == kBack || base == kBlue) {
+            if (!photoGallery.Back()) {
+                photosActive = false;
+                photoThumbnails.clear();
+                nav.section = 0;
+            } else if (photoGallery.InSources()) {
+                // Preserve the source-selection level after leaving a source.
+                imagenext::Browse sources;
+                cPlugin *provider = imageNext();
+                if (provider && provider->Service(imagenext::kBrowse, &sources) &&
+                    sources.success)
+                    photoGallery.SetSources(std::move(sources.sources));
+            } else {
+                loadPhotoDirectory();
+            }
+        } else if (base == kLeft) {
+            if (photoGallery.selected % suiteosd::PhotoGallery::kColumns == 0) {
+                nav.sideFocused = true;
+                nav.sideIndex = 8;
+            } else
+                photoGallery.Move(-1, 0);
+        } else if (base == kRight)
+            photoGallery.Move(1, 0);
+        else if (base == kUp)
+            photoGallery.Move(0, -1);
+        else if (base == kDown)
+            photoGallery.Move(0, 1);
+        else if (base == kChanUp)
+            photoGallery.Page(1);
+        else if (base == kChanDn)
+            photoGallery.Page(-1);
+        else if (base == k0) {
+            if (photoGallery.InSources())
+                loadPhotoSources();
+            else
+                loadPhotoDirectory();
+        } else if (base == kYellow || base == kInfo) {
+            const auto *entry = photoGallery.SelectedEntry();
+            if (entry)
+                photoNotice = entry->directory ? "Ordner: " + entry->name :
+                                                   "Foto: " + entry->name;
+        } else if (base == kOk || base == kRed || base == kGreen) {
+            if (photoGallery.InSources()) {
+                const auto *source = photoGallery.SelectedSource();
+                if (source) {
+                    photoGallery.OpenSource(source->index);
+                    loadPhotoDirectory();
+                }
+            } else {
+                const auto *entry = photoGallery.SelectedEntry();
+                if (entry && entry->directory) {
+                    photoGallery.OpenDirectory(entry->path);
+                    loadPhotoDirectory();
+                } else if (entry) {
+                    return playPhoto(base == kGreen);
+                }
+            }
+        } else
+            return osContinue;
+
+        draw();
+        return osContinue;
+    }
+
+    void drawPhotoGallery()
+    {
+        fill(0, 0, 1599, 899, kBackground);
+        fill(0, 0, 1599, 76, kSurface);
+        print(33, 18, "VDR", fontTitle);
+        print(117, 18, "Suite", fontTitle, kFocus);
+        print(275, 23, "Bildergalerie", fontLarge);
+        print(1228, 26, "image_next", fontBody, kMuted);
+        panel(154, 98, 1006, 84, false, kSurface);
+        const std::string location = photoGallery.InSources() ?
+            "Bildquelle auswählen" :
+            (photoGallery.directory.empty() ? "Bilder" :
+             photoGallery.directory);
+        print(173, 115, location, fontBody, kText, 900);
+        print(173, 154, photoGallery.InSources() ? "Konfigurierte Quellen" :
+              std::to_string(photoGallery.Count()) + " Einträge",
+              fontSmall, kFocus);
+
+        const int start = photoGallery.firstVisible;
+        const int last = std::min(photoGallery.Count(), start + suiteosd::PhotoGallery::kVisible);
+        for (int index = start; index < last; ++index) {
+            const int visible = index - start;
+            const int x = 158 + (visible % suiteosd::PhotoGallery::kColumns) * 199;
+            const int y = 224 + (visible / suiteosd::PhotoGallery::kColumns) * 180;
+            const bool focused = !nav.sideFocused && index == photoGallery.selected;
+            panel(x, y, 184, 158, focused, focused ? kCardAlt : kCard);
+            fill(x + 10, y + 10, x + 174, y + 110, kLine);
+
+            std::string name;
+            bool folder = true;
+            std::string cover;
+            if (photoGallery.InSources()) {
+                name = photoGallery.sources[index].title;
+            } else {
+                const auto &item = photoGallery.entries[index];
+                name = item.name;
+                folder = item.directory;
+                cover = item.cover;
+            }
+            const auto found = photoThumbnails.find(
+                std::to_string(photoGallery.source) + ":" + cover);
+            if (!cover.empty() && found != photoThumbnails.end() &&
+                found->second.ready && !found->second.argb.empty()) {
+                const auto &thumb = found->second;
+                cImage picture(cSize(thumb.width, thumb.height), thumb.argb.data());
+                osd->DrawImage(cPoint(X(x + 92) - thumb.width / 2,
+                                      Y(y + 60) - thumb.height / 2), picture);
+            } else {
+                print(x + 29, y + 45, folder ? "ORDNER" : "BILD",
+                      fontBody, focused ? kFocus : kMuted, 140);
+            }
+            print(x + 11, y + 121, name, fontSmall, kText, 161);
+        }
+
+        panel(1182, 99, 376, 678, false, kSurface);
+        print(1204, 122, "AUSGEWÄHLT", fontSmall, kFocus);
+        std::string title = "";
+        std::string kind = "";
+        if (photoGallery.InSources()) {
+            const auto *src = photoGallery.SelectedSource();
+            if (src) { title = src->title; kind = "Bildquelle"; }
+        } else {
+            const auto *photo = photoGallery.SelectedEntry();
+            if (photo) {
+                title = photo->name;
+                kind = photo->directory ? "Ordner" : "Bilddatei";
+            }
+        }
+        print(1204, 167, title, fontBody, kText, 324);
+        print(1204, 210, kind, fontSmall, kMuted);
+        if (photoGallery.Count()) {
+            print(1204, 274, "Eintrag " + std::to_string(photoGallery.selected + 1) +
+                  " / " + std::to_string(photoGallery.Count()), fontSmall, kMuted);
+        }
+        print(1204, 365, "Bildquelle: image_next", fontSmall, kFocus);
+        print(1204, 405, "Vorschauen: Image Next Cache", fontSmall, kMuted);
+        print(1204, 446, "Wiedergabe: Image Next", fontSmall, kMuted);
+        if (!photoGallery.InSources())
+            print(1204, 538, "OK  Bild öffnen", fontBody, kText);
+        print(1204, 577, "Grün  Diashow starten", fontSmall, kMuted);
+        print(1204, 620, "Zurück  Ordner / Home", fontSmall, kMuted);
+
+        fill(16, 836, 1583, 894, kSurface);
+        print(154, 849, "OK/Rot: Öffnen", fontSmall);
+        print(412, 849, "Grün: Diashow", fontSmall);
+        print(680, 849, "Gelb: Info", fontSmall);
+        print(921, 849, "Blau: Zurück", fontSmall);
+        print(1194, 849, "0: Aktualisieren", fontSmall);
+        if (!photoNotice.empty()) {
+            fill(163, 788, 1554, 833, kSurface);
+            print(180, 798, photoNotice, fontSmall, kFocus, 1300);
+        }
+        drawSidebar();
+    }
+
     void drawSidebar()
     {
         // Expanded sidebar overlays the content; it never permanently
