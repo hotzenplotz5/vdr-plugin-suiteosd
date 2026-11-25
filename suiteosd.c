@@ -581,8 +581,7 @@ private:
     void drawTimelineHeader()
     {
         fill(0, 0, 1600, 77, kSurface);
-        print(33, 19, "VDR", fontTitle);
-        print(116, 19, "Suite", fontTitle, kFocus);
+        print(33, 24, "VDR Suite", fontLarge, kText, 226);
         print(276, 24, "EPG Zeitleiste", fontLarge);
         print(1250, 25, "Jetzt " + formatTime(time(nullptr)), fontBody, kMuted);
         panel(149, 88, 1418, 96, false, kSurface);
@@ -1239,12 +1238,9 @@ private:
     void drawHeader()
     {
         fill(0, 0, 1600, 72, kSurface);
-        print(32, 18, "VDR", fontTitle);
-        print(115, 18, "Suite", fontTitle, kFocus);
-        print(244, 26, "TV-OSD", fontBody, kMuted);
-        print(424, 26, "Live-TV  |  " + data.live.channel, fontBody);
-        time_t now = time(nullptr);
-        print(1460, 22, formatTime(now), fontTitle);
+        print(32, 23, "VDR Suite", fontLarge, kText, 226);
+        print(284, 26, "Live-TV  |  " + data.live.channel, fontBody, kMuted, 1040);
+        print(1390, 24, formatTime(time(nullptr)), fontLarge, kText, 175);
     }
 
     void drawHero(int scroll)
@@ -1271,9 +1267,21 @@ private:
         fill(189, y + 242, 805, y + 250, kLine);
         fill(189, y + 242, 189 + (616 * data.live.progress / 100), y + 250, kFocus);
         panel(875, y + 18, 652, 224, false, kCardAlt);
-        print(928, y + 70, "Live-TV", fontLarge, kText);
-        print(928, y + 118, "Bildausgabe durch VDR / Ausgabeplugin", fontBody, kMuted, 560);
-        print(928, y + 157, "Kein separater Streaming-Player", fontSmall, kMuted);
+        print(899, y + 39, "ZUR SENDUNG", fontSmall, kFocus);
+        const std::string synopsis = data.live.description.empty() ?
+            "Keine Beschreibung verfügbar." : data.live.description;
+        std::istringstream words(synopsis);
+        std::string line, word;
+        int lineY = y + 79;
+        while (words >> word && lineY <= y + 195) {
+            const std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(598)) {
+                print(899, lineY, line, fontBody, kText, 598);
+                lineY += 34;
+                line = word;
+            } else line = candidate;
+        }
+        if (lineY <= y + 195) print(899, lineY, line, fontBody, kText, 598);
     }
 
     void drawPrograms(int section, int y, const char *heading, const std::vector<Programme> &items)
@@ -1291,7 +1299,12 @@ private:
             const bool focus = !nav.sideFocused && nav.section == section &&
                                nav.card[section] == first + col;
             panel(x, y + 48, cw, 160, focus, kCard);
-            print(x + 13, y + 61, item.channel, fontBody, kText, cw - 25);
+            suiteosd::TimelineChannel logoChannel;
+            logoChannel.name = item.channel;
+            if (!drawChannelLogo(logoChannel, x + 10, y + 55, 65, 43))
+                print(x + 13, y + 61, item.channel, fontBody, kText, cw - 25);
+            else
+                print(x + 82, y + 64, item.channel, fontSmall, kText, cw - 92);
             print(x + 13, y + 104, item.title, fontSmall, kText, cw - 24);
             print(x + 13, y + 132, item.time, fontSmall, kMuted, cw - 24);
             fill(x + 13, y + 190, x + cw - 13, y + 198, kLine);
@@ -1564,8 +1577,7 @@ private:
             osd->DrawImage(cPoint(X(1585) - image.fanart.width, Y(91)), art);
         }
         fill(0, 0, 1599, 78, kSurface);
-        print(35, 17, "VDR", fontTitle);
-        print(117, 17, "Suite", fontTitle, kFocus);
+        print(35, 22, "VDR Suite", fontLarge, kText, 226);
         print(284, 24, "AUFNAHMEN  /  DETAILS", fontBody, kMuted);
         print(1440, 23, formatTime(time(nullptr)), fontLarge);
 
@@ -1663,8 +1675,7 @@ private:
     {
         fill(0, 0, 1599, 899, kBackground);
         fill(0, 0, 1599, 76, kSurface);
-        print(33, 18, "VDR", fontTitle);
-        print(117, 18, "Suite", fontTitle, kFocus);
+        print(33, 23, "VDR Suite", fontLarge, kText, 226);
         print(276, 23, "Aufnahmen", fontLarge);
         print(1059, 23, std::to_string(data.recordings.size()) + " Aufnahmen", fontBody, kMuted);
 
@@ -1747,8 +1758,10 @@ private:
                 scaledRect.Y() + scaledRect.Height() - 1, clrTransparent);
         } else {
             panel(1197, 151, 338, 190, false, kCard);
-            print(1217, 211, "TV-Vorschau nicht verfügbar", fontBody, kMuted, 300);
-            print(1217, 254, "Sender läuft unverändert weiter", fontSmall, kMuted, 298);
+            suiteosd::TimelineChannel logoChannel;
+            logoChannel.name = data.live.channel;
+            drawChannelLogo(logoChannel, 1207, 175, 318, 86);
+            print(1217, 273, "Live-TV läuft weiter", fontBody, kText, 300);
         }
         print(1202, 365, data.live.channel.empty() ? "Live-TV" : data.live.channel,
               fontBody, kText, 322);
@@ -1954,8 +1967,7 @@ private:
     {
         fill(0, 0, 1599, 899, kBackground);
         fill(0, 0, 1599, 76, kSurface);
-        print(33, 18, "VDR", fontTitle);
-        print(117, 18, "Suite", fontTitle, kFocus);
+        print(33, 23, "VDR Suite", fontLarge, kText, 226);
         print(279, 23, corePageName(coreNav.page), fontLarge);
         print(1250, 29, "Core-Verwaltung", fontSmall, kMuted);
         panel(148, 113, 1417, 700, false, kSurface);
@@ -2341,8 +2353,7 @@ private:
         }
         fill(0, 0, 1599, 899, kBackground);
         fill(0, 0, 1599, 76, kSurface);
-        print(33, 18, "VDR", fontTitle);
-        print(117, 18, "Suite", fontTitle, kFocus);
+        print(33, 23, "VDR Suite", fontLarge, kText, 226);
         print(274, 23, "Einstellungen", fontLarge);
         print(1154, 27, "VDR + Suite", fontBody, kMuted);
 
@@ -3037,10 +3048,9 @@ private:
     {
         fill(0, 0, 1599, 899, kBackground);
         fill(0, 0, 1599, 76, kSurface);
-        print(32, 18, "VDR", fontTitle);
-        print(120, 18, "SuiteOSD", fontTitle, kFocus);
-        print(355, 24, "Bilder", fontLarge, kMuted);
-        print(1468, 27, formatTime(time(nullptr)), fontBody, kText);
+        print(32, 23, "VDR Suite", fontLarge, kText, 226);
+        print(284, 24, "Bilder", fontLarge, kMuted, 1000);
+        print(1390, 24, formatTime(time(nullptr)), fontLarge, kText, 175);
 
         // The title bar contains only the currently selected folder/source.
         panel(20, 94, 1560, 63, false, kSurface);
