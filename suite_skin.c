@@ -371,7 +371,7 @@ public:
     DisplayTracks(const char *Title, int NumTracks, const char *const *Tracks)
       : canvas(330), heading(Title ? Title : "Audio / Sprache")
     {
-        const int count = std::clamp(NumTracks, 0, 256);
+        const int count = std::max(0, NumTracks);
         tracks.reserve(count);
         for (int i = 0; i < count; ++i)
             tracks.emplace_back(Tracks && Tracks[i] ? Tracks[i] : "");
