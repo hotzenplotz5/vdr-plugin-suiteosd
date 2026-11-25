@@ -39,6 +39,35 @@ OSD frame -> VDR cOsdProvider -> vaapivideo oder anderes Ausgabeplugin -> HDMI
 
 **Ausgabeplugin-Unabhängigkeit:** Keine Includes, Bibliotheken, gerätespezifischen Patches oder internen Methoden aus `vaapivideo`. Die tatsächlichen Darstellungsmöglichkeiten (TrueColor, Auflösung, Bilder) sind zur Laufzeit über VDR zu bestimmen. Bei einem schwächeren OSD-Provider muss die Kernbedienbarkeit erhalten bleiben; nicht unterstützte Effekte werden weggelassen.
 
+## Renderwege: nativer Standard und möglicher GPU-Pfad (25.11.2026)
+
+**Verbindliche Entscheidung:** Die native VDR-OSD-API bleibt der produktive Standard und der langfristig erhaltene Rückfallweg. Sie darf durch eine mögliche spätere GPU-/Web-UI-Darstellung weder ersetzt noch zur zweiten Wahl mit reduzierter Bedienbarkeit degradiert werden. Das Suite-OSD muss ohne CEF, DMA-BUF-Import oder spezielle Ausgabeplugin-Patches nutzbar bleiben.
+
+**Standard / dauerhaft unterstützter Fallback (bestehende Architektur):**
+
+```text
+VDR-Suite / suiteosd (native Menüs, cSkin, cOsdObject)
+    -> VDR-OSD-API (TrueColor-/ARGB-Flächen, sofern unterstützt)
+    -> aktiver VDR-OSD-Provider / Ausgabeplugin
+    -> gerätespezifische Ausgabe und Bildkomposition -> TV
+```
+
+Die im Ideendiagramm genannte Abfolge „ARGB Bitmap → vaapivideo → DRM Overlay“ ist **schematisch**: Ob und wie ein konkretes Ausgabeplugin das OSD per DRM-Plane, GPU-Komposition oder anderem Mechanismus ausgibt, ist eine Implementierungs- und Hardwarefrage. Daraus ergibt sich **kein** verifizierter generischer DRM-Overlay-Vertrag. Der bestehende TrueColor-Fallback auf andere VDR-Skins bei nicht unterstützten 32-Bit-Flächen bleibt unabhängig davon erhalten.
+
+**Optionale zukünftige Alternative, ausdrücklich nicht implementiert:**
+
+```text
+CEF / andere Web-UI (optionaler Renderer)
+    -> GPU-Textur bzw. DMA-BUF (zu spezifizierender Übergabevertrag)
+    -> dafür nachweislich kompatibler Video-/OSD-Renderer
+    -> Bildkomposition / TV
+       \-> bei fehlender Unterstützung oder Fehler: natives VDR-OSD
+```
+
+Eine direkte Übergabe von GPU-Texturen oder DMA-BUF an `vaapivideo` ist **weder nachgewiesen noch Bestandteil** der Suite-OSD-Integration. Möglicherweise wären Erweiterungen oder ein separater Kompositionspfad nötig; daraus entsteht kein Auftrag zum Fork oder Patch von `vaapivideo`. Auch ein möglicher Geschwindigkeitsgewinn oder flüssigere Animationen ist derzeit nur eine Hypothese, keine Messung. Die bestehende HbbTV-/CEFBrowser-Kette wird dadurch nicht verändert.
+
+**Voraussetzungen vor einer späteren Entscheidung:** Konkrete Schnittstellen- und Ownership-Prüfung (Textur-/DMA-BUF-Import, Synchronisation, Format/Stride/Modifier, Alpha/Scaling, Lifetime), Fernbedienungsfokus, Rückkehr zu Live-TV, Hardwarekompatibilität sowie vergleichende Messungen von Framerate, CPU-/GPU-Last und Latenz. Erst wenn ein optionaler GPU-Pfad ausdrücklich beauftragt und am Zielsystem nachgewiesen ist, könnte eine konfigurierbare Auswahl mit automatischem Rückfall auf das native OSD entstehen. Keine Pflichtabhängigkeit für andere VDR-Skins oder Ausgabeplugins.
+
 ## Medien und OSD-Handoff
 
 - **Live-TV/EPG/Timer/Aufnahmen:** Direkt aus VDR über die vorhandenen Kern-Schnittstellen und Menü-/Wiedergabemechanismen; kein Public-API-v1-Umweg. Das Webfrontend bleibt gestalterische und funktionale Paritätsreferenz.
