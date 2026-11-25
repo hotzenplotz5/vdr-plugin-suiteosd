@@ -952,6 +952,8 @@ private:
 
     void openTimeline()
     {
+        photosActive = false;
+        photoThumbnails.clear();
         if (settingsActive) coreAdmin.logout();
         settingsActive = false;
         if (recordingsActive) closeRecordingBrowser();
@@ -1437,6 +1439,8 @@ private:
 
     void openRecordingBrowser()
     {
+        photosActive = false;
+        photoThumbnails.clear();
         if (settingsActive) coreAdmin.logout();
         settingsActive = false;
         if (timelineActive) timelineActive = false;
@@ -2455,6 +2459,8 @@ private:
 
     void openSettings()
     {
+        photosActive = false;
+        photoThumbnails.clear();
         if (recordingsActive)
             closeRecordingBrowser(); // restore scaled video before changing views
         timelineActive = false;
