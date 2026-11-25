@@ -63,3 +63,25 @@ Die VDR-Suite-Einstellungsseite bietet nun eine echte Human-Browser-Session mit 
 Der native `suite_skin.c`-Renderer zeichnet jetzt auch VDR-`cSkinDisplayVolume`, `cSkinDisplayTracks` und `cSkinDisplayMessage`: kompakte dunkle Overlays für Lautstärke/Stummschaltung, Audio-/Spurwahl (mit maximal fünf gleichzeitig sichtbaren Spuren) und nach Status/Info/Warnung/Fehler differenzierte Meldungen. Auswahl, Lautstärke, Meldungstext und Einblenddauer bleiben bei VDR bzw. den vorhandenen Plugins; die neue Darstellung fügt keine zusätzliche Menü- oder Fernbedienungslogik hinzu. Wenn eine TrueColor-Fläche für diese Overlays fehlt, wird die vorhandene Skin verwendet. Kein `vaapivideo`-Fork, CEF oder DMA-BUF.
 
 **Offen:** Echte Bedien- und Anzeigeabnahme mit `vaapivideo` und alternativen OSD-Providern, Audio-Track-Längen, Skalierung, Overlay-Überlagerung und zeitgerechtes Ausblenden. Builds und bestehende Headless-Tests sind dafür lediglich Quellcode-Nachweise; ein kompletter OSD.2-Abschluss erfordert die spätere Geräteabnahme.
+
+
+## Weiterentwicklung nach dem ersten Hardwaretest (25.11.2026)
+
+0.9.5-dev: lokaler Debian-Build und Installation bestätigt; VDR 2.8.3 / VAAPIVideo 1.10.1. Auf Fotos nachgewiesen: Home, Kanalinfo mit Logo/Fanart, EPG, Genre-Normalisierung, native skalierte Live-TV-Vorschau, Aufnahmen und Replay. Nicht abgenommen: vollständige Bedien-/Aktionsparität und Langzeitstabilität. Automatischen Attach nicht wieder einführen.
+
+Die nächste Produktphase ist nicht nur Design. Der Webfrontend-Mindestumfang und die offenen Funktionslücken stehen in [der Funktionsmatrix](webfrontend-parity.md).
+
+| Slice | Ziel |
+| --- | --- |
+| OSD.8 | Gemeinsame Detaildaten und einheitliche interaktive Details |
+| OSD.9 | Mitwirkende/Porträts, Fernbedienungsnavigation, Auswahl |
+| OSD.10 | Vorhandene Aufnahme- und EPG-Personensuche, Ergebnisaktionen |
+| OSD.11 | Globale Suche mit vorhandener Suite-Suchsemantik |
+| OSD.12 | Filmreihen, Serien, Staffeln, Episoden, Zuordnung |
+| OSD.13 | Aufnahmebearbeitung, Verschieben, Schnittmarken |
+| OSD.14 | Timer/Suchtimer: vollständige Funktions- und Bedienparität |
+| OSD.15 | Addons, Bilder und Media Tools |
+| OSD.16 | Design, Icons, Artwork, Kontrast und TV-Bedienkomfort |
+| OSD.17 | Vollständige Paritäts-/Hardwareabnahme |
+
+OSD.8/9 erster Slice: gemeinsamer Detaildaten-Adapter, native scrollbare Mitwirkenden-Texte, interaktive Mitwirkenden-Seite aus Suite-Aufnahmedetails und Suite-Replay-Info. **Personenauswahl startet noch keine Suche**; das ist OSD.10. Der passive VDR-Skin kann selbst keine neuen Fernbedienungsaktionen besitzen. Weitere native Detail-Einstiege benötigen ein interaktives Menü mit belegter VDR-Ownership. Kein neuer Suchindex.

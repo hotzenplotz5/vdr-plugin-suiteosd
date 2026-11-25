@@ -24,10 +24,10 @@ all: $(SOFILE)
 $(SOFILE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -o $@ $^ $(ARTWORK_LIBS) $(CORE_LIBS)
 
-suiteosd.o: suiteosd.c navigation.h core_admin_client.h core_admin_navigation.h settings_navigation.h recording_browser.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h photo_gallery.h photo_carousel.h image-next-service-v1.h epg_timeline.h logo_locator.h artwork_decode.h vendor/tvscraper/services.h
+suiteosd.o: suiteosd.c navigation.h core_admin_client.h core_admin_navigation.h settings_navigation.h recording_browser.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h photo_gallery.h photo_carousel.h image-next-service-v1.h epg_timeline.h logo_locator.h artwork_decode.h scraper_detail.h detail_model.h cast_page.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
-suite_menu.o: suite_menu.c artwork_decode.h vendor/tvscraper/services.h
+suite_menu.o: suite_menu.c artwork_decode.h scraper_detail.h detail_model.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 suite_skin.o: suite_skin.c artwork_decode.h logo_locator.h skin_registration.h vendor/tvscraper/services.h
@@ -89,6 +89,12 @@ check-skin-registration:
 	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o skin-registration-test tests/skin_registration_test.cpp
 	./skin-registration-test
 	rm -f skin-registration-test
+
+.PHONY: check-detail-model
+check-detail-model:
+	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o detail-model-test tests/detail_model_test.cpp
+	./detail-model-test
+	rm -f detail-model-test
 
 check-navigation:
 	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o navigation-test tests/navigation_test.cpp

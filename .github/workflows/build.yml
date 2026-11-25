@@ -12,6 +12,13 @@ jobs:
       - name: Test remote navigation without display device
         run: make check-navigation
 
+  detail-model:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify credit deduplication and remote paging
+        run: make check-detail-model
+
   skin-registration:
     runs-on: ubuntu-24.04
     steps:

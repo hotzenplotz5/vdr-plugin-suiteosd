@@ -7,6 +7,7 @@
  * images are decoded only after those calls, in Flush().
  */
 #include "artwork_decode.h"
+#include "scraper_detail.h"
 #include "vendor/tvscraper/services.h"
 
 #include <vdr/channels.h>
@@ -77,10 +78,29 @@ struct Preview {
     std::string meta;
     std::string picture;
     bool hasDetail = false;
+    DetailMetadata detail;
 
-    void ReadScraper(cScraperVideo *video)
+    void ReadScraper(cScraperVideo *video, bool fullDetail = false)
     {
         if (!video) return;
+        if (fullDetail) {
+            detail = ReadScraperDetail(video);
+            if (!detail.title.empty()) title = detail.title;
+            if (!detail.episode.empty()) subtitle = detail.episode;
+            if (!detail.overview.empty()) description = detail.overview;
+            for (const auto &genre : detail.genres) meta += "  ·  " + genre;
+            if (!detail.release.empty()) meta += "  ·  " + detail.release;
+            if (detail.runtime > 0) meta += "  ·  " + std::to_string(detail.runtime) + " Min";
+            if (detail.season > 0) meta += "  ·  S" + std::to_string(detail.season);
+            if (detail.episodeNumber > 0) meta += " E" + std::to_string(detail.episodeNumber);
+            if (detail.rating > 0) {
+                char buffer[28];
+                std::snprintf(buffer, sizeof(buffer), "  ·  %.1f/10", detail.rating);
+                meta += buffer;
+            }
+            picture = detail.fanartPath.empty() ? detail.posterPath : detail.fanartPath;
+            return;
+        }
         std::string movieTitle, episodeTitle, release, overview;
         std::vector<std::string> genres;
         int runtime = 0;
@@ -408,7 +428,7 @@ class SuiteMenu final : public cSkinDisplayMenu {
         }
         const auto lines = contentLines();
         int y = 365;
-        for (int i = firstTextLine; i < int(lines.size()) && y < 747; ++i, y += 37)
+        for (int i = firstTextLine; i < int(lines.size()) && y < 720; ++i, y += 37)
             text(67, y, lines[i], fixedText ? fixedFont : bodyFont, kWhite, descWidth);
         if (firstTextLine > 0 || int(lines.size()) > 10 + firstTextLine)
             text(69, 758, "Pfeile: Text scrollen", small, kCyan, 700);
@@ -629,9 +649,10 @@ public:
         if (scraper) {
             cGetScraperVideo request(event, nullptr);
             if (scraper->Service("GetScraperVideo", &request) && request.m_scraperVideo)
-                preview.ReadScraper(request.m_scraperVideo.get());
+                preview.ReadScraper(request.m_scraperVideo.get(), true);
         }
-        if (rawText.empty()) rawText = preview.description;
+        rawText = preview.description;
+        if (!preview.detail.people.empty()) rawText += "\n\nMITWIRKENDE\n" + CreditText(preview.detail);
     }
     void SetRecording(const cRecording *recording) override
     {
@@ -652,9 +673,10 @@ public:
         if (scraper) {
             cGetScraperVideo request(nullptr, recording);
             if (scraper->Service("GetScraperVideo", &request) && request.m_scraperVideo)
-                preview.ReadScraper(request.m_scraperVideo.get());
+                preview.ReadScraper(request.m_scraperVideo.get(), true);
         }
         rawText = preview.description;
+        if (!preview.detail.people.empty()) rawText += "\n\nMITWIRKENDE\n" + CreditText(preview.detail);
     }
     void SetText(const char *value, bool fixedFont) override
     {

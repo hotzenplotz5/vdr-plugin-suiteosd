@@ -14,6 +14,8 @@
 #include "photo_carousel.h"
 #include "logo_locator.h"
 #include "artwork_decode.h"
+#include "scraper_detail.h"
+#include "cast_page.h"
 #include "vendor/tvscraper/services.h"
 
 #include <vdr/channels.h>
@@ -98,6 +100,7 @@ struct RecordingMeta {
     suiteosd::Artwork artwork;
 };
 struct RecordingDetailImage {
+    suiteosd::DetailMetadata metadata;
     suiteosd::Artwork fanart;
     suiteosd::Artwork poster;
 };
@@ -266,6 +269,9 @@ class cSuiteReplayInfo final : public cOsdObject {
     int width = 1600, height = 900;
     std::string title, episode, overview, release, genres;
     std::string fanartPath, posterPath;
+    suiteosd::DetailMetadata detail;
+    suiteosd::CreditNavigation castNav;
+    std::map<std::string, suiteosd::Artwork> castCache;
     int runtime = 0;
     int season = 0, episodeNumber = 0;
     float rating = 0;
@@ -313,44 +319,21 @@ public:
         cGetScraperVideo request(nullptr, recording);
         if (!scraper->Service("GetScraperVideo", &request) || !request.m_scraperVideo)
             return;
-        cScraperVideo *video = request.m_scraperVideo.get();
-        std::string scrapedTitle, scrapedEpisode;
-        video->getOverview(&scrapedTitle, &scrapedEpisode, &release,
-                           &runtime, nullptr, nullptr, nullptr);
-        if (!scrapedTitle.empty()) title = std::move(scrapedTitle);
-        if (!scrapedEpisode.empty()) episode = std::move(scrapedEpisode);
-        std::vector<std::string> values;
-        std::string scraperOverview;
-        video->getMovieOrTv(nullptr, nullptr, nullptr, &scraperOverview,
-                            &values, nullptr, nullptr, nullptr,
-                            nullptr, nullptr, &rating, nullptr, nullptr,
-                            nullptr, nullptr, nullptr, nullptr, nullptr,
-                            nullptr, nullptr, nullptr);
-        if (!scraperOverview.empty()) overview = std::move(scraperOverview);
-        for (const std::string &genre : values) {
+        detail = suiteosd::ReadScraperDetail(request.m_scraperVideo.get());
+        if (!detail.title.empty()) title = detail.title;
+        if (!detail.episode.empty()) episode = detail.episode;
+        if (!detail.overview.empty()) overview = detail.overview;
+        release = detail.release;
+        runtime = detail.runtime;
+        rating = detail.rating;
+        season = detail.season;
+        episodeNumber = detail.episodeNumber;
+        fanartPath = detail.fanartPath;
+        posterPath = detail.posterPath;
+        for (const auto &genre : detail.genres) {
             if (!genres.empty()) genres += "  ·  ";
             genres += genre;
-            if (genres.size() > 90) break;
         }
-        season = video->getSeasonNumber();
-        episodeNumber = video->getEpisodeNumber();
-        if (video->getVideoType() == tSeries) {
-            std::string episodeOverview;
-            int episodeRuntime = 0;
-            if (video->getEpisode(nullptr, &episodeOverview, nullptr, nullptr,
-                                  &episodeRuntime, nullptr, nullptr, nullptr)) {
-                if (!episodeOverview.empty()) overview = std::move(episodeOverview);
-                if (episodeRuntime > 0) runtime = episodeRuntime;
-            }
-        }
-        fanartPath = video->getImage(
-            cImageLevels(eImageLevel::episodeMovie,
-                         eImageLevel::seasonMovie, eImageLevel::tvShowCollection),
-            cOrientations(eOrientation::landscape, eOrientation::banner), true).path;
-        posterPath = video->getImage(
-            cImageLevels(eImageLevel::episodeMovie,
-                         eImageLevel::seasonMovie, eImageLevel::tvShowCollection),
-            cOrientations(eOrientation::portrait), true).path;
     }
 
     ~cSuiteReplayInfo() override
@@ -376,11 +359,21 @@ public:
         titleFont = cFont::CreateFont("Sans:Bold", std::max(20, Y(49)));
         bodyFont = cFont::CreateFont("Sans", std::max(14, Y(24)));
         smallFont = cFont::CreateFont("Sans", std::max(12, Y(19)));
+        Render();
+    }
+    void Render()
+    {
+        if (!view) return;
+        if (castNav.active) {
+            suiteosd::DrawCastPage(view, width, height, titleFont, bodyFont, smallFont,
+                                   detail, castNav, castCache);
+            view->Flush();
+            return;
+        }
         box(0, 0, 1599, 899, kBackground);
         artwork(fanartPath, 520, 95, 1045, 383);
         box(0, 0, 1599, 77, kSurface);
-        label(36, 16, "VDR", titleFont);
-        label(115, 16, "Suite", titleFont, kFocus);
+        label(36, 25, "VDR Suite", bodyFont, kText, 225);
         label(286, 25, "WIEDERGABE  /  AUFNAHMEINFO", bodyFont, kMuted);
         label(1430, 25, formatTime(time(nullptr)), bodyFont);
 
@@ -420,12 +413,24 @@ public:
         }
         if (!line.empty() && y < 770) label(378, y, line, bodyFont, kText, 1117);
         box(17, 817, 1580, 889, kSurface);
-        label(56, 837, "OK / Info / Zurück: Weiter zur Aufnahme", bodyFont, kFocus);
+        label(56, 837, "OK / Info / Zurück: Wiedergabe", bodyFont, kFocus, 800);
+        if (!detail.people.empty()) label(925, 837, "Runter: Mitwirkende", bodyFont, kText, 600);
         view->Flush();
     }
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        if (castNav.active) {
+            if (base == kBack || base == kUp || base == kInfo) castNav.Close();
+            else if (base == kLeft || base == kRight)
+                castNav.Move(base == kLeft ? -1 : 1, int(detail.people.size()));
+            else return osContinue;
+            Render();
+            return osContinue;
+        }
+        if (base == kDown && !detail.people.empty()) {
+            castNav.Open(); Render(); return osContinue;
+        }
         return base == kOk || base == kBack || base == kInfo ? osBack : osContinue;
     }
 };
@@ -476,6 +481,8 @@ private:
     Snapshot data;
     std::map<std::string, RecordingMeta> recordingMeta;
     std::map<std::string, RecordingDetailImage> recordingDetailImages;
+    suiteosd::CreditNavigation detailCastNav;
+    std::map<std::string, suiteosd::Artwork> detailCastCache;
     std::map<std::string, std::vector<std::string>> recordingGenres;
     suiteosd::RecordingBrowser recordingBrowser;
     bool recordingsActive = false;
@@ -1144,6 +1151,7 @@ private:
             return osContinue;
         }
         if (browserDetails) {
+            if (handleDetailCast(base, browserSelectedRecording())) return osContinue;
             if (base == kOk || base == kPlay || base == kRed) {
                 const eOSState result = playBrowserRecording();
                 if (result != osContinue) return result;
@@ -1190,7 +1198,7 @@ private:
             recordingBrowser.ToggleSort();
             browserNotice.clear();
         } else if (base == kInfo || base == kBlue) {
-            if (browserSelectedRecording()) browserDetails = true;
+            if (browserSelectedRecording()) { detailCastNav.Close(); browserDetails = true; }
         } else if (base == kYellow) {
             if (browserSelectedRecording()) browserDeleteConfirm = true;
         } else if (base == kRed || base == kPlay) {
@@ -1539,7 +1547,7 @@ private:
         auto found = recordingDetailImages.find(rec.fileName);
         if (found != recordingDetailImages.end()) return found->second;
         if (recordingDetailImages.size() >= 3) recordingDetailImages.clear();
-        std::string fanartPath, posterPath;
+        RecordingDetailImage image;
         // The VDR-owned cRecording and TVScraper service result are used only
         // under VDR's read lock. Decoding follows outside the lock.
         cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
@@ -1551,27 +1559,16 @@ private:
                 if (recording) {
                     cGetScraperVideo request(nullptr, recording);
                     if (scraper->Service("GetScraperVideo", &request) && request.m_scraperVideo) {
-                        cScraperVideo *video = request.m_scraperVideo.get();
-                        fanartPath = video->getImage(
-                            cImageLevels(eImageLevel::episodeMovie,
-                                         eImageLevel::seasonMovie,
-                                         eImageLevel::tvShowCollection),
-                            cOrientations(eOrientation::landscape, eOrientation::banner),
-                            true).path;
-                        posterPath = video->getImage(
-                            cImageLevels(eImageLevel::episodeMovie,
-                                         eImageLevel::seasonMovie,
-                                         eImageLevel::tvShowCollection),
-                            cOrientations(eOrientation::portrait), true).path;
+                        image.metadata = suiteosd::ReadScraperDetail(request.m_scraperVideo.get());
                     }
                 }
             }
         }
-        RecordingDetailImage image;
-        if (!fanartPath.empty())
-            image.fanart = suiteosd::LoadArtwork(fanartPath, X(980), Y(390));
-        if (!posterPath.empty())
-            image.poster = suiteosd::LoadArtwork(posterPath, X(250), Y(372));
+        if (image.metadata.title.empty()) image.metadata.title = rec.baseName;
+        if (!image.metadata.fanartPath.empty())
+            image.fanart = suiteosd::LoadArtwork(image.metadata.fanartPath, X(980), Y(390));
+        if (!image.metadata.posterPath.empty())
+            image.poster = suiteosd::LoadArtwork(image.metadata.posterPath, X(250), Y(372));
         return recordingDetailImages.emplace(rec.fileName, std::move(image)).first->second;
     }
 
@@ -1579,6 +1576,12 @@ private:
     {
         const RecordingMeta &meta = metaFor(rec);
         const RecordingDetailImage &image = detailImageFor(rec);
+        const auto &detail = image.metadata;
+        if (detailCastNav.active) {
+            suiteosd::DrawCastPage(osd, width, height, fontTitle, fontBody, fontSmall,
+                                   detail, detailCastNav, detailCastCache);
+            return;
+        }
         fill(0, 0, 1599, 899, kBackground);
         // A native artwork hero rather than a second player or HTTP image.
         if (image.fanart.valid() && osd) {
@@ -1603,31 +1606,31 @@ private:
         } else print(68, 296, "Kein Poster vorhanden", fontBody, kMuted, 241);
 
         panel(342, 116, 1203, 370, false, 0xDC08192A);
-        const std::string title = meta.title.empty() ? rec.baseName : meta.title;
+        const std::string title = detail.title.empty() ? rec.baseName : detail.title;
         print(371, 142, title, fontTitle, kText, 1128);
-        if (!meta.episode.empty())
-            print(372, 210, meta.episode, fontLarge, kText, 1097);
+        if (!detail.episode.empty())
+            print(372, 210, detail.episode, fontLarge, kText, 1097);
         std::string facts = "Aufnahme  ·  " + rec.time;
-        if (meta.season > 0) facts += "  ·  S" + std::to_string(meta.season);
-        if (meta.episodeNumber > 0) facts += " E" + std::to_string(meta.episodeNumber);
+        if (detail.season > 0) facts += "  ·  S" + std::to_string(detail.season);
+        if (detail.episodeNumber > 0) facts += " E" + std::to_string(detail.episodeNumber);
         print(371, 272, facts, fontBody, kFocus, 1120);
         std::string metadata;
-        for (const std::string &genre : meta.genres)
+        for (const std::string &genre : detail.genres)
             metadata += (metadata.empty() ? "" : "  ·  ") + genre;
-        if (!meta.release.empty())
-            metadata += (metadata.empty() ? "" : "  ·  ") + meta.release;
-        if (meta.runtime > 0)
-            metadata += "  ·  " + std::to_string(meta.runtime) + " Min";
-        if (meta.rating > 0) {
+        if (!detail.release.empty())
+            metadata += (metadata.empty() ? "" : "  ·  ") + detail.release;
+        if (detail.runtime > 0)
+            metadata += "  ·  " + std::to_string(detail.runtime) + " Min";
+        if (detail.rating > 0) {
             char rating[30];
-            std::snprintf(rating, sizeof(rating), "  ·  %.1f/10", meta.rating);
+            std::snprintf(rating, sizeof(rating), "  ·  %.1f/10", detail.rating);
             metadata += rating;
         }
         print(372, 325, metadata, fontBody, kText, 1080);
 
         panel(342, 506, 1203, 277, false, kSurface);
         print(372, 524, "INHALT", fontBody, kFocus);
-        std::string summary = meta.overview.empty() ? rec.description : meta.overview;
+        std::string summary = detail.overview.empty() ? rec.description : detail.overview;
         if (summary.empty()) summary = "Keine Beschreibung vorhanden.";
         std::replace(summary.begin(), summary.end(), '\n', ' ');
         std::istringstream words(summary);
@@ -1646,7 +1649,26 @@ private:
         fill(18, 813, 1580, 892, kSurface);
         print(52, 838, "OK / Rot: Wiedergabe", fontBody, kFocus);
         print(436, 838, "Info / Zurück: Schließen", fontBody);
-        print(1055, 838, "Gelb: Löschen (Aufnahmen)", fontBody, kMuted);
+        if (!detail.people.empty())
+            print(1055, 838, "Runter: Mitwirkende", fontBody, kFocus, 490);
+    }
+
+    bool handleDetailCast(eKeys base, const Recording *rec)
+    {
+        if (!rec) { detailCastNav.Close(); return false; }
+        if (detailCastNav.active) {
+            if (base == kBack || base == kInfo || base == kUp) detailCastNav.Close();
+            else if (base == kLeft || base == kRight)
+                detailCastNav.Move(base == kLeft ? -1 : 1, int(detailImageFor(*rec).metadata.people.size()));
+            draw();
+            return true;
+        }
+        if (base == kDown && !detailImageFor(*rec).metadata.people.empty()) {
+            detailCastNav.Open();
+            draw();
+            return true;
+        }
+        return false;
     }
 
     void drawRecordingDetails()
@@ -3311,6 +3333,9 @@ public:
             return osContinue;
         }
         if (recordingDetails) {
+            const Recording *selected = nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) ?
+                &data.recordings[nav.card[3]] : nullptr;
+            if (handleDetailCast(base, selected)) return osContinue;
             if ((base == kOk || base == kPlay || base == kRed) &&
                 nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) &&
                 !data.recordings[nav.card[3]].fileName.empty()) {
@@ -3327,7 +3352,7 @@ public:
         if ((base == kInfo || base == kYellow) && !nav.sideFocused) {
             if (nav.section == 3 && nav.card[3] >= 0 &&
                 nav.card[3] < int(data.recordings.size()))
-                recordingDetails = true;
+                { detailCastNav.Close(); recordingDetails = true; }
             else if (selectedHomeProgramme())
                 homeProgrammeDetails = true;
             draw();

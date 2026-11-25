@@ -4,7 +4,7 @@
 	dh $@ --with vdrplugin
 
 override_dh_auto_test:
-	$(MAKE) check-navigation check-artwork check-epg-timeline check-logos check-recording-browser check-photo-gallery check-photo-carousel check-settings-navigation check-core-admin-navigation check-core-admin-http check-skin-registration
+	$(MAKE) check-navigation check-artwork check-epg-timeline check-logos check-recording-browser check-photo-gallery check-photo-carousel check-settings-navigation check-core-admin-navigation check-core-admin-http check-skin-registration check-detail-model
 
 override_dh_auto_install:
 	api=$$(pkg-config --variable=apiversion vdr); test -n "$$api" && \
