@@ -305,6 +305,8 @@ class SuiteMenu final : public cSkinDisplayMenu {
         rect(25, 106, 1035, 697, kSurface);
         rect(1077, 106, 501, 697, kSurface);
         text(48, 126, title.empty() ? "MENÜ" : title, bodyFont, kCyan, 955);
+        if (sorting != msmUnknown)
+            text(792, 135, sortLabel(), small, kMuted, 239);
         rect(49, 177, 985, 2, kLine);
 
         const int rowTop = 190, rowHeight = 55;
@@ -330,11 +332,42 @@ class SuiteMenu final : public cSkinDisplayMenu {
         drawPreview(1100, 126, 443, 645);
     }
 
+    const char *selectionLabel() const
+    {
+        switch (category) {
+        case mcSchedule:
+        case mcScheduleNow:
+        case mcScheduleNext:
+        case mcEvent:         return "PROGRAMM";
+        case mcTimer:
+        case mcTimerEdit:     return "TIMER";
+        case mcRecording:
+        case mcRecordingInfo:
+        case mcRecordingEdit:return "AUFNAHME";
+        case mcChannel:
+        case mcChannelEdit:   return "SENDER";
+        case mcSetup:
+        case mcPluginSetup:  return "EINSTELLUNGEN";
+        default:             return "AUSWAHL";
+        }
+    }
+
+    const char *sortLabel() const
+    {
+        switch (sorting) {
+        case msmNumber: return "SORTIERT: NUMMER";
+        case msmName: return "SORTIERT: NAME";
+        case msmTime: return "SORTIERT: ZEIT";
+        case msmProvider: return "SORTIERT: ANBIETER";
+        default: return "";
+        }
+    }
+
     void drawPreview(int x, int y, int w, int h)
     {
         text(x, y, mode == Body::Event ? "PROGRAMMINFORMATION" :
              mode == Body::Recording ? "AUFNAHMEDETAILS" :
-             "AUSWAHL", small, kCyan, w);
+             selectionLabel(), small, kCyan, w);
         rect(x, y + 39, w, 2, kLine);
         if (!preview.title.empty())
             drawParagraph(preview.title, x, y + 55, w, y + 147,
