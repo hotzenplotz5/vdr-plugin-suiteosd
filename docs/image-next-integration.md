@@ -29,6 +29,32 @@ and rejects traversal or symlinks escaping those roots. Only image extensions
 supported by image_next may be played. File paths are not returned as
 unrestricted absolute filesystem paths.
 
+## Additional Carousel display mode (SuiteOSD 0.9.4-dev)
+
+SuiteOSD now offers a grid and an inward-facing 2D-perspective carousel.
+The selected main photo is front-facing at full size with a cyan highlight.
+Two neighboring photos on each side are progressively smaller and dimmer;
+left cards have taller RIGHT/inside edges, right cards have taller LEFT/inside
+edges. Transitions use eased visual position interpolation (~220 ms) and
+a subtle reflected bitmap under each card. Photos remain images from the
+`image_next` thumbnail service, not a second decoder. Source and playback
+ownership stay unchanged.
+
+The carousel occupies the full screen, without a sidebar or permanent
+right-side information panel. The header carries **only the source/folder
+name**, and the footer is limited to playback and view controls.
+`1` switches between Grid/Carousel and persists `PhotoView` to VDR's
+existing `suiteosd` plugin settings; the plugin setup menu also exposes
+the same preference. Default on new installs is Carousel. Keyboard navigation
+uses Left/Right for previous/next, OK for fullscreen, Green for slideshow,
+Info for a small optional filename/path overlay, Back for parent.
+Image-next's bounded thumbnail service was extended to accept up to
+896 x 896 previews for the larger central card.
+
+This is a native 32-bit TrueColor OSD projection, **not** hardware 3D.
+The exact visual quality, frame pacing, memory pressure and focus behavior
+on real output hardware still need device validation.
+
 ## Remote and lifecycle
 - SuiteOSD sidebar **Bilder**: enter the native gallery.
 - **OK / Rot**: enter a source/folder or open the selected image.
