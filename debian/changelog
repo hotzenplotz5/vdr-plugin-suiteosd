@@ -1,0 +1,7 @@
+vdr-plugin-suiteosd (0.9.5~dev) unstable; urgency=medium
+
+  * Initial local Debian source packaging for hardware testing.
+  * Fix duplicate skin registration and live transfer-mode preview.
+  * Improve layout, channel logos, artwork and genre grouping.
+
+ -- VDR-Suite contributors <noreply@github.com>  Wed, 25 Nov 2026 22:48:00 +0100

@@ -12,3 +12,13 @@ recording-browser-test
 settings-navigation-test
 core-admin-navigation-test
 core-admin-http-test
+
+skin-registration-test
+suiteosd-artwork-test.svg
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/*.substvars
+debian/*.debhelper.log
+debian/vdr-plugin-suiteosd/
+debian/vdr-plugin-suiteosd-dbgsym/

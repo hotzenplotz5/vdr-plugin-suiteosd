@@ -7,6 +7,10 @@
 #include <cstring>
 #include <jpeglib.h>
 #include <png.h>
+#include <cairo.h>
+#include <librsvg/rsvg.h>
+#include <cmath>
+#include <memory>
 #include <vector>
 
 namespace suiteosd {
@@ -132,6 +136,76 @@ bool LoadPng(const std::string &path, RawImage &result)
     return true;
 }
 
+// Logos are rendered directly at the bounded display size. A memory-backed
+// handle has no base URL, so external local files are not resolved.
+Artwork LoadSvg(const std::string &path, int maxWidth, int maxHeight)
+{
+    constexpr size_t kMaxSvgBytes = 2U * 1024U * 1024U;
+    std::unique_ptr<FILE, decltype(&fclose)> file(fopen(path.c_str(), "rb"), fclose);
+    if (!file) return {};
+    std::vector<unsigned char> bytes(kMaxSvgBytes + 1);
+    const size_t size = fread(bytes.data(), 1, bytes.size(), file.get());
+    if (size == 0 || size > kMaxSvgBytes || ferror(file.get())) return {};
+    GError *error = nullptr;
+    auto releaseHandle = [](RsvgHandle *p) { if (p) g_object_unref(p); };
+    std::unique_ptr<RsvgHandle, decltype(releaseHandle)> handle(
+        rsvg_handle_new_from_data(bytes.data(), size, &error), releaseHandle);
+    if (error) g_error_free(error);
+    if (!handle) return {};
+
+    double w = 0, h = 0;
+    if (!rsvg_handle_get_intrinsic_size_in_pixels(handle.get(), &w, &h)) {
+        gboolean hasViewBox = FALSE;
+        RsvgRectangle box{};
+        rsvg_handle_get_intrinsic_dimensions(handle.get(), nullptr, nullptr,
+                                             nullptr, nullptr, &hasViewBox, &box);
+        w = hasViewBox ? box.width : maxWidth;
+        h = hasViewBox ? box.height : maxHeight;
+    }
+    if (!std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0)
+        return {};
+    const double scale = std::min(double(maxWidth) / w, double(maxHeight) / h);
+    const int width = std::clamp(int(w * scale), 1, maxWidth);
+    const int height = std::clamp(int(h * scale), 1, maxHeight);
+    std::unique_ptr<cairo_surface_t, decltype(&cairo_surface_destroy)> surface(
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height),
+        cairo_surface_destroy);
+    if (cairo_surface_status(surface.get()) != CAIRO_STATUS_SUCCESS) return {};
+    std::unique_ptr<cairo_t, decltype(&cairo_destroy)> context(
+        cairo_create(surface.get()), cairo_destroy);
+    if (cairo_status(context.get()) != CAIRO_STATUS_SUCCESS) return {};
+    RsvgRectangle viewport{0, 0, double(width), double(height)};
+    error = nullptr;
+    const gboolean ok = rsvg_handle_render_document(handle.get(), context.get(),
+                                                    &viewport, &error);
+    if (error) g_error_free(error);
+    if (!ok || cairo_status(context.get()) != CAIRO_STATUS_SUCCESS) return {};
+    cairo_surface_flush(surface.get());
+    const unsigned char *data = cairo_image_surface_get_data(surface.get());
+    const int stride = cairo_image_surface_get_stride(surface.get());
+    if (!data || stride < width * 4) return {};
+
+    Artwork result;
+    result.width = width;
+    result.height = height;
+    result.argb.resize(size_t(width) * height);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            uint32_t p;
+            std::memcpy(&p, data + size_t(y) * stride + 4 * x, sizeof(p));
+            const uint32_t a = p >> 24;
+            // Cairo stores premultiplied ARGB; VDR's cImage needs straight ARGB.
+            auto straight = [a](uint32_t v) -> uint32_t {
+                return a ? std::min(255U, (v * 255U + a / 2U) / a) : 0U;
+            };
+            result.argb[size_t(y) * width + x] =
+                (a << 24) | (straight((p >> 16) & 255U) << 16) |
+                (straight((p >> 8) & 255U) << 8) | straight(p & 255U);
+        }
+    }
+    return result;
+}
+
 Artwork ScaleToFit(const RawImage &source, int maxWidth, int maxHeight)
 {
     Artwork result;
@@ -175,7 +249,11 @@ Artwork LoadArtwork(const std::string &path, int maxWidth, int maxHeight)
         ok = LoadPng(path, raw);
     else if (n >= 2 && magic[0] == 0xff && magic[1] == 0xd8)
         ok = LoadJpeg(path, maxWidth, maxHeight, raw);
-    if (!ok) return {};
+    if (!ok) {
+        if (path.size() >= 4 && path.compare(path.size() - 4, 4, ".svg") == 0)
+            return LoadSvg(path, maxWidth, maxHeight);
+        return {};
+    }
 
     Artwork result = ScaleToFit(raw, maxWidth, maxHeight);
     free(raw.pixels);

@@ -1,0 +1,12 @@
+Provisional local test-package provenance; not a redistribution clearance.
+
+Upstream: https://github.com/hotzenplotz5/vdr-plugin-suiteosd
+Project-wide licensing and contributor provenance still require confirmation.
+The local package build does not constitute a new licensing declaration.
+Do not interpret this document as permission to publish or distribute packages.
+
+The vendored TVScraper service header retains the GPL-2.0-or-later notice and
+upstream attribution documented in vendor/tvscraper/README.md and COPYING.
+The vendored VDR-Suite genre headers retain the originating project's terms;
+the exact originating commit is recorded in vendor/vdr-suite/README.md.
+The package does not bundle downloaded broadcaster logos or movie artwork.

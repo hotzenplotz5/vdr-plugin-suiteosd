@@ -107,11 +107,10 @@ inline std::string FindChannelLogoInRoots(const std::vector<std::string> &roots,
     std::vector<std::string> names;
     AppendLogoVariants(names, name);
     AppendLogoVariants(names, shortName);
-    // PNG/JPEG are natively decoded by the OSD. SVG-only assets correctly
-    // fall back to a channel label until an SVG renderer is available.
+    // All supported local image formats can be decoded by the OSD.
     for (const std::string &root : roots)
         for (const std::string &variant : names)
-            for (const char *ext : {".png", ".jpg", ".jpeg"}) {
+            for (const char *ext : {".png", ".jpg", ".jpeg", ".svg"}) {
                 const std::string path = root + "/" + variant + ext;
                 std::ifstream f(path, std::ios::binary);
                 if (f.good()) return path;

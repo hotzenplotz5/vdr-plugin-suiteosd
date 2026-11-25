@@ -2,7 +2,7 @@
 
 Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die Funktionen und installierten Addons der Suite am Fernseher per Fernbedienung verfügbar machen, ohne ein Ausgabeplugin zu forken.
 
-**Projektstatus:** frühe Entwicklung; noch keine auf einem echten VDR verifizierte Version.
+**Projektstatus:** erster Hardwaretest auf yaVDR mit VDR 2.8.3 und VAAPIVideo 1.10.1. Die vollständige visuelle und Stabilitätsabnahme steht aus.
 
 ## Grundsätze
 
@@ -34,10 +34,10 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **EPG-Zeitleiste nach bestehendem Webfrontend:** Das EPG-Symbol öffnet eine native Suite-Ansicht im bewährten Webfrontend-Stil: Sender links, horizontale proportionale Sendezeit-Kacheln, 30-Minuten-Raster, orange Jetzt-Markierung und aktive Auswahl, ohne sichtbaren Scrollbalken. Alternativ (Blaue Taste) **Zeit vertikal**, **Live-Liste**, **Läuft jetzt** und **Als nächstes**. Die Webfrontend-Tagesseiten **Aktuelle 24h / Nächste 24h** bleiben erhalten; die 10-Fuß-Ansicht zeigt wegen der Lesbarkeit jeweils einen verschiebbaren Vier-Stunden-Ausschnitt. Programme und Beschreibungen stammen direkt aus `cSchedules` unter VDR-Locks, nicht aus API v1. **OK/Info** öffnet echte EPG-Details; **Zurück** führt zum Suite-Home. Der native VDR-Programmführer ist weiterhin über VDR-Tasten aufrufbar.
 - **Timeline-Fernbedienung:** Pfeile wählen Sender und Sendungen bzw. in der vertikalen Ansicht Kanal/Zeitschritte; Rot: Jetzt, Grün: aktuelle 24 Stunden, Gelb: nächste 24 Stunden, Blau: Ansichtswechsel. Der Headless-Test prüft Kanalfokus, Zeitfenster, 24-Stunden-Seiten, Ereignisgeometrie und fünf Darstellungsmodi.
 - **EPG-Gruppen:** Die vorhandenen Kanalgruppen aus `channels.conf` (`cChannel::GroupSep()`) werden als Filter angezeigt. Taste `0` wechselt zwischen „Alle Sender“ und vorhandenen Gruppen. Der gewählte Sender bleibt bei einem Filterwechsel erhalten, soweit er in der Gruppe vorkommt.
-- **EPG-Senderlogos:** Die für das Webfrontend vorhandenen lokalen VDR-Suite-/SkinDesigner-Logo-Verzeichnisse werden ohne HTTP durchsucht. PNG-/JPEG-Logos erscheinen in Kanalzeilen und Listen mit Textfallback; reine SVG-Dateien benötigen für eine Anzeige noch einen nativen Renderer. Maximal 48 kleine Logos im OSD-Cache.
+- **EPG-Senderlogos:** Die für das Webfrontend vorhandenen lokalen VDR-Suite-/SkinDesigner-Logo-Verzeichnisse werden ohne HTTP durchsucht. PNG-, JPEG- und SVG-Logos erscheinen in Kanalzeilen und Listen mit Textfallback. SVGs werden lokal und größenbegrenzt mit librsvg gerendert. Maximal 48 kleine Logos im OSD-Cache.
 - **EPG-TVscraper-Artwork:** Im Sendungsdetail wird über den nativen VDR-Service `GetScraperVideo` das Bild der markierten Sendung ermittelt und nach Freigabe der Schedule-Locks dekodiert. Kein zweiter Scraper und kein Public-API-v1-Request. Bei fehlendem TVScraper oder Artwork bleiben die VDR-EPG-Texte sichtbar.
 - **EPG-Timer:** Im Sendungsdetail `Rot` oder `Record` wählen, dann mit `OK` die Aufnahme bestätigen; `Zurück` bricht ab. Der VDR-Kern wird unter seinen nativen Timer-/Kanal-/Schedule-Locks aufgerufen, dabei werden doppelte Timer erkannt und VDRs vorhandene Remote-Peer-Semantik berücksichtigt. Eine echte Timeranlage auf dem yaVDR ist noch nicht durchgeführt.
-- **Webfrontend-Parität:** Die vier Erweiterungen sind implementiert, jedoch noch nicht visuell mit dem realen Fernseher abgenommen. SVG-Logos, detaillierte visuelle Abstimmung und die vollständige native Skin der tieferen VDR-Menüs sind weiter offen.
+- **Webfrontend-Parität:** Die vier Erweiterungen sind implementiert, jedoch noch nicht visuell mit dem realen Fernseher abgenommen. Detaillierte visuelle Abstimmung und die vollständige native Skin der tieferen VDR-Menüs sind weiter offen.
 - Direkter VDR-Senderwechsel bei Auswahl einer Jetzt-Sendung und VDR-eigene Wiedergabe für ausgewählte Aufnahmen; kein zweiter Video-Player.
 - Menüübergabe an **bereits installierte** VDR-Plugins `web` (HbbTV), `osdteletext` und `epgsearch` (Suchtimer/Suche, optional `epgsearchonly`) per `cRemote::CallPlugin`. Verfügbarkeit und Fokus-/Rückkehrverhalten sind auf dem echten VDR noch zu testen.
 - **Aufnahmen mit TVScraper-Daten:** Die sieben gerade sichtbaren Aufnahmekacheln lesen lokal über den VDR-Service `GetScraperVideo` Filmtitel, Episodenname, Erscheinungsdatum, Beschreibung und Bildpfad. PNG-/JPEG-Artwork wird als kleines natives OSD-Bild eingeblendet; `Info` zeigt die neue vollflächige Detailansicht einschließlich Fanart/Poster und Metadaten; `Zurück` schließt sie. Ohne installierten TVScraper oder bei nicht gefundenem Artwork bleiben Titel, Datum, VDR-Beschreibung und Wiedergabe verfügbar. Kein API-v1-Aufruf.
@@ -54,7 +54,7 @@ Die GitHub-Actions-Matrix kompiliert gegen den unveränderten Upstream-VDR-Quell
 
 ## Zusätzliche Build-Abhängigkeiten ab 0.3.0
 
-`libpng-dev` und `libjpeg-dev` für das lokale Dekodieren von TVScraper-Bildern, sowie die bereits benötigten VDR-Entwicklungsheader. Das Projekt enthält ausschließlich den öffentlichen TVScraper-Service-Header mit Upstream-Provenienz und GPL-Hinweis unter [vendor/tvscraper](vendor/tvscraper/README.md); **keinen TVScraper-Fork**. Zur Laufzeit ist TVScraper optional. Test mit dem tatsächlich installierten TVScraper und OSD-Provider steht noch aus.
+`libpng-dev`, `libjpeg-dev` und `librsvg2-dev` für das lokale Dekodieren von TVScraper-Bildern, sowie die bereits benötigten VDR-Entwicklungsheader. Das Projekt enthält ausschließlich den öffentlichen TVScraper-Service-Header mit Upstream-Provenienz und GPL-Hinweis unter [vendor/tvscraper](vendor/tvscraper/README.md); **keinen TVScraper-Fork**. Zur Laufzeit ist TVScraper optional. Test mit dem tatsächlich installierten TVScraper und OSD-Provider steht noch aus.
 
 ## Core-Admin-Abhängigkeiten (0.8.0)
 
@@ -77,3 +77,13 @@ Für die authentifizierte Suite-Verwaltung werden zusätzlich libcurl4-openssl-d
 **Kein Installationsversprechen:** Eine Quellcode-Skizze oder ein Git-Commit bedeutet nicht, dass das Plugin gegen die konkrete VDR-ABI gebaut und mit HbbTV, Teletext oder Medienwiedergabe getestet ist.
 
 Die native Aufnahme-Genreübersicht verwendet die aus VDR-Suite übernommene kanonische Genre-Registry (`vendor/vdr-suite`, siehe Herkunftsnachweis). Bekannte deutsche/englische Aliase werden zusammengefasst und Aufnahmen pro Kategorie nur einmal gezählt.
+
+## Lokales Debian-Paket
+
+Mit zum Ziel-VDR passenden Entwicklungsheadern und den in `debian/control` angegebenen Build-Abhängigkeiten:
+
+```sh
+dpkg-buildpackage -b -us -uc
+```
+
+Das Paket nutzt den VDR-API-Suffix aus pkg-config und die ABI-Abhängigkeit über das VDR-Debhelper-Addon. Der Build installiert nichts auf dem laufenden VDR. Die Paketierung ist für lokale Hardwaretests bestimmt; eine Veröffentlichung (einschließlich Lizenz- und Provenienzprüfung) ist noch nicht freigegeben.

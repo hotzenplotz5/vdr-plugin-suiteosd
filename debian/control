@@ -1,0 +1,24 @@
+Source: vdr-plugin-suiteosd
+Section: video
+Priority: optional
+Maintainer: VDR-Suite contributors <noreply@github.com>
+Build-Depends: debhelper-compat (= 13),
+ g++,
+ make,
+ pkg-config,
+ vdr-dev,
+ libpng-dev,
+ libjpeg-dev,
+ librsvg2-dev,
+ libcurl4-openssl-dev,
+ libjson-c-dev
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/hotzenplotz5/vdr-plugin-suiteosd
+
+Package: vdr-plugin-suiteosd
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ${vdr:Depends}
+Description: Native VDR Suite OSD frontend
+ Native television menus, programme guide, recording browser and channel
+ and replay information using VDR's own OSD and playback interfaces.

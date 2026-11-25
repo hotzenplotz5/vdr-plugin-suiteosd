@@ -68,6 +68,22 @@ int main()
     fclose(f);
     assert(!suiteosd::LoadArtwork(invalidPath, 10, 10).valid());
 
+    const std::string svgPath = "suiteosd-artwork-test.svg";
+    f = fopen(svgPath.c_str(), "wb");
+    assert(f);
+    fputs(R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><rect width="10" height="10" fill="#ff0000" fill-opacity="0.5"/></svg>)", f);
+    fclose(f);
+    auto svg = suiteosd::LoadArtwork(svgPath, 20, 20);
+    assert(svg.valid() && svg.width == 20 && svg.height == 10);
+    assert((svg.argb[0] & 0x00FFFFFFu) == 0x00FF0000u);
+    assert((svg.argb[0] >> 24) >= 127 && (svg.argb[0] >> 24) <= 128);
+    assert(svg.argb[19] == 0);
+    f = fopen(svgPath.c_str(), "wb");
+    assert(f);
+    fputs("not an SVG", f);
+    fclose(f);
+    assert(!suiteosd::LoadArtwork(svgPath, 20, 20).valid());
+    remove(svgPath.c_str());
     remove(pngPath.c_str());
     remove(jpegPath.c_str());
     remove(invalidPath.c_str());

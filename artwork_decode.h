@@ -16,7 +16,7 @@ struct Artwork {
 };
 
 // Pure image decoder, independent of VDR. Decode only the small on-screen image.
-// Supports PNG/JPEG, preserves aspect ratio, no network or shell invocations.
+// Supports PNG/JPEG/SVG, preserves aspect ratio, no network or shell invocations.
 Artwork LoadArtwork(const std::string &path, int maxWidth, int maxHeight);
 
 } // namespace suiteosd

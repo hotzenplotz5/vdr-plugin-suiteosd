@@ -86,8 +86,8 @@ jobs:
       - name: Install native image dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpng-dev libjpeg-dev
-      - name: Verify PNG and JPEG decode with fixture images
+          sudo apt-get install -y libpng-dev libjpeg-dev librsvg2-dev
+      - name: Verify PNG, JPEG and SVG decode with fixture images
         run: make check-artwork
 
   native-vdr:
@@ -108,7 +108,7 @@ jobs:
       - name: Install toolchain and package metadata
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config vdr-dev libpng-dev libjpeg-dev libcurl4-openssl-dev libjson-c-dev
+          sudo apt-get install -y build-essential pkg-config vdr-dev libpng-dev libjpeg-dev librsvg2-dev libcurl4-openssl-dev libjson-c-dev
       - name: Compile plugin against exact upstream VDR header version
         run: |
           make VDR_SOURCE_PARENT=upstream -j2

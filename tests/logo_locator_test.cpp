@@ -25,6 +25,12 @@ int main()
     assert(FindChannelLogoInRoots({dir}, "Unknown Channel").empty());
     assert(FindChannelLogoInRoots({dir}, "../zdfneo").empty());
     std::remove(path.c_str());
+    const std::string svg = dir + "/zdfneo.svg";
+    std::ofstream svgFile(svg);
+    svgFile << "fixture";
+    svgFile.close();
+    assert(FindChannelLogoInRoots({dir}, "ZDFneo HD") == svg);
+    std::remove(svg.c_str());
     rmdir(dir.c_str());
     return 0;
 }
