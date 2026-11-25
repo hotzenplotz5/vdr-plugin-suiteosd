@@ -10,6 +10,7 @@
 #include "core_admin_navigation.h"
 #include "epg_timeline.h"
 #include "recording_browser.h"
+#include "photo_gallery.h"
 #include "logo_locator.h"
 #include "artwork_decode.h"
 #include "vendor/tvscraper/services.h"
@@ -474,6 +475,10 @@ private:
     std::map<std::string, std::vector<std::string>> recordingGenres;
     suiteosd::RecordingBrowser recordingBrowser;
     bool recordingsActive = false;
+    bool photosActive = false;
+    suiteosd::PhotoGallery photoGallery;
+    std::string photoNotice;
+    std::map<std::string, imagenext::Thumbnail> photoThumbnails;
     bool browserDetails = false;
     bool browserDeleteConfirm = false;
     std::string browserNotice;
@@ -2570,7 +2575,7 @@ private:
             if (selected)
                 panel(31, y, right - 51, 48, true, kHighlight);
             else if (!nav.sideFocused && i ==
-                     (settingsActive ? 10 : timelineActive ? 2 : recordingsActive ? 3 : 0))
+                     (photosActive ? 8 : settingsActive ? 10 : timelineActive ? 2 : recordingsActive ? 3 : 0))
                 panel(31, y, 52, 48, false, kHighlight);
             print(41, y + 13, kSymbols[i], fontSmall, kText, 56);
             if (nav.sideFocused)
@@ -2595,6 +2600,11 @@ private:
     {
         if (!osd)
             return;
+        if (photosActive) {
+            drawPhotoGallery();
+            osd->Flush();
+            return;
+        }
         if (settingsActive) {
             drawSettings();
             osd->Flush();
@@ -2662,6 +2672,7 @@ private:
             case 1: return osEnd;       // Live-TV: return to current broadcast
             case 2: openTimeline(); break; // Native VDR schedule, Suite Web timeline design
             case 3: openRecordingBrowser(); return osContinue; // Native Suite recording grid
+            case 8: openPhotoGallery(); return osContinue; // image_next VDR service
             case 4: nativeKey = kTimers; break;     // Timers
             case 10: openSettings(); return osContinue; // Unified VDR+Suite settings
             default: break;
@@ -2746,6 +2757,8 @@ public:
             draw();
             return osContinue;
         }
+        if (photosActive)
+            return photoKey(base);
         if (recordingsActive)
             return browserKey(base);
         if (timelineActive)
