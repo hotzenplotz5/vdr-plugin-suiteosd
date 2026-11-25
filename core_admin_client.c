@@ -167,6 +167,124 @@ bool parseItems(const std::string &body, std::vector<CoreItem> &items,
     items.swap(next); // failed reads preserve the previous successful listing
     return true;
 }
+std::string queryEncode(const std::string &value) {
+    constexpr char hex[] = "0123456789ABCDEF";
+    std::string result;
+    for (unsigned char c : value) {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~')
+            result.push_back(char(c));
+        else {
+            result.push_back('%');
+            result.push_back(hex[c >> 4]);
+            result.push_back(hex[c & 15]);
+        }
+    }
+    return result;
+}
+std::string searchImage(json_object *entry, const char *key) {
+    auto *image = field(entry, key);
+    return boolOf(image, "available") ? stringOf(image, "url") : "";
+}
+CoreSearchRecording readSearchRecording(json_object *entry) {
+    CoreSearchRecording row;
+    row.id = stringOf(entry, "id");
+    row.backendId = stringOf(entry, "backendId");
+    row.nativeId = stringOf(entry, "backendNativeId");
+    row.title = stringOf(entry, "title");
+    row.subtitle = stringOf(entry, "subtitle");
+    row.startTime = stringOf(entry, "startTime");
+    row.person = stringOf(entry, "matchedPerson");
+    row.role = stringOf(entry, "matchedRole");
+    row.matchReason = stringOf(entry, "matchReason");
+    row.artworkUrl = searchImage(entry, "artwork");
+    auto *metadata = field(entry, "metadata");
+    auto *presentation = field(metadata, "presentation");
+    const auto title = stringOf(presentation, "title");
+    const auto subtitle = stringOf(presentation, "subtitle");
+    if (!title.empty()) row.title = title;
+    if (!subtitle.empty()) row.subtitle = subtitle;
+    if (row.artworkUrl.empty())
+        row.artworkUrl = stringOf(field(metadata, "artwork"), "preferredUrl");
+    return row;
+}
+bool parsePersonSearch(const std::string &body, CorePersonSearch &output) {
+    auto root = parse(body);
+    auto *matches = field(root.get(), "matches");
+    if (!json_object_is_type(matches, json_type_array)) return false;
+    CorePersonSearch next;
+    next.total = integerOf(root.get(), "totalCount");
+    next.limit = int(integerOf(root.get(), "limit"));
+    next.offset = int(integerOf(root.get(), "offset"));
+    if (next.total < 0 || next.limit < 0 || next.offset < 0) return false;
+    for (size_t i = 0; i < json_object_array_length(matches); ++i) {
+        auto *entry = json_object_array_get_idx(matches, i);
+        auto *recording = field(entry, "recording");
+        if (!json_object_is_type(recording, json_type_object)) continue;
+        auto row = readSearchRecording(recording);
+        auto *person = field(entry, "person");
+        row.person = stringOf(person, "originalName");
+        row.role = stringOf(person, "role");
+        row.character = stringOf(person, "characterName");
+        next.recordings.push_back(std::move(row));
+    }
+    output = std::move(next);
+    return true;
+}
+bool parseGlobalSearch(const std::string &body, CoreGlobalSearch &output) {
+    auto root = parse(body);
+    auto *recordings = field(root.get(), "recordings");
+    auto *epg = field(root.get(), "epg");
+    auto *people = field(root.get(), "people");
+    if (!json_object_is_type(recordings, json_type_array) ||
+        !json_object_is_type(epg, json_type_array) ||
+        !json_object_is_type(people, json_type_array)) return false;
+    CoreGlobalSearch next;
+    next.query = stringOf(root.get(), "query");
+    next.backendId = stringOf(root.get(), "backendId");
+    next.status = stringOf(root.get(), "status");
+    next.limit = int(integerOf(root.get(), "limit"));
+    next.offset = int(integerOf(root.get(), "offset"));
+    next.recordingTotal = integerOf(root.get(), "recordingTotal");
+    next.epgTotal = integerOf(root.get(), "epgTotal");
+    next.recordingHasMore = boolOf(root.get(), "recordingHasMore");
+    next.epgHasMore = boolOf(root.get(), "epgHasMore");
+    if (next.limit < 0 || next.offset < 0 || next.recordingTotal < 0 || next.epgTotal < 0)
+        return false;
+    for (size_t i = 0; i < json_object_array_length(recordings); ++i)
+        next.recordings.push_back(readSearchRecording(json_object_array_get_idx(recordings, i)));
+    for (size_t i = 0; i < json_object_array_length(epg); ++i) {
+        auto *entry = json_object_array_get_idx(epg, i);
+        CoreSearchEvent row;
+        row.eventId = stringOf(entry, "eventId");
+        row.backendId = stringOf(entry, "backendId");
+        row.channelId = stringOf(entry, "channelId");
+        row.channelName = stringOf(entry, "channelName");
+        row.title = stringOf(entry, "title");
+        row.subtitle = stringOf(entry, "subtitle");
+        row.description = stringOf(entry, "description");
+        row.startTime = stringOf(entry, "startTime");
+        row.endTime = stringOf(entry, "endTime");
+        row.person = stringOf(entry, "matchedPerson");
+        row.role = stringOf(entry, "matchedRole");
+        row.matchReason = stringOf(entry, "matchReason");
+        row.artworkUrl = searchImage(entry, "artwork");
+        next.epg.push_back(std::move(row));
+    }
+    for (size_t i = 0; i < json_object_array_length(people); ++i) {
+        auto *entry = json_object_array_get_idx(people, i);
+        CoreSearchPerson row;
+        row.name = stringOf(entry, "name");
+        row.role = stringOf(entry, "role");
+        row.imageUrl = searchImage(entry, "image");
+        row.recordingCount = integerOf(entry, "recordingCount", 0);
+        row.epgCount = integerOf(entry, "epgCount", 0);
+        next.people.push_back(std::move(row));
+    }
+    output = std::move(next);
+    return true;
+}
+
 bool parseAddon(const std::string &body, CoreAddon &state) {
     auto root = parse(body);
     if (!root || !field(root.get(), "desiredEnabled") ||
@@ -343,6 +461,29 @@ void CoreAdminClient::logout() {
         (void)request("POST", "/api/security/browser-sessions/logout", "{}");
     csrf_.clear();
     sessionCookie_.clear();
+}
+
+CoreStatus CoreAdminClient::recordingPersons(const std::string &backendId,
+        const std::string &name, int limit, int offset, CorePersonSearch &results) {
+    // Ask the existing read owner. It decides whether this request requires
+    // the existing Human session; no additional client-side permission gate.
+    const Reply r = request("GET", "/api/vdr/recordings/persons/search?backend=" +
+        queryEncode(backendId) + "&name=" + queryEncode(name) +
+        "&limit=" + std::to_string(limit) + "&offset=" + std::to_string(offset));
+    if (!status(r).ok) return last_;
+    if (!parsePersonSearch(r.body, results))
+        last_ = {false, r.http, "Ungültige Personensuchantwort"};
+    return last_;
+}
+CoreStatus CoreAdminClient::globalSearch(const std::string &backendId,
+        const std::string &query, int limit, int offset, CoreGlobalSearch &results) {
+    const Reply r = request("GET", "/api/search?backend=" + queryEncode(backendId) +
+        "&query=" + queryEncode(query) + "&limit=" + std::to_string(limit) +
+        "&offset=" + std::to_string(offset));
+    if (!status(r).ok) return last_;
+    if (!parseGlobalSearch(r.body, results))
+        last_ = {false, r.http, "Ungültige Suchantwort"};
+    return last_;
 }
 
 CoreStatus CoreAdminClient::backends(std::vector<CoreItem> &items) {

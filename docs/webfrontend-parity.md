@@ -44,3 +44,5 @@ Quellenbasis: [VDR-Suite main 52c67da](https://github.com/hotzenplotz5/vdr-suite
 | Regression | Headless-Modelle + echter Servicevergleich Web/OSD mit I, Robot / Will Smith und einer Serie; Live-TV-Vorschau/Replay-Rückkehr am Gerät |
 
 Kodi/Plex sind UX-Referenzen für interaktive Medienbibliotheken. Ein aktueller, quellengestützter Wettbewerbsvergleich und vollständiger Web/OSD-Button-Test sind noch offen; keine behauptete Gesamtparität.
+
+OSD.10/11 Transportbasis: Der vorhandene Core-HTTP-Client bietet jetzt die read-only Methoden `recordingPersons` und `globalSearch` mit explizitem Backend, Query-Encoding, Counts, Paging und bestehenden Sitzungsheadern. HTTP-Mock prüft beide realen Web-Routen sowie UTF-8/Sonderzeichen und Metadatenprojektion. Noch nicht aus der Cast-/Suchoberfläche aufgerufen. Vor UI-Wiring: tatsächlich lokales Backend und bestehende Lese-Session auf yaVDR bestimmen; stabile Zuordnung der Ergebnisse zu nativen Aufnahme-/EPG-Aktionen nachweisen. Kein Hardcoding eines fremden Backend-Kontexts und kein zweiter Index.

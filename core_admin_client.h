@@ -34,6 +34,35 @@ struct CoreEncoding {
     std::string shrinkPreset;
 };
 
+// Read-only projections of the existing Web search contracts. Preserve the
+// server's ordering, counts, identities and match reasons; no second index.
+struct CoreSearchRecording {
+    std::string id, backendId, nativeId, title, subtitle, startTime;
+    std::string person, role, character, matchReason, artworkUrl;
+};
+struct CoreSearchEvent {
+    std::string eventId, backendId, channelId, channelName, title, subtitle;
+    std::string description, startTime, endTime, person, role, matchReason, artworkUrl;
+};
+struct CoreSearchPerson {
+    std::string name, role, imageUrl;
+    std::int64_t recordingCount = 0, epgCount = 0;
+};
+struct CorePersonSearch {
+    std::vector<CoreSearchRecording> recordings;
+    std::int64_t total = 0;
+    int limit = 0, offset = 0;
+};
+struct CoreGlobalSearch {
+    std::string query, backendId, status;
+    std::vector<CoreSearchRecording> recordings;
+    std::vector<CoreSearchEvent> epg;
+    std::vector<CoreSearchPerson> people;
+    std::int64_t recordingTotal = 0, epgTotal = 0;
+    int limit = 0, offset = 0;
+    bool recordingHasMore = false, epgHasMore = false;
+};
+
 class CoreAdminClient {
     std::string origin_;
     std::string sessionCookie_;
@@ -66,6 +95,10 @@ public:
     CoreStatus login(const std::string &username, const std::string &password);
     void logout();
 
+    CoreStatus recordingPersons(const std::string &backendId, const std::string &name,
+                                int limit, int offset, CorePersonSearch &results);
+    CoreStatus globalSearch(const std::string &backendId, const std::string &query,
+                            int limit, int offset, CoreGlobalSearch &results);
     CoreStatus backends(std::vector<CoreItem> &items);
     CoreStatus addon(const std::string &backendId, CoreAddon &value);
     CoreStatus setAddon(const CoreAddon &previous, bool enabled, CoreAddon &updated);

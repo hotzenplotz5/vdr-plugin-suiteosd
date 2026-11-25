@@ -108,6 +108,8 @@ int main() {
             "GET /api/v1/devices?limit=100",
             "GET /api/v1/devices/dev-a/lifecycle",
             "POST /api/v1/devices/dev-a/lifecycle",
+            "GET /api/vdr/recordings/persons/search?backend=default&name=Will%20Smith&limit=20&offset=0",
+            "GET /api/search?backend=default&query=J%C3%BCrgen%20%26%20Co&limit=24&offset=24",
             "POST /api/security/browser-sessions/logout"
         };
         const std::vector<std::string> bodies = {
@@ -123,6 +125,8 @@ int main() {
             R"({"items":[{"deviceId":"dev-a","displayName":"Samsung TV","active":true,"revoked":false}]})",
             R"({"deviceId":"dev-a","active":true,"revoked":false})",
             R"({"deviceId":"dev-a","active":false,"revoked":true})",
+            R"({"totalCount":2,"returnedCount":1,"limit":20,"offset":0,"matches":[{"recording":{"id":"r1","backendId":"default","backendNativeId":"/video/Robot.rec","title":"Action~I, Robot","startTime":"2026-11-09","metadata":{"presentation":{"title":"I, Robot"}}},"person":{"originalName":"Will Smith","role":"actor","characterName":"Del Spooner"}}]})",
+            R"({"query":"Jürgen & Co","backendId":"default","status":"ok","limit":24,"offset":24,"recordings":[{"id":"r2","backendId":"default","backendNativeId":"/video/a.rec","title":"Film","matchedPerson":"Jürgen","matchReason":"person"}],"recordingTotal":25,"recordingHasMore":false,"epg":[{"eventId":"7","backendId":"default","channelId":"C-1-2-3","title":"Sendung","matchedPerson":"Jürgen","artwork":{"available":true,"url":"/api/epg/cache/artwork?eventId=7"}}],"epgTotal":30,"epgHasMore":true,"people":[{"name":"Jürgen","role":"actor","recordingCount":25,"epgCount":30}]})",
             ""
         };
         for (size_t i = 0; i < expected.size(); ++i) {
@@ -162,7 +166,7 @@ int main() {
                 header = "Set-Cookie: vdr_suite_session=sid-abc; Path=/; HttpOnly\r\n";
             if (i == 7) header = "ETag: \"account-etag\"\r\n";
             if (i == 10) header = "ETag: \"device-etag\"\r\n";
-            answer(fd, bodies[i], header, i == 12 ? 204 : 200);
+            answer(fd, bodies[i], header, i == 14 ? 204 : 200);
             close(fd);
         }
         close(listenFd);
@@ -198,6 +202,18 @@ int main() {
     std::vector<suiteosd::CoreItem> devices;
     assert(client.devices(devices).ok && devices.size() == 1);
     assert(client.revokeDevice(devices[0]).ok);
+    suiteosd::CorePersonSearch persons;
+    assert(client.recordingPersons("default", "Will Smith", 20, 0, persons).ok);
+    assert(persons.total == 2 && persons.recordings.size() == 1);
+    assert(persons.recordings[0].title == "I, Robot");
+    assert(persons.recordings[0].nativeId == "/video/Robot.rec");
+    assert(persons.recordings[0].character == "Del Spooner");
+    suiteosd::CoreGlobalSearch search;
+    assert(client.globalSearch("default", "Jürgen & Co", 24, 24, search).ok);
+    assert(search.offset == 24 && search.recordingTotal == 25 && search.epgTotal == 30);
+    assert(search.recordings[0].matchReason == "person");
+    assert(search.epg[0].eventId == "7" && search.epgHasMore);
+    assert(search.people[0].recordingCount == 25);
     client.logout();
     assert(!client.authenticated());
     mock.join();
