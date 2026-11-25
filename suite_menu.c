@@ -433,6 +433,7 @@ public:
         mode = Body::Items;
         firstTextLine = 0;
         rawText.clear();
+        fixedText = false;
         totalItems = firstItem = 0;
     }
     void SetTitle(const char *value) override { title = value ? value : ""; }
@@ -567,6 +568,7 @@ public:
     {
         mode = Body::Event;
         preview = Preview{};
+        fixedText = false;
         firstTextLine = 0;
         if (!event) { rawText.clear(); return; }
         preview.title = event->Title() ? event->Title() : "";
@@ -587,6 +589,7 @@ public:
     {
         mode = Body::Recording;
         preview = Preview{};
+        fixedText = false;
         firstTextLine = 0;
         if (!recording) { rawText.clear(); return; }
         preview.title = recording->Info() && recording->Info()->Title() ?
