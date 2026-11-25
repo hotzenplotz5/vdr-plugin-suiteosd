@@ -13,7 +13,11 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.9.2, noch nicht auf TV abgenommen)
+## Aktueller Implementierungsstand (0.9.3-dev, noch nicht auf TV abgenommen)
+
+- **Bildergalerie mit image_next (0.9.3-dev):** Der Sidebar-Eintrag „Bilder“ öffnet einen eigenen SuiteOSD-Fotobrowser mit fünf Spalten, Cyan-Fokus und lokaler Ordner-/Quellennavigation. Quelle, Verzeichniseinträge und ARGB-Vorschaubilder kommen ausschließlich aus den drei versionierten nativen VDR-Services des installierten Plugins `image_next`; dessen Thumbnail-Cache bleibt verantwortlich. OK/Rot öffnet Bilder, Grün startet die Diashow über den bestehenden image_next-Player, Zurück/Blau wechselt Ordner/Quelle/Home. Bei fehlendem Plugin oder fehlender Bildquelle erscheint ein verständlicher Hinweis. **Beide Plugins müssen mit derselben VDR-ABI gebaut werden; die reale TV-Abnahme steht aus.** Siehe [Bilder-Integration](docs/image-next-integration.md).
+
+## Implementierungsstand zuvor (0.9.2)
 
 - **Kompakte Suite-Einblendungen (0.9.2):** Die nativen VDR-Skin-Klassen für Lautstärke/Stummschaltung (`cSkinDisplayVolume`), Audio-/Sprachauswahl (`cSkinDisplayTracks`) und Hinweis-/Warn-/Fehlermeldungen (`cSkinDisplayMessage`) verwenden das gleiche dunkle Suite-Design mit Cyan-Akzenten. Tonspur-Listen zeigen bis zu fünf sichtbare Einträge samt Auswahl, Spurenzahl und Stereo/Links/Rechts; Lautstärke wird aus dem von VDR gelieferten Wert angezeigt. Für diese drei Anzeigen wird bei fehlender TrueColor-OSD-Fläche auf eine bereits installierte VDR-Skin zurückgegriffen. Fernbedienungsaktionen und Einblendzeiten gehören weiter VDR; kein Ausgabeplugin-Fork und keine neuen Berechtigungen.
 
