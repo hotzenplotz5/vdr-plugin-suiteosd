@@ -4,6 +4,7 @@
  * TVScraper is an optional, local VDR service; no external API is involved.
  */
 #include "artwork_decode.h"
+#include "logo_locator.h"
 #include "vendor/tvscraper/services.h"
 
 #include <vdr/epg.h>
@@ -121,6 +122,7 @@ class Canvas {
     int height = 0;
     std::string lastImagePath;
     Artwork cachedImage;
+    Artwork cachedLogo;
 
 public:
     explicit Canvas(int nominalHeight)
@@ -187,6 +189,18 @@ public:
         osd->DrawImage(cPoint(W(1275) + (W(270) - cachedImage.width) / 2,
                               H(31) + (H(156) - cachedImage.height) / 2), img);
     }
+    void setLogo(const std::string &path)
+    {
+        cachedLogo = path.empty() ? Artwork{} : LoadArtwork(path, W(245), H(100));
+    }
+    bool logo()
+    {
+        if (!osd || !cachedLogo.valid()) return false;
+        cImage img(cSize(cachedLogo.width, cachedLogo.height), cachedLogo.argb.data());
+        osd->DrawImage(cPoint(W(52) + (W(245) - cachedLogo.width) / 2,
+                              H(30) + (H(100) - cachedLogo.height) / 2), img);
+        return true;
+    }
     void progress(int x0, int y, int x1, int value)
     {
         const int pos = std::clamp(value, 0, 100);
@@ -216,6 +230,7 @@ public:
     {
         channel = ch && ch->Name() ? ch->Name() : "Kein Sender";
         channelNumber = std::to_string(number > 0 ? number : (ch ? ch->Number() : 0));
+        canvas.setLogo(ch ? FindChannelLogo(channel, ch->ShortName() ? ch->ShortName() : "") : "");
         // Invalidate preceding artwork when the user switches channels.
         media = Media{};
         present.clear();
@@ -250,8 +265,9 @@ public:
     {
         if (!canvas.valid()) return;
         canvas.begin();
-        canvas.label(52, 39, "VDR Suite", 0, accent, 250);
-        canvas.label(52, 93, channelNumber + "  " + channel, 1, white, 268);
+        if (!canvas.logo())
+            canvas.label(52, 55, channel, 0, white, 268);
+        canvas.label(52, 140, channelNumber + "  " + channel, 1, white, 268);
         canvas.rect(338, 29, 341, 197, accent);
         canvas.label(371, 26, present, 0, white, 848);
         if (withInfo) {
