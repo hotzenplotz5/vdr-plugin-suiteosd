@@ -2707,46 +2707,89 @@ private:
         return osContinue;
     }
 
+    void advancePhotoCarousel()
+    {
+        if (!photoAnimating) return;
+        const auto now = std::chrono::steady_clock::now();
+        const float elapsed = float(std::chrono::duration_cast<
+                                    std::chrono::milliseconds>(
+                                    now - photoAnimationStart).count());
+        const float t = std::clamp(elapsed / 220.0f, 0.0f, 1.0f);
+        const float eased = t * t * (3.0f - 2.0f * t);
+        photoVisualCenter = photoAnimationFrom +
+                            (photoAnimationTo - photoAnimationFrom) * eased;
+        if (t >= 1.0f) {
+            photoVisualCenter = photoAnimationTo;
+            photoAnimating = false;
+        }
+    }
+
+    void startPhotoCarouselMove(int oldIndex)
+    {
+        if (oldIndex == photoGallery.selected) return;
+        advancePhotoCarousel(); // a rapid second key continues smoothly
+        photoAnimationFrom = photoVisualCenter;
+        photoAnimationTo = float(photoGallery.selected);
+        photoAnimationStart = std::chrono::steady_clock::now();
+        photoLastFrame = photoAnimationStart;
+        photoAnimating = true;
+    }
+
+    // VDR's existing setup.conf is the only persistent preference owner.
+    void togglePhotoView()
+    {
+        const int previous = gPhotoViewMode;
+        const int next = previous ? 0 : 1;
+        cPlugin *owner = cPluginManager::GetPlugin("suiteosd");
+        if (!owner) {
+            photoNotice = "SuiteOSD-Einstellungen nicht verfügbar";
+            return;
+        }
+        owner->SetupStore("PhotoView", next);
+        if (!Setup.Save()) {
+            owner->SetupStore("PhotoView", previous);
+            photoNotice = "Ansicht konnte nicht gespeichert werden";
+            return;
+        }
+        gPhotoViewMode = next;
+        photoGallery.SetView(next ? suiteosd::PhotoGallery::View::Carousel :
+                                    suiteosd::PhotoGallery::View::Grid);
+        photoThumbnails.clear();
+        photoVisualCenter = float(photoGallery.selected);
+        photoAnimating = false;
+        photoNotice.clear();
+    }
+
     eOSState photoKey(eKeys base)
     {
+        const bool carousel =
+            photoGallery.view == suiteosd::PhotoGallery::View::Carousel;
         if (base == kNone) {
-            if (pollPhotoThumbnails()) draw();
-            return osContinue;
-        }
-        if (nav.sideFocused) {
-            if (base == kUp)
-                nav.sideIndex = std::max(0, nav.sideIndex - 1);
-            else if (base == kDown)
-                nav.sideIndex = std::min(suiteosd::Navigation::kSidebarItems - 1,
-                                         nav.sideIndex + 1);
-            else if (base == kRight || base == kBack)
-                nav.sideFocused = false;
-            else if (base == kOk) {
-                nav.sideFocused = false;
-                if (nav.sideIndex != 8) {
-                    photosActive = false;
-                    photoThumbnails.clear();
-                    if (nav.sideIndex == 0) {
-                        nav.section = 0;
-                        draw();
-                        return osContinue;
-                    }
-                    const eOSState next = action(suiteosd::Activation::Module);
-                    if (next != osContinue)
-                        return next;
+            bool refresh = pollPhotoThumbnails();
+            if (carousel && photoAnimating) {
+                const auto now = std::chrono::steady_clock::now();
+                if (now - photoLastFrame >= std::chrono::milliseconds(33)) {
+                    photoLastFrame = now;
+                    advancePhotoCarousel();
+                    refresh = true;
                 }
             }
-            draw();
+            if (refresh) draw();
             return osContinue;
         }
 
-        if (base == kBack || base == kBlue) {
+        // The approved gallery is fullscreen: no permanent left-hand sidebar.
+        if (nav.sideFocused)
+            nav.sideFocused = false;
+
+        if (base == k1) {
+            togglePhotoView();
+        } else if (base == kBack || base == kBlue) {
             if (!photoGallery.Back()) {
                 photosActive = false;
                 photoThumbnails.clear();
                 nav.section = 0;
             } else if (photoGallery.InSources()) {
-                // Preserve the source-selection level after leaving a source.
                 imagenext::Browse sources;
                 cPlugin *provider = imageNext();
                 if (provider && provider->Service(imagenext::kBrowse, &sources) &&
@@ -2755,32 +2798,40 @@ private:
             } else {
                 loadPhotoDirectory();
             }
-        } else if (base == kLeft) {
-            if (photoGallery.selected % suiteosd::PhotoGallery::kColumns == 0) {
-                nav.sideFocused = true;
-                nav.sideIndex = 8;
-            } else
-                photoGallery.Move(-1, 0);
-        } else if (base == kRight)
-            photoGallery.Move(1, 0);
-        else if (base == kUp)
-            photoGallery.Move(0, -1);
-        else if (base == kDown)
-            photoGallery.Move(0, 1);
-        else if (base == kChanUp)
-            photoGallery.Page(1);
-        else if (base == kChanDn)
-            photoGallery.Page(-1);
-        else if (base == k0) {
+            photoThumbnails.clear();
+            photoVisualCenter = float(photoGallery.selected);
+            photoAnimating = false;
+            photoInfoVisible = false;
+        } else if (base == kLeft || base == kRight) {
+            const int previous = photoGallery.selected;
+            if (carousel) {
+                photoGallery.MoveCarousel(base == kLeft ? -1 : 1);
+                startPhotoCarouselMove(previous);
+            } else {
+                photoGallery.Move(base == kLeft ? -1 : 1, 0);
+            }
+        } else if (base == kUp || base == kDown) {
+            if (!carousel)
+                photoGallery.Move(0, base == kUp ? -1 : 1);
+            else
+                return osContinue;
+        } else if (base == kChanUp || base == kChanDn) {
+            if (carousel) {
+                photoGallery.MoveCarousel(base == kChanUp ? 5 : -5);
+                photoVisualCenter = float(photoGallery.selected);
+                photoAnimating = false;
+            } else {
+                photoGallery.Page(base == kChanUp ? 1 : -1);
+            }
+        } else if (base == k0) {
             if (photoGallery.InSources())
                 loadPhotoSources();
             else
                 loadPhotoDirectory();
+            photoVisualCenter = float(photoGallery.selected);
+            photoAnimating = false;
         } else if (base == kYellow || base == kInfo) {
-            const auto *entry = photoGallery.SelectedEntry();
-            if (entry)
-                photoNotice = entry->directory ? "Ordner: " + entry->name :
-                                                   "Foto: " + entry->name;
+            photoInfoVisible = !photoInfoVisible;
         } else if (base == kOk || base == kRed || base == kGreen) {
             if (photoGallery.InSources()) {
                 const auto *source = photoGallery.SelectedSource();
@@ -2797,9 +2848,12 @@ private:
                     return playPhoto(base == kGreen);
                 }
             }
-        } else
+            photoVisualCenter = float(photoGallery.selected);
+            photoAnimating = false;
+            photoInfoVisible = false;
+        } else {
             return osContinue;
-
+        }
         draw();
         return osContinue;
     }
