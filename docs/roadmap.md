@@ -50,3 +50,9 @@ Die VDR-Suite-Einstellungsseite bietet nun eine echte Human-Browser-Session mit 
 - Suite-Home und Aufnahmebrowser öffnen per Info eine großflächige, native Detailseite im freigegebenen Webfrontend-Stil mit Poster, Fanart, Episodendaten, Genres, Laufzeit, Bewertung, Datum und Synopsis. OK/Rot startet dort die VDR-Wiedergabe.
 - Über `cReplayControl::GetInfo()` liefern **aus Suite-OSD gestartete Wiedergaben** bei Info diese native Detailansicht. Wiedergabesteuerung, Schnittfunktionen und Player bleiben VDR-eigen. Replay aus fremden Menüeinträgen nutzt weiterhin deren normale VDR-Infoansicht.
 - Die verbleibenden `cSkin`-Bereiche (vollständige native Menüs, Lautstärke, Audio und Meldungen) verwenden einstweilen eine vorhandene Skin; OSD.2 ist deshalb noch nicht vollständig. Kein TV-/Remote-Test erfolgt. Quellnachweis: [CI VDR 2.8.3/2.8.4 für Commit 073950e](https://github.com/hotzenplotz5/vdr-plugin-suiteosd/actions/runs/45481258523).
+
+## OSD.2.1 – Native VDR-Standardmenüs (0.9.1)
+
+`suite_menu.c` implementiert `cSkinDisplayMenu` als optisch einheitlichen VDR-Suite-Zwei-Spalten-Renderer. VDR liefert weiterhin die tatsächlichen Einträge, Auswahl, Farbtasten und Aktionen; die Skin übernimmt Darstellung und scrollbarige Texte. Typisierte VDR-Events, Timer, Sender und Aufnahmen bekommen nur bei gültigen VDR-Daten einen Informationsbereich mit optionaler lokaler TVScraper-Fanart. Keine zweite Datenhaltung, API-v1-Abfrage oder neue Menülogik. Der vorherige `DisplayMenu()`-Fallback wird nur bei fehlender TrueColor-OSD-Fläche verwendet. VDR-/Plugin-Menüs mit eigener OSD-Zeichnung werden nicht automatisch umgestaltet.
+
+**Abnahme ausstehend:** Bild- und Fernbedienungstest auf yaVDR, insbesondere editierbare Setup-Tabs, lange EPG-/Aufnahmetexte, Seitenwechsel, Plugin-Menüs, alternative OSD-Provider und korrekte Rückkehr zum TV. Lautstärke, Audiospuren und Statusmeldungen sind weitere separate OSD.2-Schritte.
