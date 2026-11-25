@@ -140,6 +140,7 @@ class SuiteMenu final : public cSkinDisplayMenu {
     cFont *heading = nullptr;
     cFont *bodyFont = nullptr;
     cFont *small = nullptr;
+    cFont *fixedFont = nullptr;
     int width = 1600;
     int height = 900;
     int maxRows = 10;
@@ -200,6 +201,20 @@ class SuiteMenu final : public cSkinDisplayMenu {
             if (!line.empty()) result.push_back(line);
         }
         return result;
+    }
+
+    std::vector<std::string> contentLines() const
+    {
+        if (!fixedText) {
+            return wrap(rawText, X(preview.picture.empty() ? 1406 : 921), bodyFont);
+        }
+        // Fixed-font views (e.g. technical plugin output) must preserve
+        // indentation and whitespace rather than word-wrapping it.
+        std::vector<std::string> lines;
+        std::istringstream stream(rawText);
+        std::string line;
+        while (std::getline(stream, line)) lines.push_back(line);
+        return lines;
     }
 
     void drawParagraph(const std::string &value, int x, int y, int w,
@@ -354,10 +369,10 @@ class SuiteMenu final : public cSkinDisplayMenu {
             rect(1028, 356, 493, 317, kCard);
             drawPicture(1041, 369, 468, 290);
         }
-        const auto lines = wrap(rawText, X(descWidth), fixedText ? small : bodyFont);
+        const auto lines = contentLines();
         int y = 365;
         for (int i = firstTextLine; i < int(lines.size()) && y < 747; ++i, y += 37)
-            text(67, y, lines[i], fixedText ? small : bodyFont, kWhite, descWidth);
+            text(67, y, lines[i], fixedText ? fixedFont : bodyFont, kWhite, descWidth);
         if (firstTextLine > 0 || int(lines.size()) > 10 + firstTextLine)
             text(69, 758, "Pfeile: Text scrollen", small, kCyan, 700);
     }
@@ -381,6 +396,7 @@ public:
         heading = cFont::CreateFont("Sans:Bold", std::max(20, Y(44)));
         bodyFont = cFont::CreateFont("Sans", std::max(15, Y(29)));
         small = cFont::CreateFont("Sans", std::max(12, Y(22)));
+        fixedFont = cFont::CreateFont("Monospace", std::max(12, Y(22)));
     }
 
     ~SuiteMenu() override
@@ -389,13 +405,14 @@ public:
         delete heading;
         delete bodyFont;
         delete small;
+        delete fixedFont;
     }
 
     bool valid() const { return osd != nullptr && bodyFont != nullptr; }
     int MaxItems() override { return maxRows; }
     int GetTextAreaWidth() const override { return X(1400); }
     const cFont *GetTextAreaFont(bool FixedFont) const override
-    { return FixedFont ? small : bodyFont; }
+    { return FixedFont ? fixedFont : bodyFont; }
 
     void SetMenuCategory(eMenuCategory value) override
     {
@@ -599,8 +616,7 @@ public:
     void Scroll(bool up, bool page) override
     {
         if (mode == Body::Items) return;
-        const int maxLines = int(wrap(rawText, X(preview.picture.empty() ? 1406 : 921),
-                                      fixedText ? small : bodyFont).size());
+        const int maxLines = int(contentLines().size());
         firstTextLine = std::clamp(firstTextLine + (up ? -1 : 1) * (page ? 9 : 1),
                                    0, std::max(0, maxLines - 10));
     }
