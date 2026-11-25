@@ -18,6 +18,7 @@ Stand: 2026-11-24 · Basis: separates `hotzenplotz5/vdr-plugin-suiteosd` Reposit
 - OSD.0/OSD.1 liegen im Quellcode vor; OSD.2 (Skin), OSD.3 (lokale Integration) und Teile der späteren Integration sind begonnen. Alle Phasen benötigen weiterhin ihre jeweils beschriebene echte Geräte-/Funktionsabnahme.
 - `vdr-plugin-suiteosd` braucht keine veränderte `vaapivideo`-Quelle. Es soll auch mit anderen VDR-OSD-Providern funktionieren.
 - Bei OSD.2 die verfügbaren OSD-Flächen/TrueColor-Fähigkeiten am echten Gerät nachweisen.
+- **Rendering-Entscheidung (25.11.2026):** Native VDR-OSD-API und der vorhandene Ausgabeprovider bleiben Standard **und dauerhafter Rückfallweg**. Ein möglicher CEF-/GPU-Textur-/DMA-BUF-Renderer ist lediglich eine spätere, optionale Forschungs-/Entwicklungsalternative; kein nachgewiesener `vaapivideo`-Vertrag, keine Pflichtpatches und kein aktuell eingeplanter Implementierungsslice. Erst nach Machbarkeit, Messungen und gesonderter Entscheidung aufnehmen. Details: [Architektur – Renderwege](architecture.md#renderwege-nativer-standard-und-möglicher-gpu-pfad-25112026).
 - HbbTV bleibt in seinen bisherigen drei Komponenten. Die in VDR-Suite am 23.11.2026 zurückgestellte HbbTV-Extraktion wird nicht neu gestartet.
 - Keine neuen Git-Branches, Berechtigungsgates, produktiven API-Routen oder Addon-C++-Loader als Nebeneffekt.
 - Kein `make install` auf dem produktiven VDR ohne verifizierten Build, ABI- und Installationsweg.
