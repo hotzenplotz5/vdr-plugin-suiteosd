@@ -162,3 +162,5 @@ inline CarouselBitmap ReflectCarousel(const CarouselBitmap &card, int depth = 72
 }
 
 } // namespace suiteosd
+
+#endif // VDR_SUITEOSD_PHOTO_CAROUSEL_H
