@@ -193,6 +193,12 @@ public:
         rect(x0, y, x1, y + 8, line);
         rect(x0, y, x0 + (x1 - x0) * pos / 100, y + 8, accent);
     }
+    void clear()
+    {
+        if (!osd) return;
+        osd->DrawRectangle(0, 0, width - 1, height - 1, clrTransparent);
+        osd->Flush();
+    }
     void flush() { if (osd) osd->Flush(); }
 };
 
@@ -322,6 +328,130 @@ public:
     }
 };
 
+
+// Native OSD.2.2 overlays. VDR remains the owner of volume, audio track
+// selection, timeout policy and notifications; these classes only draw them.
+class DisplayVolume final : public cSkinDisplayVolume {
+    Canvas canvas;
+    int current = 0;
+    int total = 0;
+    bool mute = false;
+public:
+    DisplayVolume() : canvas(145) {}
+    bool valid() const { return canvas.valid(); }
+    void SetVolume(int Current, int Total, bool Mute) override
+    {
+        current = Current;
+        total = Total;
+        mute = Mute;
+    }
+    void Flush() override
+    {
+        if (!canvas.valid()) return;
+        canvas.begin();
+        canvas.label(53, 34, "VDR Suite", 0, accent, 278);
+        canvas.rect(333, 32, 337, 196, accent);
+        canvas.label(365, 30, mute ? "TON AUS" : "LAUTSTÄRKE", 0, white, 420);
+        const int percent = total > 0 ?
+            std::clamp(int(100LL * current / total), 0, 100) : 0;
+        canvas.progress(368, 135, 1190, mute ? 0 : percent);
+        canvas.label(1220, 115, mute ? "MUTE" : std::to_string(percent) + " %",
+                     1, mute ? 0xFFFF8585 : accent, 300);
+        canvas.flush();
+    }
+};
+
+class DisplayTracks final : public cSkinDisplayTracks {
+    Canvas canvas;
+    std::string heading;
+    std::vector<std::string> tracks;
+    int selected = 0;
+    int audioChannel = -1;
+public:
+    DisplayTracks(const char *Title, int NumTracks, const char *const *Tracks)
+      : canvas(330), heading(Title ? Title : "Audio / Sprache")
+    {
+        const int count = std::clamp(NumTracks, 0, 256);
+        tracks.reserve(count);
+        for (int i = 0; i < count; ++i)
+            tracks.emplace_back(Tracks && Tracks[i] ? Tracks[i] : "");
+    }
+    bool valid() const { return canvas.valid(); }
+    void SetTrack(int Index, const char *const *Tracks) override
+    {
+        selected = std::clamp(Index, 0, std::max(0, int(tracks.size()) - 1));
+        if (Tracks) {
+            for (size_t i = 0; i < tracks.size(); ++i)
+                tracks[i] = Tracks[i] ? Tracks[i] : "";
+        }
+    }
+    void SetAudioChannel(int AudioChannel) override
+    {
+        audioChannel = AudioChannel;
+    }
+    void Flush() override
+    {
+        if (!canvas.valid()) return;
+        canvas.begin();
+        canvas.label(48, 29, "VDR Suite", 0, accent, 281);
+        canvas.label(48, 112, heading, 1, white, 285);
+        canvas.rect(330, 31, 334, 201, accent);
+        const int total = int(tracks.size());
+        const int first = std::clamp(selected - 2, 0, std::max(0, total - 5));
+        for (int row = 0; row < 5 && first + row < total; ++row) {
+            const int index = first + row;
+            const int y = 27 + row * 35;
+            if (index == selected)
+                canvas.rect(362, y - 3, 1205, y + 28, 0xFF075E8B);
+            else
+                canvas.rect(362, y + 28, 1205, y + 29, 0xFF29465F);
+            canvas.label(385, y, std::to_string(index + 1) + ".  " + tracks[index],
+                         1, index == selected ? white : muted, 830);
+        }
+        std::string detail = total ? std::to_string(selected + 1) + " / " +
+                                      std::to_string(total) + " Spuren" : "Keine Tonspuren";
+        if (audioChannel == 0) detail += " · Stereo";
+        if (audioChannel == 1) detail += " · Links";
+        if (audioChannel == 2) detail += " · Rechts";
+        canvas.label(49, 182, detail, 2, accent, 290);
+        canvas.flush();
+    }
+};
+
+class DisplayMessage final : public cSkinDisplayMessage {
+    Canvas canvas;
+    eMessageType type = mtInfo;
+    std::string message;
+public:
+    DisplayMessage() : canvas(140) {}
+    bool valid() const { return canvas.valid(); }
+    void SetMessage(eMessageType Type, const char *Text) override
+    {
+        type = Type;
+        message = Text ? Text : "";
+    }
+    void Flush() override
+    {
+        if (!canvas.valid()) return;
+        if (message.empty()) {
+            canvas.clear();
+            return;
+        }
+        canvas.begin();
+        const tColor indicator = type == mtError ? 0xFFFF8585 :
+                                 type == mtWarning ? 0xFFF7CE68 :
+                                 type == mtInfo ? accent : muted;
+        const char *kind = type == mtError ? "FEHLER" :
+                           type == mtWarning ? "WARNUNG" :
+                           type == mtInfo ? "HINWEIS" : "STATUS";
+        canvas.label(49, 44, "VDR Suite", 0, accent, 280);
+        canvas.rect(330, 33, 335, 192, indicator);
+        canvas.label(366, 28, kind, 2, indicator, 220);
+        canvas.label(365, 94, message, 1, white, 1130);
+        canvas.flush();
+    }
+};
+
 class SuiteSkin final : public cSkin {
     // A provider without TrueColor keeps the original VDR skin as fallback.
     cSkin *fallback()
@@ -343,12 +473,27 @@ public:
     cSkinDisplayReplay *DisplayReplay(bool modeOnly) override
     { return new class DisplayReplay(modeOnly); }
     cSkinDisplayVolume *DisplayVolume() override
-    { return fallback() ? fallback()->DisplayVolume() : nullptr; }
+    {
+        auto *display = new class DisplayVolume();
+        if (display->valid()) return display;
+        delete display;
+        return fallback() ? fallback()->DisplayVolume() : nullptr;
+    }
     cSkinDisplayTracks *DisplayTracks(const char *title, int count,
                                      const char *const *tracks) override
-    { return fallback() ? fallback()->DisplayTracks(title, count, tracks) : nullptr; }
+    {
+        auto *display = new class DisplayTracks(title, count, tracks);
+        if (display->valid()) return display;
+        delete display;
+        return fallback() ? fallback()->DisplayTracks(title, count, tracks) : nullptr;
+    }
     cSkinDisplayMessage *DisplayMessage() override
-    { return fallback() ? fallback()->DisplayMessage() : nullptr; }
+    {
+        auto *display = new class DisplayMessage();
+        if (display->valid()) return display;
+        delete display;
+        return fallback() ? fallback()->DisplayMessage() : nullptr;
+    }
 };
 } // namespace
 
