@@ -5,6 +5,7 @@
  */
 #include "artwork_decode.h"
 #include "logo_locator.h"
+#include "skin_registration.h"
 #include "vendor/tvscraper/services.h"
 
 #include <vdr/epg.h>
@@ -515,10 +516,6 @@ public:
 
 void RegisterSuiteSkin()
 {
-    // cSkin registers itself in its constructor; do not add it twice.
-    // The VDR skin list owns the instance and deletes it on shutdown.
-    for (cSkin *skin = Skins.First(); skin; skin = Skins.Next(skin))
-        if (std::string(skin->Name()) == "suiteosd") return;
-    new SuiteSkin();
+    RegisterSkinOnce<SuiteSkin>(Skins, "suiteosd");
 }
 } // namespace suiteosd

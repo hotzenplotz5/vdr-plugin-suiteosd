@@ -30,7 +30,7 @@ suiteosd.o: suiteosd.c navigation.h core_admin_client.h core_admin_navigation.h 
 suite_menu.o: suite_menu.c artwork_decode.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
-suite_skin.o: suite_skin.c artwork_decode.h logo_locator.h vendor/tvscraper/services.h
+suite_skin.o: suite_skin.c artwork_decode.h logo_locator.h skin_registration.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 core_admin_client.o: core_admin_client.c core_admin_client.h
@@ -83,6 +83,12 @@ check-recording-browser:
 	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o recording-browser-test tests/recording_browser_test.cpp
 	./recording-browser-test settings-navigation-test
 	rm -f recording-browser-test
+
+.PHONY: check-skin-registration
+check-skin-registration:
+	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o skin-registration-test tests/skin_registration_test.cpp
+	./skin-registration-test
+	rm -f skin-registration-test
 
 check-navigation:
 	$(CXX) -std=c++17 -Wall -Wextra -pedantic -o navigation-test tests/navigation_test.cpp

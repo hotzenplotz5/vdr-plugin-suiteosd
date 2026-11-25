@@ -46,7 +46,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.4-dev";
+static const char *VERSION = "0.9.5-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -1366,7 +1366,7 @@ private:
         }
         // Image disk I/O and decode must not hold the VDR recordings lock.
         if (!imagePath.empty())
-            meta.artwork = suiteosd::LoadArtwork(imagePath, X(164), Y(55));
+            meta.artwork = suiteosd::LoadArtwork(imagePath, X(164), Y(84));
         return meta;
     }
 
@@ -1511,23 +1511,23 @@ private:
                                nav.card[3] == first + col;
             panel(x, y + 48, cw, 160, focus, kCardAlt);
             const RecordingMeta &meta = metaFor(item);
-            fill(x + 12, y + 59, x + cw - 12, y + 114, kLine);
+            fill(x + 12, y + 59, x + cw - 12, y + 143, kLine);
             if (meta.artwork.valid()) {
                 cImage picture(cSize(meta.artwork.width, meta.artwork.height),
                                meta.artwork.argb.data());
                 const int left = X(x + 12) +
                     (X(cw - 24) - meta.artwork.width) / 2;
                 const int top = Y(y + 59) +
-                    (Y(55) - meta.artwork.height) / 2;
+                    (Y(84) - meta.artwork.height) / 2;
                 osd->DrawImage(cPoint(left, top), picture);
             } else
                 print(x + 25, y + 70, "AUFNAHME", fontSmall, kMuted);
 
             const std::string &title = meta.title.empty() ? item.title : meta.title;
-            print(x + 13, y + 122, title, fontBody, kText, cw - 24);
+            print(x + 13, y + 147, title, fontBody, kText, cw - 24);
             const std::string detail = !meta.episode.empty() ? meta.episode :
                                        !meta.release.empty() ? meta.release : item.time;
-            print(x + 13, y + 161, detail, fontSmall, kMuted, cw - 24);
+            print(x + 13, y + 181, detail, fontSmall, kMuted, cw - 24);
         }
         if (data.recordings.empty())
             print(159, y + 94, "Keine Aufnahmen vorhanden", fontBody, kMuted);

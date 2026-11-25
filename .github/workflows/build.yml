@@ -12,6 +12,13 @@ jobs:
       - name: Test remote navigation without display device
         run: make check-navigation
 
+  skin-registration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify skin self-registration and idempotence
+        run: make check-skin-registration
+
   logos:
     runs-on: ubuntu-24.04
     steps:
