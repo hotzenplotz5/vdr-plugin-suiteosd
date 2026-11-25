@@ -13,7 +13,11 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.9.3-dev, noch nicht auf TV abgenommen)
+## Aktueller Implementierungsstand (0.9.4-dev, noch nicht auf TV abgenommen)
+
+- **Bilder-Karussell im freigegebenen SuiteOSD-Design (0.9.4-dev):** Die Galerie bietet jetzt Raster **und** Karussell als persistente Anzeigeart (`suiteosd.PhotoView` in VDRs `setup.conf`; Wechsel mit Taste `1`). Die Karussellansicht zeigt ein großes scharfes mittleres Foto und je zwei nach innen geneigte, verkleinerte und abgedunkelte Nachbarbilder mit dezenter Spiegelung. **Die Perspektive ist bewusst nach innen orientiert:** Bei linken Fotos ist die rechte Innenkante höher, bei rechten Fotos die linke. Beim Wechsel mit Links/Rechts bewegen sich die Karten in rund 220 ms Richtung Mitte beziehungsweise nach außen. Die Galerie füllt fast die gesamte OSD-Fläche: kein linkes Menü, keine rechte Infospalte, nur der aktuelle Ordnername oben und eine kompakte Tastenleiste unten. Die eigentliche Bilddekodierung, Quellenvalidierung und Vollbild-/Diashow-Wiedergabe verbleiben bei `image_next`. Reine CPU-OSD-Projektion der ARGB-Vorschaubilder, kein GPU-3D- oder Browser-Layer. Headless-Perspektivtests und CI-Builds sind eingerichtet; ein realer Fernsehtest steht aus.
+
+## Implementierungsstand zuvor (0.9.3-dev)
 
 - **Bildergalerie mit image_next (0.9.3-dev):** Der Sidebar-Eintrag „Bilder“ öffnet einen eigenen SuiteOSD-Fotobrowser mit fünf Spalten, Cyan-Fokus und lokaler Ordner-/Quellennavigation. Quelle, Verzeichniseinträge und ARGB-Vorschaubilder kommen ausschließlich aus den drei versionierten nativen VDR-Services des installierten Plugins `image_next`; dessen Thumbnail-Cache bleibt verantwortlich. OK/Rot öffnet Bilder, Grün startet die Diashow über den bestehenden image_next-Player, Zurück/Blau wechselt Ordner/Quelle/Home. Bei fehlendem Plugin oder fehlender Bildquelle erscheint ein verständlicher Hinweis. **Beide Plugins müssen mit derselben VDR-ABI gebaut werden; die reale TV-Abnahme steht aus.** Siehe [Bilder-Integration](docs/image-next-integration.md).
 
