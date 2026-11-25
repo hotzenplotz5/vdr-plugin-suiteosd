@@ -28,6 +28,28 @@ public:
     int selected = 0;
     int firstVisible = 0;
 
+    // Choice is persisted in suiteosd.PhotoView (0=grid, 1=carousel).
+    // The carousel uses the same directory and image_next thumbnail data.
+    enum class View { Grid = 0, Carousel = 1 };
+    View view = View::Carousel;
+
+    void SetView(View next)
+    {
+        view = next;
+        selected = std::max(0, std::min(selected, Count() - 1));
+        firstVisible = (selected / kVisible) * kVisible;
+    }
+
+    void MoveCarousel(int delta)
+    {
+        if (!Count()) {
+            selected = firstVisible = 0;
+            return;
+        }
+        selected = std::max(0, std::min(Count() - 1, selected + delta));
+        firstVisible = (selected / kVisible) * kVisible;
+    }
+
     bool InSources() const { return source < 0; }
     int Count() const { return InSources() ? int(sources.size()) : int(entries.size()); }
 
