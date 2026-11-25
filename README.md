@@ -75,3 +75,5 @@ Für die authentifizierte Suite-Verwaltung werden zusätzlich libcurl4-openssl-d
 - [VDR](https://www.tvdr.de/) – Plugin-, Skin- und OSD-Schnittstellen
 
 **Kein Installationsversprechen:** Eine Quellcode-Skizze oder ein Git-Commit bedeutet nicht, dass das Plugin gegen die konkrete VDR-ABI gebaut und mit HbbTV, Teletext oder Medienwiedergabe getestet ist.
+
+Die native Aufnahme-Genreübersicht verwendet die aus VDR-Suite übernommene kanonische Genre-Registry (`vendor/vdr-suite`, siehe Herkunftsnachweis). Bekannte deutsche/englische Aliase werden zusammengefasst und Aufnahmen pro Kategorie nur einmal gezählt.

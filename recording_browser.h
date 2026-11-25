@@ -1,6 +1,8 @@
 #ifndef SUITEOSD_RECORDING_BROWSER_H
 #define SUITEOSD_RECORDING_BROWSER_H
 
+#include "vendor/vdr-suite/CanonicalGenreRegistry.h"
+
 #include <algorithm>
 #include <ctime>
 #include <map>
@@ -59,6 +61,19 @@ struct RecordingBrowser {
         return delimiter == std::string::npos ? recording.name : recording.name.substr(delimiter + 1);
     }
 
+    static std::set<std::string> GenreLabels(const BrowserRecording &rec)
+    {
+        static const CanonicalGenreRegistry registry;
+        std::set<std::string> labels;
+        for (const auto &raw : rec.genres) {
+            const auto canonical = registry.classify(raw);
+            if (canonical.id != "unclassified" && !canonical.labelDe.empty())
+                labels.insert(canonical.labelDe);
+        }
+        if (labels.empty()) labels.insert("Ohne Genre");
+        return labels;
+    }
+
     void Refresh()
     {
         entries.clear();
@@ -94,14 +109,8 @@ struct RecordingBrowser {
         } else if (view == View::Genres && genre.empty()) {
             std::map<std::string, int> counts;
             for (const BrowserRecording &rec : source) {
-                if (rec.genres.empty()) ++counts["Ohne Genre"];
-                else {
-                    std::set<std::string> unique;
-                    for (const std::string &name : rec.genres)
-                        if (!name.empty()) unique.insert(name);
-                    if (unique.empty()) ++counts["Ohne Genre"];
-                    else for (const std::string &name : unique) ++counts[name];
-                }
+                for (const auto &label : GenreLabels(rec))
+                    ++counts[label];
             }
             for (const auto &item : counts) {
                 BrowserEntry entry;
@@ -113,12 +122,7 @@ struct RecordingBrowser {
         } else {
             for (const BrowserRecording &rec : source) {
                 if (view == View::Genres) {
-                    const std::string wanted = genre;
-                    const bool without = rec.genres.empty() ||
-                                         std::all_of(rec.genres.begin(), rec.genres.end(),
-                                                     [](const std::string &g) { return g.empty(); });
-                    if (wanted == "Ohne Genre" ? !without :
-                        std::find(rec.genres.begin(), rec.genres.end(), wanted) == rec.genres.end())
+                    if (GenreLabels(rec).count(genre) == 0)
                         continue;
                 }
                 BrowserEntry entry;

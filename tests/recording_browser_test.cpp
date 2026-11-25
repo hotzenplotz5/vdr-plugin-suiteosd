@@ -62,6 +62,23 @@ int main()
     b.Move(0, -1);
     assert(b.tabsFocused); // first grid row -> tabs
 
+    RecordingBrowser aliases;
+    aliases.source = {
+        rec("a", "A", 10, {"Adventure", "Abenteuer", "Comedy", "Komödie"}),
+        rec("b", "B", 20, {"adventure", "documentary", "Dokumentarfilm"}),
+        rec("c", "C", 30, {" ", "Ohne Genre"}),
+        rec("d", "D", 40, {"Unbekanntes Genre"})
+    };
+    aliases.ChangeView(RecordingBrowser::View::Genres);
+    assert(aliases.entries.size() == 5);
+    assert(aliases.entries[0].title == "Abenteuer" && aliases.entries[0].count == 2);
+    assert(aliases.entries[1].title == "Dokumentation" && aliases.entries[1].count == 1);
+    assert(aliases.entries[2].title == "Komödie" && aliases.entries[2].count == 1);
+    aliases.Open();
+    assert(aliases.entries.size() == 2);
+    assert(aliases.entries[0].fileName == "b" && aliases.entries[1].fileName == "a");
+    assert(aliases.Back());
+
     RecordingBrowser many;
     for (int i = 0; i < 25; ++i)
         many.source.push_back(rec(std::to_string(i), "Item" + std::to_string(i), i));
