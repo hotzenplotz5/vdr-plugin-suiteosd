@@ -499,6 +499,10 @@ public:
 
 void RegisterSuiteSkin()
 {
-    Skins.Add(new SuiteSkin());
+    // cSkin registers itself in its constructor; do not add it twice.
+    // The VDR skin list owns the instance and deletes it on shutdown.
+    for (cSkin *skin = Skins.First(); skin; skin = Skins.Next(skin))
+        if (std::string(skin->Name()) == "suiteosd") return;
+    new SuiteSkin();
 }
 } // namespace suiteosd
