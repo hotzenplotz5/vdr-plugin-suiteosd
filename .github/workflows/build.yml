@@ -51,6 +51,13 @@ jobs:
       - name: Verify folder/genre/all navigation and recording sorting
         run: make check-recording-browser
 
+  photo-gallery:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify image_next source, folder, and paging navigation
+        run: make check-photo-gallery
+
   epg-timeline:
     runs-on: ubuntu-24.04
     steps:
