@@ -46,7 +46,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.3-dev";
+static const char *VERSION = "0.9.4-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -3376,22 +3376,28 @@ public:
 class cMenuSuiteOsdSetup final : public cMenuSetupPage {
 private:
     int livePreview;
+    int photoView;
     char coreUrl[256] = {};
 protected:
     void Store(void) override
     {
         gLivePreviewEnabled = livePreview;
         SetupStore("LivePreview", gLivePreviewEnabled);
+        gPhotoViewMode = photoView;
+        SetupStore("PhotoView", gPhotoViewMode);
         std::snprintf(gCoreUrl, sizeof(gCoreUrl), "%s", coreUrl);
         SetupStore("CoreURL", gCoreUrl);
     }
 public:
     cMenuSuiteOsdSetup(void)
-        : livePreview(gLivePreviewEnabled)
+        : livePreview(gLivePreviewEnabled), photoView(gPhotoViewMode)
     {
         std::snprintf(coreUrl, sizeof(coreUrl), "%s", gCoreUrl);
         SetSection("VDR Suite-OSD");
         Add(new cMenuEditBoolItem("Live-TV im Aufnahmenbrowser", &livePreview));
+        static const char * const views[] = {"Raster", "Karussell"};
+        Add(new cMenuEditStraItem("Bildergalerie - Anzeigeart",
+                                  &photoView, 2, views));
         Add(new cMenuEditStrItem("VDR-Suite Core URL", coreUrl, sizeof(coreUrl)));
     }
 };
@@ -3408,6 +3414,10 @@ public:
     {
         if (std::strcmp(Name, "LivePreview") == 0) {
             gLivePreviewEnabled = std::atoi(Value) != 0 ? 1 : 0;
+            return true;
+        }
+        if (std::strcmp(Name, "PhotoView") == 0) {
+            gPhotoViewMode = std::atoi(Value) == 0 ? 0 : 1;
             return true;
         }
         if (std::strcmp(Name, "CoreURL") == 0) {
