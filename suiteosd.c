@@ -1514,17 +1514,23 @@ private:
         }
         drawCinemaImage(it->second.image,it->second.x,it->second.y);
     }
+    void printFit(int x,int y,const std::string &value,const cFont *font,tColor color,int maxWidth)
+    {
+        if(!font||value.empty())return;
+        print(x,y,suiteosd::EllipsizeUtf8(value,X(maxWidth),
+            [font](const std::string &s){return font->Width(s.c_str());}),font,color,maxWidth);
+    }
     void portraitTitle(int x,int top,const std::string &title,const std::string &subtitle,
                        const std::string &episode={}) {
         const auto *f=fontCinemaCard?fontCinemaCard:fontSmall;
         auto lines=suiteosd::HeroLines(title,f,X(HL::cardWidth-16));
         if(lines.size()==1&&!episode.empty()) {
             auto episodes=suiteosd::HeroLines(episode,f,X(HL::cardWidth-16));
-            if(!episodes.empty())lines.push_back(episodes.front());
+            if(!episodes.empty())lines.push_back(episodes.front()+(episodes.size()>1?"…":""));
         }
         for(int i=0;i<2&&i<int(lines.size());++i)
-            print(x+8,top+HL::cardHeight-65+i*18,lines[i],f,kText,HL::cardWidth-16);
-        print(x+8,top+HL::cardHeight-28,subtitle,fontCinemaMeta?fontCinemaMeta:fontSmall,0xFFD8E4F2u,HL::cardWidth-16);
+            printFit(x+8,top+HL::cardHeight-65+i*18,lines[i]+(i==1&&lines.size()>2?"…":""),f,kText,HL::cardWidth-16);
+        printFit(x+8,top+HL::cardHeight-28,subtitle,fontCinemaMeta?fontCinemaMeta:fontSmall,0xFFD8E4F2u,HL::cardWidth-16);
     }
     void cinematicHeading(int y,const std::string &heading)
     {
@@ -2059,7 +2065,15 @@ private:
         return index>=0&&index<int(it->second.page.cards.size())?
             &it->second.page.cards[index]:nullptr;
     }
-    void drawHomeSidePanel() {
+    void liveBadge(int x,int y,int w,int h,tColor color)
+    {
+        if(!osd||w<h)return;
+        const int r=h/2;
+        fill(x+r,y,x+w-r-1,y+h-1,color);
+        osd->DrawEllipse(X(x),Y(y),X(x+h)-1,Y(y+h)-1,color);
+        osd->DrawEllipse(X(x+w-h),Y(y),X(x+w)-1,Y(y+h)-1,color);
+    }
+    void drawHomeLivePanel() {
         focusClockMinute=time(nullptr)/60;
         const bool liveFocused=homeCollections.empty()&&nav.section==0&&!nav.sideFocused;
         cinemaPanel(HL::right,HL::liveY,HL::rightWidth,HL::liveH,16,
@@ -2071,22 +2085,26 @@ private:
             print(HL::videoX+12,HL::videoY+75,"Live-TV läuft weiter",fontBody,kText,310);
         }
         // Readable opaque overlays over the *actual* independent video.
-        fill(HL::right+12,HL::liveY+9,HL::right+105,HL::liveY+34,0xFF05172Au);
-        fill(HL::right+19,HL::liveY+17,HL::right+28,HL::liveY+26,0xFFE42D36u);
-        print(HL::right+35,HL::liveY+10,"Live-TV",fontSmall,kText,70);
+        liveBadge(HL::right+12,HL::liveY+10,104,26,0xFF05172Au);
+        osd->DrawEllipse(X(HL::right+21),Y(HL::liveY+18),X(HL::right+29),Y(HL::liveY+26),0xFFE42D36u);
+        print(HL::right+35,HL::liveY+12,"Live-TV",fontCinemaMeta?fontCinemaMeta:fontSmall,kText,75);
         const auto &liveLogo=cinematicLogo(data.live.channel);
         if(liveLogo.valid()){
             auto logo=liveLogo;suiteosd::OpaqueArtwork(logo,0xFF05172Au);
-            drawCinemaImage(logo,X(HL::right+HL::rightWidth-14)-logo.width,Y(HL::liveY+10));
+            const int badgeX=HL::right+HL::rightWidth-76;
+            liveBadge(badgeX,HL::liveY+8,64,36,0xFF05172Au);
+            drawCinemaImage(logo,X(badgeX+32)-logo.width/2,Y(HL::liveY+26)-logo.height/2);
         }else print(HL::right+HL::rightWidth-132,HL::liveY+10,data.live.channel,fontSmall,kText,120);
         fill(HL::right+11,HL::liveY+HL::liveH-56,HL::right+HL::rightWidth-12,HL::liveY+HL::liveH-11,0xFF061626u);
         const auto *timeFont=fontCinemaMeta?fontCinemaMeta:fontSmall;
         const int timeWidth=timeFont?(timeFont->Width(data.live.time.c_str())*1600+width-1)/std::max(1,width)+6:144;
         const int timeX=HL::right+HL::rightWidth-20-timeWidth;
-        print(HL::right+20,HL::liveY+HL::liveH-54,data.live.title,fontBody,kText,std::max(1,timeX-HL::right-28));
+        printFit(HL::right+20,HL::liveY+HL::liveH-54,data.live.title,fontBody,kText,std::max(1,timeX-HL::right-28));
         print(timeX,HL::liveY+HL::liveH-51,data.live.time,timeFont,kText,timeWidth);
         cinemaProgress(HL::right+20,HL::liveY+HL::liveH-21,HL::rightWidth-40,
             HL::progressPercent(data.live.start,data.live.end,time(nullptr)));
+    }
+    void drawHomeFocusPanel() {
         cinemaPanel(HL::right,HL::detailY,HL::rightWidth,HL::detailBottom-HL::detailY,16,suiteosd::CinemaStyle::Panel);
         const Programme *p=homeCollections.empty()?selectedHomeProgramme():nullptr;
         const auto *card=p?nullptr:focusedCoreCard();
@@ -2168,15 +2186,24 @@ private:
                 if(minutes>0)facts+=(facts.empty()?"":" · ")+std::to_string(minutes)+" Min.";
             }
             if(!v.metadata.genres.empty())genre=v.metadata.genres.front();
+            if(rec&&v.metadata.season>0){
+                facts+=(facts.empty()?"":" · ")+std::string("Staffel ")+std::to_string(v.metadata.season);
+                if(v.metadata.episodeNumber>0)facts+=", Folge "+std::to_string(v.metadata.episodeNumber);
+            }
         }
         const int tx=HL::right+20,tw=HL::rightWidth-40;
         const auto titleLines=suiteosd::HeroLines(title.empty()?"Sendung oder Aufnahme auswählen":title,fontLarge,X(tw));
         int y=HL::detailY+185;
         for(int i=0;i<2&&i<int(titleLines.size());++i){
-            print(tx,y,titleLines[i],fontLarge,kText,tw);y+=30;
+            printFit(tx,y,titleLines[i]+(i==1&&titleLines.size()>2?"…":""),fontLarge,kText,tw);y+=30;
         }
         fill(tx,y+3,tx+tw-1,y+3,0xFF294762u);y+=12;
-        if(!facts.empty()){print(tx,y,facts,fontSmall,0xFFE2EDF8u,tw);y+=23;}
+        if(!facts.empty()){
+            const auto factLines=suiteosd::HeroLines(facts,fontSmall,X(tw));
+            for(size_t i=0;i<factLines.size()&&i<2;++i){
+                printFit(tx,y,factLines[i]+(i==1&&factLines.size()>2?"…":""),fontSmall,0xFFE2EDF8u,tw);y+=23;
+            }
+        }
         if(p&&p->end>p->start){
             const int left=HL::remainingMinutes(p->start,p->end,time(nullptr));
             std::string timing=p->time+" · "+std::to_string((p->end-p->start+59)/60)+" Min.";
@@ -2191,18 +2218,31 @@ private:
             for(const auto &person:cached->second.metadata.people){
                 if(person.role=="Regie"&&director.empty())director=person.name;
                 if(person.role=="Schauspiel"||person.role=="Gastrolle"){
-                    if(cast.size()<45)cast+=(cast.empty()?"":", ")+person.name;
+                    cast+=(cast.empty()?"":", ")+person.name;
                 }
             }
         }
-        const int summaryBottom=HL::detailBottom-26-(!director.empty()?23:0)-(!cast.empty()?23:0);
+        std::vector<std::string> credits;
+        if(!director.empty())credits.push_back("Regie: "+director);
+        if(!cast.empty()){
+            const auto castLines=suiteosd::HeroLines("Mit: "+cast,fontSmall,X(tw));
+            for(size_t i=0;i<castLines.size()&&i<2;++i)
+                credits.push_back(castLines[i]+(i==1&&castLines.size()>2?"…":""));
+        }
+        const int summaryBottom=HL::detailBottom-26-int(credits.size())*23;
         const auto lines=suiteosd::HeroLines(description,fontSmall,X(tw));
         for(size_t i=0;i<lines.size()&&y<=summaryBottom;++i){
-            if(!title.empty())print(tx,y,lines[i]+(y+23>summaryBottom&&i+1<lines.size()?" …":""),fontSmall,kText,tw);
+            if(!title.empty())printFit(tx,y,lines[i]+(y+23>summaryBottom&&i+1<lines.size()?" …":""),fontSmall,kText,tw);
             y+=23;
         }
-        if(!director.empty()) {print(tx,y,"Regie: "+director,fontSmall,kMuted,tw);y+=23;}
-        if(!cast.empty())print(tx,y,"Mit: "+cast,fontSmall,kMuted,tw);
+        for(const auto &credit:credits){
+            if(y>HL::detailBottom-26)break;
+            printFit(tx,y,credit,fontSmall,kMuted,tw);y+=23;
+        }
+    }
+    void drawHomeSidePanel() {
+        drawHomeLivePanel();
+        drawHomeFocusPanel();
     }
 
     void drawHomeProgrammeInfo()
@@ -4038,6 +4078,22 @@ private:
             if(nav.sideFocused)print(96,y+11,kSidebar[i],fontBody,kText,right-104);
         }
     }
+    void redrawHomeRail(int section,int first,bool clearRow)
+    {
+        const int row=section-first;
+        if(row<0||row>=HL::rows)return;
+        if(clearRow){
+            const auto &bg=cinematicBackground();
+            const int x0=X(homeLeft()-12),x1=X(HL::right-12);
+            const int y0=Y(HL::headingY(row)),y1=Y(HL::headingY(row+1));
+            suiteosd::Artwork strip{x1-x0,y1-y0,std::vector<uint32_t>(size_t(x1-x0)*(y1-y0))};
+            for(int y=y0;y<y1;++y)
+                std::copy_n(bg.argb.begin()+size_t(y)*width+x0,strip.width,
+                            strip.argb.begin()+size_t(y-y0)*strip.width);
+            drawCinemaImage(strip,x0,y0);
+        }
+        drawHomeRail(section,HL::headingY(row));
+    }
     void drawHomeNotice()
     {
         // No permanent instructional footer: keys and actions are unchanged.
@@ -4271,7 +4327,7 @@ public:
         }
         if(base==kNone){
             if(osd&&focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
-                drawHomeSidePanel();osd->Flush();
+                drawHomeFocusPanel();osd->Flush();
             }
             else if(osd&&notice.empty()&&focusClockMinute!=time(nullptr)/60){
                 drawHomeSidePanel();osd->Flush(); // local clock only, no status polling
@@ -4327,6 +4383,7 @@ public:
                            suiteosd::Activation::Close ? osEnd : (draw(), osContinue);
         default: return osContinue;
         }
+        const bool hadNotice=!notice.empty();
         notice.clear();
         // Navigation changes the section before clamping the card focus.
         // Use the destination section's actual item count, not the old row's.
@@ -4338,15 +4395,27 @@ public:
         if (nav.sideFocused && direction == suiteosd::Direction::Select &&
             nav.sideIndex == 0)
             target = 0;
-        if(target>=3)loadHomeRail(target);
         const auto previous=nav;
+        const bool railLoaded=target>=3&&(homeRails.find(target)==homeRails.end()||!homeRails.at(target).attempted);
+        if(target>=3)loadHomeRail(target);
         const eOSState result = action(nav.Move(direction, count(target), suiteosd::Navigation::kHomeVisibleCards));
         if (result != osContinue)
             return result;
-        if(direction==suiteosd::Direction::Select||previous.section!=nav.section||
-            previous.sideFocused!=nav.sideFocused||previous.sideIndex!=nav.sideIndex||
-            previous.card!=nav.card||previous.firstCard!=nav.firstCard)
-            draw();
+        const bool changed=previous.section!=nav.section||previous.sideFocused!=nav.sideFocused||
+            previous.sideIndex!=nav.sideIndex||previous.card!=nav.card||previous.firstCard!=nav.firstCard;
+        if(direction==suiteosd::Direction::Select||hadNotice){draw();return osContinue;}
+        if(!changed&&!railLoaded)return osContinue;
+        const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
+        if(osd&&!previous.sideFocused&&!nav.sideFocused&&
+            first==HL::firstRow(previous.section,suiteosd::Navigation::kSections)){
+            redrawHomeRail(previous.section,first,previous.firstCard[previous.section]!=nav.firstCard[previous.section]||
+                          (railLoaded&&previous.section==target));
+            if(nav.section!=previous.section)
+                redrawHomeRail(nav.section,first,previous.firstCard[nav.section]!=nav.firstCard[nav.section]||railLoaded);
+            if(previous.section==0||nav.section==0)drawHomeLivePanel();
+            drawHomeFocusPanel();
+            osd->Flush();
+        }else draw();
         return osContinue;
     }
 };

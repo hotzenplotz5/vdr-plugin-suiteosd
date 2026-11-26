@@ -37,9 +37,9 @@ inline Artwork CinematicBackground(int w,int h,int sideRight) {
         if(v<71) {
             const double top=-35+.28*(u-590)+.00014*(u-590)*(u-590);
             const double fade=CinemaGaussian(u-690,215);
-            c=CinemaMix(c,0xFF0068C8u,.85*fade*CinemaGaussian(v-top,37));
-            c=CinemaMix(c,0xFF00B8EFu,.83*CinemaGaussian(u-650,155)*CinemaGaussian(v+9,26));
-            c=CinemaMix(c,0xFF30F0FFu,.85*fade*CinemaGaussian(v-top,4));
+            c=CinemaMix(c,0xFF08508Eu,.65*fade*CinemaGaussian(v-top,37));
+            c=CinemaMix(c,0xFF0088BBu,.55*CinemaGaussian(u-650,155)*CinemaGaussian(v+9,26));
+            c=CinemaMix(c,0xFF30D0E5u,.62*fade*CinemaGaussian(v-top,4));
         }
         if(v>=71&&u<sideRight) {
             c=CinemaMix(c,0xFF031225u,.55);
@@ -47,7 +47,7 @@ inline Artwork CinematicBackground(int w,int h,int sideRight) {
             const double d=v-(696-.34*u+.00022*u*u);
             const double lower=v-(692-.48*u+.00155*u*u);
             c=CinemaMix(c,0xFF005ABAu,.84*CinemaGaussian(d,64));
-            c=CinemaMix(c,0xFF008AF2u,.82*CinemaGaussian(d,23));
+            c=CinemaMix(c,0xFF0063ACu,.57*CinemaGaussian(d,23));
             c=CinemaMix(c,0xFF00F0FFu,.97*CinemaGaussian(d,5)*CinemaGaussian(u-95,155));
             const double foreground=std::clamp((lower+1.5)/3.0,0.0,1.0);
             c=CinemaMix(c,CinemaMix(0xFF063D78u,0xFF031328u,std::clamp(lower/140,0.0,1.0)),

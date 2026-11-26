@@ -23,6 +23,21 @@ struct DetailMetadata {
     float rating = 0;
 };
 
+// Clip at UTF-8 character boundaries, never through a glyph or a byte sequence.
+template<class Measure> inline std::string EllipsizeUtf8(std::string value,int maxWidth,Measure measure)
+{
+    if(maxWidth<=0)return {};
+    if(measure(value)<=maxWidth)return value;
+    const std::string ellipsis="…";
+    if(measure(ellipsis)>maxWidth)return {};
+    while(!value.empty()&&measure(value+ellipsis)>maxWidth){
+        size_t end=value.size()-1;
+        while(end>0&&(static_cast<unsigned char>(value[end])&0xC0)==0x80)--end;
+        value.resize(end);
+    }
+    return value+ellipsis;
+}
+
 inline std::string RecordingDisplayTitle(const DetailMetadata &data,const std::string &fallback)
 {
     return data.title.empty()?fallback:data.title;

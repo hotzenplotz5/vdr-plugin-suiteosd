@@ -11,6 +11,11 @@ int main()
         assert(suiteosd::RecordingEpisodeLabel(rom)=="S1 E2 · Wie Titus Pullo die Republik stürzte");
         assert(suiteosd::RecordingDisplayTitle({},"Native Aufnahme")=="Native Aufnahme");
         assert(suiteosd::RecordingEpisodeLabel({}).empty());
+        const auto bytes=[](const std::string &s){return int(s.size());};
+        assert(suiteosd::EllipsizeUtf8("Rom",3,bytes)=="Rom");
+        assert(suiteosd::EllipsizeUtf8("Ärger",4,bytes)=="…");
+        assert(suiteosd::EllipsizeUtf8("Ärger",5,bytes)=="Ä…");
+        assert(suiteosd::EllipsizeUtf8("Rom",2,bytes).empty());
     }
 
     using namespace suiteosd;
