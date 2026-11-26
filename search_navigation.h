@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 namespace suiteosd {
-enum class SearchPage { Query, Login, Results, Recording, Event };
+enum class SearchPage { Query, Login, Results, Recording, Event, PublicRecording };
 enum class SearchTab { Recordings, Epg, People };
 struct SearchNavigation {
     static constexpr int pageSize = 20, visibleRows = 6, columns = 10;

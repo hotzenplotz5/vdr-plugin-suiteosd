@@ -146,6 +146,9 @@ public:
                                 int limit, int offset, CorePersonSearch &results);
     CoreStatus globalSearch(const std::string &backendId, const std::string &query,
                             int limit, int offset, CoreGlobalSearch &results);
+    CoreStatus publicSearch(const std::string &backendId, const std::string &query,
+                            bool epg, int limit, int offset, CoreGlobalSearch &results);
+    CoreStatus publicRecordingDetail(const CoreSearchRecording &row, CoreSearchEvent &detail);
     CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,
                         int limit, int offset, int year, CoreHomePage &page);
     CoreStatus backends(std::vector<CoreItem> &items);

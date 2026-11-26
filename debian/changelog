@@ -1,3 +1,10 @@
+vdr-plugin-suiteosd (0.9.14~dev) unstable; urgency=medium
+
+  * Read recording and EPG search from the shared Public API v1 using paired device credentials.
+  * Distinguish failed searches from empty result sets and read public recording details by ID.
+
+ -- VDR-Suite contributors <noreply@github.com>  Thu, 26 Nov 2026 21:25:00 +0100
+
 vdr-plugin-suiteosd (0.9.13~dev) unstable; urgency=medium
 
   * Preserve successful pairing on repeated status checks and setup reopening.

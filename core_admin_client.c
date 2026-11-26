@@ -862,6 +862,66 @@ CoreStatus CoreAdminClient::globalSearch(const std::string &backendId,
     return last_;
 }
 
+CoreStatus CoreAdminClient::publicSearch(const std::string &backendId,const std::string &query,
+        bool epg,int limit,int offset,CoreGlobalSearch &results) {
+    const auto r=request("GET",std::string("/api/v1/search/")+(epg?"epg":"recordings")+
+        "?backendId="+queryEncode(backendId)+"&query="+queryEncode(query)+
+        "&limit="+std::to_string(limit)+"&offset="+std::to_string(offset));
+    if(!status(r).ok)return last_;
+    const auto root=parse(r.body);
+    auto *items=field(root.get(),"items"),*page=field(root.get(),"page");
+    const auto invalid=[&](){return (last_={false,r.http,"Ungültige Public-v1-Suchantwort"});};
+    if(!json_object_is_type(items,json_type_array)||!json_object_is_type(page,json_type_object))
+        return invalid();
+    CoreGlobalSearch next;
+    next.query=query;next.backendId=backendId;next.status="ready";
+    const auto total=integerOf(page,"totalCount");
+    next.limit=int(integerOf(page,"limit"));next.offset=int(integerOf(page,"offset"));
+    if(total<0||next.limit!=limit||next.offset!=offset||
+       json_object_array_length(items)>size_t(limit)||
+       !json_object_is_type(field(page,"hasMore"),json_type_boolean))return invalid();
+    for(size_t i=0;i<json_object_array_length(items);++i){
+        auto *item=json_object_array_get_idx(items,i);
+        if(stringOf(item,"backendId")!=backendId||stringOf(item,"kind")!=(epg?"epg":"recording"))
+            return invalid();
+        if(epg){
+            CoreSearchEvent row;
+            row.backendId=backendId;row.eventId=stringOf(item,"eventId");
+            row.channelId=stringOf(item,"channelId");row.title=stringOf(item,"title");
+            row.subtitle=stringOf(item,"subtitle");row.startTime=stringOf(item,"startTime");
+            row.endTime=stringOf(item,"endTime");
+            if(row.eventId.empty()||row.channelId.empty()||row.title.empty()||
+               row.startTime.empty()||row.endTime.empty())return invalid();
+            next.epg.push_back(std::move(row));
+        }else{
+            auto row=readSearchRecording(item);
+            if(row.id.empty()||!safeId(row.id)||row.title.empty())return invalid();
+            row.nativeId.clear(); // Public IDs are not native VDR file names.
+            next.recordings.push_back(std::move(row));
+        }
+    }
+    if(epg){next.epgTotal=total;next.epgHasMore=boolOf(page,"hasMore");}
+    else{next.recordingTotal=total;next.recordingHasMore=boolOf(page,"hasMore");}
+    results=std::move(next);return last_;
+}
+CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row,CoreSearchEvent &detail) {
+    if(!safeId(row.id)||row.id.compare(0,4,"rec_")!=0||row.backendId.empty())
+        return (last_={false,0,"Ungültige Aufnahme-ID"});
+    const auto r=request("GET","/api/v1/recordings/"+row.id+"?backendId="+queryEncode(row.backendId));
+    if(!status(r).ok)return last_;
+    const auto root=parse(r.body);
+    if(stringOf(root.get(),"recordingId")!=row.id||stringOf(root.get(),"backendId")!=row.backendId)
+        return (last_={false,r.http,"Ungültige Aufnahmedetails"});
+    CoreSearchEvent next;
+    next.title=row.title;next.backendId=row.backendId;
+    auto *meta=field(root.get(),"metadata");
+    next.subtitle=stringOf(meta,"episodeTitle");
+    if(next.subtitle.empty())next.subtitle=stringOf(meta,"subtitle");
+    next.description=stringOf(meta,"overview");
+    if(next.description.empty())next.description=stringOf(root.get(),"description");
+    next.startTime=stringOf(root.get(),"recordedAt");
+    detail=std::move(next);return last_;
+}
 CoreStatus CoreAdminClient::homePage(const std::string &backend,HomeKind kind,
     const std::string &key,int limit,int offset,int year,CoreHomePage &page) {
     std::string route,method="GET",body;

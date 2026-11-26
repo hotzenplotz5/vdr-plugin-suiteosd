@@ -54,7 +54,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.13-dev";
+static const char *VERSION = "0.9.14-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -480,6 +480,7 @@ private:
     suiteosd::CoreAdminClient searchClient{"http://localhost",
         std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") && *std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") ?
         std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") : "/run/vdr-suite/osd.sock"};
+    suiteosd::CoreAdminClient publicSearchClient{gCoreUrl};
     suiteosd::SearchNavigation searchNav;
     suiteosd::CorePersonSearch personSearch;
     suiteosd::CoreGlobalSearch globalSearch;
@@ -3516,21 +3517,22 @@ private:
         searchNav.page = suiteosd::SearchPage::Results;
         personSearch = {};
         globalSearch = {};
-        suiteosd::CoreStatus result;
-        if (searchNav.person && searchNav.tab == suiteosd::SearchTab::Recordings)
-            result = searchClient.recordingPersons("default", searchNav.query,
-                         suiteosd::SearchNavigation::pageSize, searchNav.offset, personSearch);
-        else
-            result = searchClient.globalSearch("default", searchNav.query,
-                         suiteosd::SearchNavigation::pageSize, searchNav.offset, globalSearch);
-        if (result.http == 401) {
-            searchNotice = "Lokale Core-Zuordnung nicht verfügbar";
-        } else if (!result.ok) {
-            searchNotice = result.message.empty() ? "Suche fehlgeschlagen" : result.message;
-        } else if (!globalSearch.status.empty() && globalSearch.status != "ready" &&
-                   globalSearch.status != "ok") {
-            searchNotice = "Suchindex: " + globalSearch.status;
+        publicSearchClient.setOrigin(gCoreUrl);
+        publicSearchClient.forgetDevice();
+        if(!restoreDevice(publicSearchClient)){
+            searchNotice="Keine Geräteanmeldung – Kopplung in den Plugin-Einstellungen prüfen";
+            return;
         }
+        if(searchNav.tab==suiteosd::SearchTab::People){
+            searchNotice="Personenliste nicht über Public API v1 verfügbar – Aufnahmen und EPG nutzen";
+            return;
+        }
+        const auto result=publicSearchClient.publicSearch("default",searchNav.query,
+            searchNav.tab==suiteosd::SearchTab::Epg,suiteosd::SearchNavigation::pageSize,
+            searchNav.offset,globalSearch);
+        if(result.http==401)searchNotice="Geräteanmeldung vom Core nicht akzeptiert";
+        else if(result.http==403)searchNotice="Suchberechtigung im Webfrontend prüfen";
+        else if(!result.ok)searchNotice=result.message.empty()?"Suche fehlgeschlagen":result.message;
     }
 
     void openSearch(const std::string &person = "")
@@ -3576,7 +3578,7 @@ private:
 
     const std::vector<suiteosd::CoreSearchRecording> &searchRecordings() const
     {
-        return searchNav.person ? personSearch.recordings : globalSearch.recordings;
+        return globalSearch.recordings;
     }
     int searchCount() const
     {
@@ -3591,8 +3593,7 @@ private:
     {
         switch (searchNav.tab) {
         case suiteosd::SearchTab::Recordings:
-            return searchNav.person ? personSearch.total > searchNav.offset + searchCount() &&
-                                      searchCount() > 0 : globalSearch.recordingHasMore;
+            return globalSearch.recordingHasMore;
         case suiteosd::SearchTab::Epg: return globalSearch.epgHasMore;
         case suiteosd::SearchTab::People:
             return globalSearch.recordingHasMore || globalSearch.epgHasMore;
@@ -3626,9 +3627,10 @@ private:
             print(158,744,"Rot: Suchen · Grün: Leeren",fontBody,kFocus,1360);
             print(158,787,"OK: Zeichen · Gelb: Löschen · Blau: Groß/Klein · Zurück: Abbrechen",
                   fontSmall,kText,1360);
-        } else if (searchNav.page == SearchPage::Event) {
+        } else if (searchNav.page == SearchPage::Event||searchNav.page==SearchPage::PublicRecording) {
             print(90, 120, searchEvent.title, fontTitle, kText, 1410);
-            print(90, 198, searchEvent.channelName + " · " + searchEvent.subtitle, fontBody, kMuted, 1410);
+            print(90, 198, (searchEvent.channelName.empty()?"":searchEvent.channelName+" · ")+searchEvent.subtitle, fontBody, kMuted, 1410);
+            print(90,230,searchEvent.startTime,fontSmall,kMuted,1410);
             std::istringstream words(searchEvent.description);
             std::string word, line;
             int y = 267;
@@ -3640,7 +3642,8 @@ private:
                 } else line = candidate;
             }
             if (y < 730) print(90, y, line, fontBody, kText, 1390);
-            print(90, 768, "Zurück: Suchergebnisse", fontBody, kFocus);
+            print(90, 768, searchNav.page==SearchPage::PublicRecording?
+                  "Zurück: Suchergebnisse · Native Wiedergabezuordnung noch nicht verfügbar":"Zurück: Suchergebnisse", fontBody, kFocus,1410);
         } else {
             print(157, 108, searchNav.query, fontTitle, kText, 1350);
             const char *labels[] = {"Aufnahmen", "EPG", "Personen"};
@@ -3652,8 +3655,8 @@ private:
             const int count = searchCount();
             if (searchNav.tab != SearchTab::People) {
                 const auto total = searchNav.tab == SearchTab::Epg ? globalSearch.epgTotal :
-                    (searchNav.person ? personSearch.total : globalSearch.recordingTotal);
-                print(1080, 192, std::to_string(total) + " Treffer", fontBody, kMuted, 420);
+                    globalSearch.recordingTotal;
+                print(1080, 192, globalSearch.status=="ready"?std::to_string(total)+" Treffer":"Keine Ergebnisdaten", fontBody, kMuted, 420);
             }
             const int first = searchNav.First();
             for (int n = 0; n < suiteosd::SearchNavigation::visibleRows && first+n < count; ++n) {
@@ -3692,7 +3695,7 @@ private:
             fill(155, 837, 1538, 891, kSurface);
             print(175, 850, searchNotice, fontSmall, kFocus, 1340);
         }
-        if (searchNav.page != SearchPage::Event) drawSidebar();
+        if (searchNav.page != SearchPage::Event&&searchNav.page!=SearchPage::PublicRecording) drawSidebar();
     }
 
     eOSState searchKey(eKeys base)
@@ -3732,7 +3735,7 @@ private:
                 }
                 searchNotice = "Aufnahme nicht mehr im lokalen VDR vorhanden";
             }
-        } else if (searchNav.page == SearchPage::Event) {
+        } else if (searchNav.page == SearchPage::Event||searchNav.page==SearchPage::PublicRecording) {
             if (base == kBack || base == kInfo || base == kOk)
                 searchNav.page = SearchPage::Results;
         } else {
@@ -3756,7 +3759,11 @@ private:
                 if (searchNav.tab == SearchTab::Recordings) {
                     if (resolveSearchRecording(searchRecordings()[i], searchRecording)) {
                         detailCastNav.Close(); detailScroll=0; searchNav.page = SearchPage::Recording;
-                    } else searchNotice = "Aufnahme nicht mehr im lokalen VDR vorhanden";
+                    } else {
+                        const auto result=publicSearchClient.publicRecordingDetail(searchRecordings()[i],searchEvent);
+                        if(result.ok)searchNav.page=SearchPage::PublicRecording;
+                        else searchNotice=result.message.empty()?"Aufnahmedetails nicht verfügbar":result.message;
+                    }
                 } else if (searchNav.tab == SearchTab::Epg) {
                     searchEvent = globalSearch.epg[i]; searchNav.page = SearchPage::Event;
                 } else {
