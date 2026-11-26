@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include <limits>
 
 namespace suiteosd {
 namespace {
@@ -55,6 +57,17 @@ std::int64_t integerOf(json_object *obj, const char *name, std::int64_t fallback
     json_object *value = field(obj, name);
     return value && json_object_is_type(value, json_type_int)
            ? json_object_get_int64(value) : fallback;
+}
+void readPairingTiming(json_object *obj,DevicePairing &pairing) {
+    const auto seconds=integerOf(obj,"pollIntervalSeconds",pairing.pollIntervalSeconds);
+    if(seconds>0&&seconds<=std::numeric_limits<int>::max())pairing.pollIntervalSeconds=int(seconds);
+    const auto expires=stringOf(obj,"expiresAt");
+    if(!expires.empty()){
+        std::tm utc{};
+        const char *end=strptime(expires.c_str(),"%Y-%m-%dT%H:%M:%S",&utc);
+        if(end&&(*end=='Z'||(*end=='.'&&expires.back()=='Z')))
+            pairing.expiresAtEpoch=timegm(&utc);
+    }
 }
 std::string jsonText(json_object *obj) {
     return obj ? json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN) : "{}";
@@ -731,6 +744,7 @@ CoreStatus CoreAdminClient::beginPairing(const std::string &name,
     if (r.http != 201 || !safeId(next.requestId) || next.userCode.empty() ||
         !wireSecret(next.token) || next.state != "pending")
         return (last_ = {false,r.http,"Kopplungsantwort unvollständig"});
+    readPairingTiming(root.get(),next);
     pairing = std::move(next);
     return last_;
 }
@@ -746,6 +760,7 @@ CoreStatus CoreAdminClient::readPairing(DevicePairing &pairing) {
     if (state != "pending" && state != "approved" && state != "rejected")
         return (last_ = {false,r.http,"Ungültiger Kopplungsstatus"});
     pairing.state = state;
+    readPairingTiming(root.get(),pairing);
     return last_;
 }
 CoreStatus CoreAdminClient::issuePairing(DevicePairing &pairing,
@@ -769,6 +784,32 @@ CoreStatus CoreAdminClient::issuePairing(DevicePairing &pairing,
         return (last_ = {false,r.http,"Geräteberechtigung unvollständig"});
     credential = std::move(next);
     return last_;
+}
+CoreStatus CoreAdminClient::completePairing(DevicePairing &pairing,DeviceCredential &issued,
+                                           const std::string &profilePath) {
+    if(issued.secret.empty()){
+        const auto result=readPairing(pairing);
+        if(!result.ok){
+            // Terminal bootstrap outcomes must not start another issuance or continue polling.
+            if(result.http==401||result.http==404||result.http==409||result.http==410)pairing={};
+            return result;
+        }
+        if(pairing.state=="pending")return {true,200,"Warte auf Freigabe im Webfrontend"};
+        if(pairing.state=="rejected"){
+            pairing={};
+            return {false,200,"Kopplung abgelehnt"};
+        }
+        const auto resultIssue=issuePairing(pairing,issued);
+        if(!resultIssue.ok)return resultIssue; // no repeat of one-shot POST
+    }
+    if(issued.origin!=origin_)return {false,0,"Berechtigung gehört zu einem anderen Server"};
+    if(!saveDeviceProfile(profilePath,issued))
+        return {false,0,"Speichern fehlgeschlagen – Kopplung abschließen erneut wählen"};
+    setDeviceCredential(issued);
+    issued={};
+    const auto verified=testDevice();
+    return verified.ok?CoreStatus{true,201,"Gekoppelt und verbunden – Rechte im Webfrontend vergeben"}:
+        CoreStatus{true,201,"Kopplung gespeichert – Verbindungstest: "+verified.message};
 }
 bool CoreAdminClient::setDeviceCredential(const DeviceCredential &credential) {
     if (!localSocket_.empty() || credential.origin != origin_ ||

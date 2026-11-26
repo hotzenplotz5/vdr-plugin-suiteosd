@@ -80,6 +80,8 @@ struct CoreHomePage {
 };
 struct DevicePairing {
     std::string origin, requestId, userCode, token, state;
+    int pollIntervalSeconds = 5;
+    std::int64_t expiresAtEpoch = 0;
 };
 struct DeviceCredential {
     std::string origin, deviceId, credentialId, secret;
@@ -131,6 +133,10 @@ public:
                             DevicePairing &pairing);
     CoreStatus readPairing(DevicePairing &pairing);
     CoreStatus issuePairing(DevicePairing &pairing, DeviceCredential &credential);
+    // One bootstrap GET, followed by at most one credential issue and durable storage.
+    // A failed local write retains the issued credential for a storage-only retry.
+    CoreStatus completePairing(DevicePairing &pairing, DeviceCredential &issued,
+                               const std::string &profilePath);
     bool setDeviceCredential(const DeviceCredential &credential);
     CoreStatus testDevice();
     void forgetDevice() { device_ = {}; }

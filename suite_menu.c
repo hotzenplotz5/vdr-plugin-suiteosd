@@ -294,13 +294,16 @@ class SuiteMenu final : public cSkinDisplayMenu {
             rect(x[i], 848, 13, 13, colors[i]);
             text(x[i] + 24, 838, buttons[i], small, kWhite, 326);
         }
-        if (!message.empty()) {
-            const tColor color = messageType == mtError ? kRed :
-                                 messageType == mtWarning ? kYellow : kCyan;
-            rect(330, 780, 1216, 42, kSurface);
-            rect(330, 780, 5, 42, color);
-            text(347, 788, message, small, color, 1180);
-        }
+    }
+
+    void drawMessage()
+    {
+        // Draw status after menu panels; previously those panels painted over it.
+        if(message.empty())return;
+        const tColor color=messageType==mtError?kRed:messageType==mtWarning?kYellow:kCyan;
+        rect(18,780,1564,42,kSurface);
+        rect(18,780,5,42,color);
+        text(42,787,message,bodyFont,color,1510);
     }
 
     void drawTabbedRow(const std::string &value, int x, int y, int w,
@@ -729,6 +732,7 @@ public:
         drawChrome();
         if (mode == Body::Items) drawItems();
         else drawDetails();
+        drawMessage();
         osd->Flush();
     }
 };

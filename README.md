@@ -13,7 +13,9 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.9.11-dev)
+## Aktueller Implementierungsstand (0.9.12-dev)
+
+- **TV-Feedback:** Home verwendet bevorzugt TVScraper-Film-/Serientitel und Episode, mit nativem Namen nur als Fallback. Die Live-Videofläche endet vor Zeit und Fortschritt; Fanart-Komposition bleibt im Cache. Kontrast und fehlende Poster sind angepasst. Geräte-Pairing zeigt einen sichtbaren Status und prüft die aktive Bootstrap-Anfrage im vom Core gelieferten Intervall asynchron. Nach Genehmigung folgt einmalige Credential-Ausgabe, lokale Speicherung und Verbindungstest; die Rechtevergabe bleibt im Webfrontend. Echte TV-Abnahme offen.
 
 - **Cinematic-Home nach der freigegebenen Vorlage:** Native ARGB-Rastergrafiken mit geschwungenem Licht, weich auslaufenden Schatten, kantengeglätteten Rahmen und Icons, gecachten fertigen Posterkompositionen sowie neuer Kopf-/Sidebar-Gestaltung ohne permanente Fußleiste. Die visuelle Gesamt- und Hardwareabnahme ist ausdrücklich noch offen.
 - **Layout:** sechs gleich große 2:3-Portraitkarten pro Reihe, drei sichtbare Reihen (Jetzt, Als nächstes, Neu aufgenommen), weitere Reihen scrollbar. Abgerundete Rahmen, dezente Schatten, Cyan-Fokus ohne Vergrößerung und proportional beschnittene Poster mit opakem Textverlauf. Aufnahmekarten haben keine Senderlogos.

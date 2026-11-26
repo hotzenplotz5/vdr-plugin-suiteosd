@@ -44,6 +44,7 @@
 #include <cstdio>
 #include <cmath>
 #include <chrono>
+#include <future>
 #include <ctime>
 #include <cstring>
 #include <map>
@@ -52,7 +53,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.11-dev";
+static const char *VERSION = "0.9.12-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -4370,20 +4371,96 @@ private:
     cOsdItem *finishItem = nullptr;
     cOsdItem *testItem = nullptr;
     cOsdItem *forgetItem = nullptr;
+    enum class PairAction {Start,Complete,Test};
+    struct PairResult {
+        std::string origin, message;
+        suiteosd::DevicePairing pairing;
+        suiteosd::DeviceCredential issued;
+    };
+    // Only the setup menu owns this bounded worker. It never uses VDR UI
+    // objects, and all profile writes finish before the worker is destroyed.
+    std::future<PairResult> pairingJob;
+    std::chrono::steady_clock::time_point nextPairingCheck{};
+    std::string visiblePairingStatus;
 
     void setStatus(const std::string &message)
     {
+        const std::string code=pairing.userCode.empty()?"Kein offener Kopplungscode":
+            "Kopplungscode: "+pairing.userCode;
+        if(visiblePairingStatus==message&&code==codeItem->Text())return;
+        visiblePairingStatus=message;
         stateItem->SetText(message.c_str());
-        const std::string code = pairing.userCode.empty() ? "" :
-            "Kopplungscode: " + pairing.userCode;
-        codeItem->SetText(code.empty() ? "Im Webfrontend bestätigen" : code.c_str());
+        codeItem->SetText(code.c_str());
         Display();
+        SetStatus(message.c_str());
     }
     void selectServer()
     {
         if (pairingClient.origin() != coreUrl) {
             pairing = {};
             pairingClient.setOrigin(coreUrl);
+        }
+    }
+    void runPairing(PairAction action,bool manual=true)
+    {
+        if(pairingJob.valid())return;
+        selectServer();
+        const std::string origin=pairingClient.origin(), name=deviceName, path=deviceProfilePath();
+        if(action==PairAction::Start&&!issued.secret.empty()){
+            setStatus("Zuerst ausgestellte Berechtigung speichern");return;
+        }
+        if(manual||action!=PairAction::Complete)
+            setStatus(action==PairAction::Start?"Kopplungsanfrage wird erstellt ...":
+                      action==PairAction::Test?"Geräteverbindung wird geprüft ...":"Freigabe wird geprüft ...");
+        try {
+            pairingJob=std::async(std::launch::async,[origin,name,path,action,p=pairing,c=issued]() mutable {
+                PairResult out{origin,{},std::move(p),std::move(c)};
+                suiteosd::CoreAdminClient client(origin);
+                suiteosd::CoreStatus status;
+                if(action==PairAction::Start){
+                    status=client.beginPairing(name,VERSION,out.pairing);
+                    out.message=status.ok?"Code im Webfrontend genehmigen – Abschluss automatisch":status.message;
+                }else if(action==PairAction::Complete){
+                    status=client.completePairing(out.pairing,out.issued,path);
+                    out.message=status.message;
+                }else{
+                    suiteosd::DeviceCredential saved;
+                    if(!suiteosd::loadDeviceProfile(path,origin,saved)||!client.setDeviceCredential(saved))
+                        out.message="Keine gespeicherte Kopplung für diesen Server";
+                    else {
+                        status=client.testDevice();
+                        out.message=status.ok?"Verbunden – Geräteanmeldung bestätigt":status.message;
+                    }
+                }
+                return out;
+            });
+        }catch(const std::exception &){setStatus("Gerätevorgang konnte nicht gestartet werden");}
+    }
+    void updatePairing()
+    {
+        if(pairingJob.valid()){
+            if(pairingJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return;
+            try {
+                auto result=pairingJob.get();
+                if(result.origin==coreUrl){
+                    pairing=std::move(result.pairing);issued=std::move(result.issued);
+                    setStatus(result.message);
+                    nextPairingCheck=std::chrono::steady_clock::now()+std::chrono::seconds(pairing.pollIntervalSeconds);
+                }else{
+                    // Credential storage (if issued) used the original exact origin.
+                    // Never project its state onto a newly edited server URL.
+                    pairing={};issued=std::move(result.issued);selectServer();
+                    setStatus("Server geändert – Kopplungsstatus für neues Ziel prüfen");
+                }
+            }catch(const std::exception &){pairing={};setStatus("Gerätevorgang fehlgeschlagen – Status prüfen");}
+        }
+        if(!pairingJob.valid()&&pairing.state=="pending"&&pairing.origin==coreUrl){
+            if(pairing.expiresAtEpoch>0&&time(nullptr)>=pairing.expiresAtEpoch){
+                // Server remains authoritative; the manual check can still read its status.
+                pairing.state="expired";
+                setStatus("Kopplung abgelaufen – neue Anfrage starten oder Status prüfen");
+            }else if(std::chrono::steady_clock::now()>=nextPairingCheck)
+                runPairing(PairAction::Complete,false);
         }
     }
 protected:
@@ -4414,57 +4491,30 @@ public:
         Add(stateItem = new cOsdItem(
             restoreDevice(pairingClient) ? "Geräteberechtigung gespeichert" : "Nicht gekoppelt",
             osUnknown, false));
-        Add(codeItem = new cOsdItem("Im Webfrontend bestätigen",osUnknown,false));
+        Add(codeItem = new cOsdItem("Kein offener Kopplungscode",osUnknown,false));
         Add(new cOsdItem("Für entfernte Server HTTPS verwenden",osUnknown,false));
         Add(startItem = new cOsdItem("Gerät koppeln"));
-        Add(finishItem = new cOsdItem("Bestätigung prüfen / Kopplung abschließen"));
+        Add(finishItem = new cOsdItem("Status prüfen / Kopplung abschließen"));
         Add(testItem = new cOsdItem("Verbindung testen"));
         Add(forgetItem = new cOsdItem("Lokale Kopplung aufheben"));
         Add(new cOsdItem("Einstellungen speichern"));
     }
     eOSState ProcessKey(eKeys Key) override
     {
+        updatePairing();
         if (Key != kOk) return cMenuSetupPage::ProcessKey(Key);
         cOsdItem *item = Get(Current());
         if (item != startItem && item != finishItem &&
             item != testItem && item != forgetItem)
             return cMenuSetupPage::ProcessKey(Key);
+        if(pairingJob.valid()){
+            setStatus("Gerätevorgang läuft ...");return osContinue;
+        }
         selectServer();
-        if (item == startItem) {
-            if (!issued.secret.empty()) {
-                setStatus("Zuerst ausgestellte Berechtigung speichern");
-                return osContinue;
-            }
-            const auto r = pairingClient.beginPairing(deviceName,VERSION,pairing);
-            setStatus(r.ok ? "Im Webfrontend unter Wartende Geräte bestätigen" : r.message);
-        } else if (item == finishItem) {
-            if (issued.secret.empty()) {
-                const auto r = pairingClient.readPairing(pairing);
-                if (!r.ok) { setStatus(r.message); return osContinue; }
-                if (pairing.state != "approved") {
-                    setStatus(pairing.state == "rejected" ?
-                        "Kopplung abgelehnt" : "Warte auf Bestätigung im Webfrontend");
-                    return osContinue;
-                }
-                const auto result = pairingClient.issuePairing(pairing,issued);
-                if (!result.ok) { setStatus(result.message); return osContinue; }
-            }
-            if (!suiteosd::saveDeviceProfile(deviceProfilePath(),issued)) {
-                setStatus("Speichern fehlgeschlagen – erneut Abschließen wählen");
-                return osContinue;
-            }
-            if (issued.origin == pairingClient.origin())
-                pairingClient.setDeviceCredential(issued);
-            issued = {};
-            setStatus("Gekoppelt – Rechte im Webfrontend vergeben");
-        } else if (item == testItem) {
-            if (!restoreDevice(pairingClient)) {
-                setStatus("Keine gespeicherte Kopplung für diesen Server");
-                return osContinue;
-            }
-            const auto r = pairingClient.testDevice();
-            setStatus(r.ok ? "Verbunden – Geräteanmeldung bestätigt" : r.message);
-        } else {
+        if(item==startItem)runPairing(PairAction::Start);
+        else if(item==finishItem)runPairing(PairAction::Complete);
+        else if(item==testItem)runPairing(PairAction::Test);
+        else {
             if (!suiteosd::removeDeviceProfile(deviceProfilePath(),pairingClient.origin())) {
                 setStatus("Lokale Kopplung konnte nicht entfernt werden");
                 return osContinue;

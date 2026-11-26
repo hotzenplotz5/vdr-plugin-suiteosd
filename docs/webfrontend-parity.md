@@ -96,3 +96,15 @@ Kodi/Plex bleiben UX-Referenzen für Poster-Navigation und Detailvorschau; eine 
 ## Cinematic-Renderer 0.9.11 – optische Korrektur
 
 Die native Home-Oberfläche verwendet jetzt den produktiven C++-ARGB-Rasterpfad in `cinematic_home.h` für die Hintergrundbeleuchtung, weich auslaufende Rahmen, Posterkomposition und antialiaste Sidebar-Glyphen. Die fertigen Rasterflächen werden begrenzt gecacht. Die sechs 2:3-Karten in drei Reihen passen auch bei ausgeklappter Sidebar, ohne deren Navigation zu ändern. Der bisherige feste Footer entfällt; die Tastenfunktionen bleiben erhalten. Die Video-Geometrie des Aufnahmenbrowsers bleibt unverändert; Home nutzt die separate native Videoebene und die darunterliegende Fokus-Fanart. Alle bisherigen Sidebar-Aktionen bleiben sichtbar und erreichbar; die sieben beispielhaften Einträge im Mockup sind kein Auftrag, andere Funktionen zu entfernen. Raster-/Buildnachweise ersetzen nicht die echte VDR-/TV-Abnahme.
+
+## TV-Praxistest – Korrekturen 0.9.12
+
+| Beobachtung | Korrektur | Abnahme |
+| --- | --- | --- |
+| Importname `DE - Rom (2005) (US)` auf Home-Poster | TVScraper-Titel und Episode aus demselben lokalen Scraper-Aufruf wie das Poster; nativer Name nur bei fehlenden Metadaten. Exakte Aufnahme-ID unverändert. | Titel-/Fallback-Unit-Test; TV offen |
+| Live-Endzeit abgeschnitten, Video unter Progressbar | Gemessene Zeittextbreite; getrennte 16:9-Video- und Textgeometrie, opake Chrome; Browser-Video unverändert. | Layout-Assertions; reale Provider-Geometrie offen |
+| Grelles Blau, Poster ohne Artwork | Dunklere Hintergrundmischung, zurückhaltende Rahmen und neutraler Ersatz. | Rastertests; TV-Vergleich offen |
+| Verzögerung beim ersten Öffnen | Zusammengesetzte Fokus-Fanart cachen, Fokus-Leerlauf zeichnet nur rechte Spalte, unveränderte Navigation löst keinen Full-Redraw aus. | Laufzeitmessung offen |
+| Genehmigung ohne sichtbare Rückmeldung | Native Statusmeldung nach Menüpanels; bestehender Public-v1-Bootstrap-GET im dokumentierten Intervall nur bei offenem Pairing; ein asynchroner Auftrag, keine Wiederholung des Credential-POST. Speicherung und authentifizierter Readback über bestehende Verträge. | Loopback-Test pending/approved, Speicherfehler/Retry, Device-GET; reale TV-/Core-Kopplung offen |
+
+Der Bootstrap-GET ist der vom [Core-Vertrag](https://github.com/hotzenplotz5/vdr-suite/blob/main/api/device-pairing.md) vorgesehene Statuspfad für anonyme Pairing-Token, kein allgemeines Suite-Statuspolling. Der OSD-Setup-Worker wird beim Schließen aufgeräumt; ein gerade laufender HTTP-Aufruf kann den Menüabschluss bis zu seinem Timeout verzögern. Keine Änderung an VDR-Core, Ausgabeplugin, Dateinamen, Berechtigungen oder Hostkonfiguration.

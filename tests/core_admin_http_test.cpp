@@ -310,7 +310,7 @@ int main() {
     len=sizeof(bindTo);
     assert(getsockname(pairFd,reinterpret_cast<sockaddr*>(&bindTo),&len)==0);
     std::thread pairMock([&]{
-        for(int i=0;i<4;++i){
+        for(int i=0;i<5;++i){
             const int fd=accept(pairFd,nullptr,nullptr);assert(fd>=0);
             const auto req=readRequest(fd);
             assert(!req.headers.count("cookie")&&!req.headers.count("x-csrf-token"));
@@ -318,13 +318,13 @@ int main() {
                 assert(req.method=="POST"&&req.path=="/api/v1/device-pairings");
                 assert(req.body.find("suiteosd")!=std::string::npos);
                 assert(!req.headers.count("authorization"));
-                answer(fd,R"({"pairingRequestId":"pair-a","userCode":"ABCD","pairingToken":"token-a","status":"pending"})","",201);
-            }else if(i==1||i==2){
+                answer(fd,R"({"pairingRequestId":"pair-a","userCode":"ABCD","pairingToken":"token-a","status":"pending","pollIntervalSeconds":3,"expiresAt":"2026-11-26T19:47:45Z"})","",201);
+            }else if(i>=1&&i<=3){
                 assert(req.headers.at("x-vdr-suite-pairing-token")=="token-a");
                 assert(!req.headers.count("authorization"));
-                if(i==1){
+                if(i<=2){
                     assert(req.method=="GET"&&req.path=="/api/v1/device-pairings/pair-a");
-                    answer(fd,R"({"status":"approved"})");
+                    answer(fd,i==1?R"({"status":"pending","pollIntervalSeconds":4})":R"({"status":"approved"})");
                 }else{
                     assert(req.method=="POST"&&req.path=="/api/v1/device-pairings/pair-a/credential"&&req.body.empty());
                     answer(fd,R"({"deviceId":"device-a","credentialId":"cred-a","credentialSecret":"secret-a"})","",201);
@@ -342,21 +342,25 @@ int main() {
     suiteosd::CoreAdminClient pairingClient("http://127.0.0.1:"+std::to_string(ntohs(bindTo.sin_port)));
     suiteosd::DevicePairing pairing;
     suiteosd::DeviceCredential credential;
-    assert(pairingClient.beginPairing("OSD","test",pairing).ok&&pairing.userCode=="ABCD");
-    assert(!pairingClient.issuePairing(pairing,credential).ok);
-    assert(pairingClient.readPairing(pairing).ok&&pairing.state=="approved");
-    assert(pairingClient.issuePairing(pairing,credential).ok&&pairing.token.empty());
-    assert(!pairingClient.issuePairing(pairing,credential).ok);
-    assert(pairingClient.setDeviceCredential(credential));
-    assert(pairingClient.testDevice().ok);
-    pairMock.join();
-    pairingClient.setOrigin("https://other.invalid");
-    assert(!pairingClient.setDeviceCredential(credential));
-    assert(!pairingClient.testDevice().ok);
-
     char vaultDir[]="/tmp/suiteosd-profile-XXXXXX";
     assert(mkdtemp(vaultDir));
     const auto vault=std::string(vaultDir)+"/devices.json";
+    assert(pairingClient.beginPairing("OSD","test",pairing).ok&&pairing.userCode=="ABCD");
+    assert(pairing.pollIntervalSeconds==3&&pairing.expiresAtEpoch>0);
+    assert(!pairingClient.issuePairing(pairing,credential).ok);
+    assert(pairingClient.completePairing(pairing,credential,vault).ok&&pairing.state=="pending");
+    assert(pairing.pollIntervalSeconds==4&&credential.secret.empty());
+    // Approved GET + one-shot POST, simulate local storage failure.
+    assert(!pairingClient.completePairing(pairing,credential,vault+"/missing").ok);
+    assert(pairing.token.empty()&&!credential.secret.empty());
+    const auto issuedCopy=credential;
+    // Retry storage only, then the authenticated GET. No second POST.
+    assert(pairingClient.completePairing(pairing,credential,vault).ok&&credential.secret.empty());
+    pairMock.join();
+    assert(suiteosd::loadDeviceProfile(vault,issuedCopy.origin,credential)&&credential.secret==issuedCopy.secret);
+    pairingClient.setOrigin("https://other.invalid");
+    assert(!pairingClient.setDeviceCredential(credential));
+    assert(!pairingClient.testDevice().ok);
     suiteosd::DeviceCredential other{"https://other.invalid","device-b","cred-b","secret-b"};
     assert(suiteosd::saveDeviceProfile(vault,credential));
     assert(suiteosd::saveDeviceProfile(vault,other));
