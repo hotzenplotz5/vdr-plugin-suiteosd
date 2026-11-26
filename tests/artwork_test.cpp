@@ -26,6 +26,13 @@ int main()
     assert(png.valid() && png.width == 2 && png.height == 2);
     assert(png.argb[0] == 0xFFFF0000u);
     assert(png.argb[3] == 0x80FFFFFFu);
+    auto opaque = png;
+    suiteosd::OpaqueArtwork(opaque, 0xFF102030u);
+    assert(opaque.argb[0] == 0xFFFF0000u);
+    assert(opaque.argb[3] == 0xFF889098u);
+    suiteosd::Artwork transparent{1, 1, {0x00010203u}};
+    suiteosd::OpaqueArtwork(transparent, 0xFF102030u);
+    assert(transparent.argb[0] == 0xFF102030u);
     auto smaller = suiteosd::LoadArtwork(pngPath, 1, 1);
     assert(smaller.valid() && smaller.width == 1 && smaller.height == 1);
 

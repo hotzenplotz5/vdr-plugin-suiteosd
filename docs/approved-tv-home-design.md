@@ -122,3 +122,8 @@ Die mit dem Nutzer abgestimmten Mockups führen zu drei getrennten nativen Bedie
 Alle Bilddateien werden nur aus dem lokalen TVScraper-Cache gelesen. Pfade und Metadaten werden aus dem VDR-Service kopiert, solange die VDR-Quellzeiger gültig sind; JPEG-/PNG-Dekodierung geschieht über den vorhandenen Artwork-Decoder. Fehlende Fanart verhindert weder Senderinformation noch Wiedergabe. **Kein neuer Streamplayer, HTTP-EPG-Client oder API-v1-Zwang.**
 
 **Offene Abnahme:** Die neue Skin muss über VDRs OSD-Einstellungen ausgewählt werden; sie wird nicht ungefragt als Standard gesetzt. Native VDR-Menüs, Lautstärke, Audio/Spuren und Meldungen fallen derzeit auf eine vorhandene VDR-Skin zurück. TVScraper-ABI, Fanart-Darstellung, VDR-Rückkehr, Tastennavigation und Ausgabeplugin werden erst auf realem yaVDR abgenommen; ein grüner CI-Build ist hierfür kein Ersatz.
+
+
+## Korrektur nach TV-Abnahme (26.11.2026)
+
+Home nutzt denselben nativen ScaleVideo-Pfad wie der Aufnahmenbrowser: oben rechts ein 16:9-Fenster, keine zweite Videoquelle, und Rücksetzen beim Wechsel in Details/andere Ansichten sowie beim Schließen. Beide Ansichten respektieren die vorhandene LivePreview-Einstellung. Logos werden mit einer opaken dunklen Unterlage alpha-komponiert; der Home-Hintergrund und die Kanalinfo-Leiste sind deckend. Ein TV-Test der Home-Geometrie und der Rückkehr zur Vollbildausgabe bleibt erforderlich.

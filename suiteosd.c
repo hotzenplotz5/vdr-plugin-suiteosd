@@ -54,8 +54,8 @@ static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 namespace suiteosd { void RegisterSuiteSkin(); }
 
 namespace {
-constexpr tColor kBackground = 0xF9040A19;
-constexpr tColor kSurface = 0xFC071729;
+constexpr tColor kBackground = 0xFF040A19;
+constexpr tColor kSurface = 0xFF071729;
 constexpr tColor kCard = 0xFF11243B;
 constexpr tColor kCardAlt = 0xFF132A44;
 constexpr tColor kFocus = 0xFF09D2FA;
@@ -502,6 +502,7 @@ private:
     std::string browserNotice;
     cDevice *scaledDevice = nullptr;
     cRect scaledRect;
+    bool scaledForHome = false;
     std::string notice;
     bool recordingDetails = false;
     bool homeProgrammeDetails = false;
@@ -554,8 +555,9 @@ private:
         if (it != channelLogos.end()) return it->second;
         if (channelLogos.size() >= 48) channelLogos.clear();
         const std::string path = suiteosd::FindChannelLogo(channel.name, channel.shortName);
-        return channelLogos.emplace(key,
-            suiteosd::LoadArtwork(path, X(64), Y(42))).first->second;
+        auto art = suiteosd::LoadArtwork(path, X(64), Y(42));
+        suiteosd::OpaqueArtwork(art, kSurface);
+        return channelLogos.emplace(key, std::move(art)).first->second;
     }
 
     bool drawChannelLogo(const suiteosd::TimelineChannel &channel,
@@ -564,6 +566,7 @@ private:
         const suiteosd::Artwork &art = channelLogo(channel);
         if (!art.valid() || !osd) return false;
         cImage image(cSize(art.width, art.height), art.argb.data());
+        fill(x, y, x + w - 1, y + h - 1, kSurface);
         const int px = X(x) + (X(w) - art.width) / 2;
         const int py = Y(y) + (Y(h) - art.height) / 2;
         osd->DrawImage(cPoint(px, py), image);
@@ -1274,22 +1277,35 @@ private:
         print(518, y + 207, data.liveNext.time, fontSmall, kMuted, 286);
         fill(189, y + 242, 805, y + 250, kLine);
         fill(189, y + 242, 189 + (616 * data.live.progress / 100), y + 250, kFocus);
-        panel(875, y + 18, 652, 224, false, kCardAlt);
-        print(899, y + 39, "ZUR SENDUNG", fontSmall, kFocus);
+        panel(830, y + 18, 272, 224, false, kCardAlt);
+        print(845, y + 30, "ZUR SENDUNG", fontSmall, kFocus, 242);
         const std::string synopsis = data.live.description.empty() ?
             "Keine Beschreibung verfügbar." : data.live.description;
         std::istringstream words(synopsis);
         std::string line, word;
-        int lineY = y + 79;
-        while (words >> word && lineY <= y + 195) {
+        int lineY = y + 65;
+        while (words >> word && lineY <= y + 200) {
             const std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(598)) {
-                print(899, lineY, line, fontBody, kText, 598);
-                lineY += 34;
+            if (!line.empty() && fontSmall && fontSmall->Width(candidate.c_str()) > X(242)) {
+                print(845, lineY, line, fontSmall, kText, 242);
+                lineY += 26;
                 line = word;
             } else line = candidate;
         }
-        if (lineY <= y + 195) print(899, lineY, line, fontBody, kText, 598);
+        if (lineY <= y + 200) print(845, lineY, line, fontSmall, kText, 242);
+        // Same primary video plane already proven in the recording browser.
+        panel(1124, y + 18, 400, 225, false, kCardAlt);
+        if (scaledForHome && scaledDevice && !scaledRect.IsEmpty() && scroll == 0) {
+            osd->DrawRectangle(scaledRect.X(), scaledRect.Y(),
+                scaledRect.X() + scaledRect.Width() - 1,
+                scaledRect.Y() + scaledRect.Height() - 1, clrTransparent);
+        } else {
+            suiteosd::TimelineChannel logoChannel;
+            logoChannel.name = data.live.channel;
+            drawChannelLogo(logoChannel, 1264, y + 57, 120, 65);
+            print(1150, y + 156, data.live.channel, fontBody, kText, 350);
+            print(1150, y + 189, "Live-TV", fontSmall, kMuted, 350);
+        }
     }
 
     void drawPrograms(int section, int y, const char *heading, const std::vector<Programme> &items)
@@ -1446,9 +1462,11 @@ private:
         recordingBrowser.Refresh();
     }
 
-    void startLivePreview()
+    void startLivePreview(bool home)
     {
-        if (!gLivePreviewEnabled || scaledDevice) return;
+        if (!gLivePreviewEnabled) { restoreLivePreview(); return; }
+        if (scaledDevice && scaledForHome == home) return;
+        restoreLivePreview();
         cDevice *device = cDevice::PrimaryDevice();
         // Live DVB transfer mode has an attached player too. Only exclude
         // real recording replay, not the transfer player used for live TV.
@@ -1456,7 +1474,9 @@ private:
             return;
         const int left = cOsd::OsdLeft();
         const int top = cOsd::OsdTop();
-        const cRect requested(left + X(1197), top + Y(151), X(338), Y(190));
+        const cRect requested = home ?
+            cRect(left + X(1124), top + Y(107), X(400), Y(225)) :
+            cRect(left + X(1197), top + Y(151), X(338), Y(190));
         const cRect available = device->CanScaleVideo(requested);
         if (available.IsEmpty() ||
             available.X() < requested.X() || available.Y() < requested.Y() ||
@@ -1464,6 +1484,7 @@ private:
             available.Y() + available.Height() > requested.Y() + requested.Height())
             return; // never cover surrounding controls with the video plane
         scaledDevice = device;
+        scaledForHome = home;
         // The device uses screen coordinates, the OSD draws locally.
         scaledRect = cRect(available.X() - left, available.Y() - top,
                            available.Width(), available.Height());
@@ -1475,6 +1496,7 @@ private:
         if (!scaledDevice) return;
         scaledDevice->ScaleVideo(cRect::Null);
         scaledDevice = nullptr;
+        scaledForHome = false;
         scaledRect = cRect::Null;
     }
 
@@ -1492,7 +1514,6 @@ private:
         data = readVdrSnapshot();
         refreshBrowser();
         recordingsActive = true;
-        startLivePreview();
     }
 
     void closeRecordingBrowser()
@@ -3160,6 +3181,13 @@ private:
     {
         if (!osd)
             return;
+        const bool home = !photosActive && !settingsActive && !recordingsActive && !timelineActive;
+        if (home && !recordingDetails && !homeProgrammeDetails && nav.firstVisibleSection != 2)
+            startLivePreview(true);
+        else if (recordingsActive && !browserDetails && !browserDeleteConfirm)
+            startLivePreview(false);
+        else
+            restoreLivePreview();
         if (photosActive) {
             drawPhotoGallery();
             osd->Flush();
@@ -3438,7 +3466,7 @@ public:
     {
         std::snprintf(coreUrl, sizeof(coreUrl), "%s", gCoreUrl);
         SetSection("VDR Suite-OSD");
-        Add(new cMenuEditBoolItem("Live-TV im Aufnahmenbrowser", &livePreview));
+        Add(new cMenuEditBoolItem("Live-TV-Vorschau in Home und Aufnahmen", &livePreview));
         static const char * const views[] = {"Raster", "Karussell"};
         Add(new cMenuEditStraItem("Bildergalerie - Anzeigeart",
                                   &photoView, 2, views));

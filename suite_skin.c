@@ -25,7 +25,7 @@
 namespace suiteosd {
 cSkinDisplayMenu *CreateSuiteMenu();
 namespace {
-constexpr tColor bg = 0xE9091729;
+constexpr tColor bg = 0xFF091729;
 constexpr tColor dark = 0xF6071426;
 constexpr tColor accent = 0xFF08D2F6;
 constexpr tColor white = 0xFFF7FAFF;
@@ -193,6 +193,7 @@ public:
     void setLogo(const std::string &path)
     {
         cachedLogo = path.empty() ? Artwork{} : LoadArtwork(path, W(245), H(100));
+        OpaqueArtwork(cachedLogo, bg);
     }
     bool logo()
     {
