@@ -9,6 +9,7 @@
 #include "sidebar_icons.h"
 #include "settings_navigation.h"
 #include "core_admin_client.h"
+#include "pairing_dialog.h"
 #include "core_admin_navigation.h"
 #include "epg_timeline.h"
 #include "recording_browser.h"
@@ -4452,16 +4453,21 @@ private:
     std::chrono::steady_clock::time_point nextPairingCheck{};
     std::string visiblePairingStatus;
 
+    std::string pairingCodeText() const
+    {
+        return pairing.userCode.empty()?"Kein offener Kopplungscode":suiteosd::kPairingCodePrefix+pairing.userCode;
+    }
     void setStatus(const std::string &message)
     {
-        const std::string code=pairing.userCode.empty()?"Kein offener Kopplungscode":
-            "Kopplungscode: "+pairing.userCode;
+        const std::string code=pairingCodeText();
         if(visiblePairingStatus==message&&code==codeItem->Text())return;
         visiblePairingStatus=message;
         stateItem->SetText(message.c_str());
         codeItem->SetText(code.c_str());
-        Display();
-        SetStatus(message.c_str());
+        if(!HasSubMenu()){
+            Display();
+            SetStatus(message.c_str());
+        }
     }
     void selectServer()
     {
@@ -4532,6 +4538,42 @@ private:
                 runPairing(PairAction::Complete,false);
         }
     }
+    class PairingDialog final : public cOsdMenu {
+        cMenuSuiteOsdSetup &owner;
+        cOsdItem *code=nullptr,*status=nullptr,*check=nullptr,*test=nullptr,*back=nullptr;
+    public:
+        explicit PairingDialog(cMenuSuiteOsdSetup &parent)
+            :cOsdMenu(suiteosd::kPairingDialogTitle),owner(parent)
+        {
+            SetMenuCategory(mcPluginSetup);
+            Add(code=new cOsdItem(owner.pairingCodeText().c_str(),osUnknown,false));
+            Add(status=new cOsdItem(owner.visiblePairingStatus.c_str(),osUnknown,false));
+            Add(new cOsdItem("Im Webfrontend: Einstellungen > Wartende Geräte",osUnknown,false));
+            Add(new cOsdItem("Dieses Gerät genehmigen. Der Abschluss erfolgt automatisch.",osUnknown,false));
+            Add(check=new cOsdItem("Status prüfen / Kopplung abschließen"),true);
+            Add(test=new cOsdItem("Verbindung testen"));
+            Add(back=new cOsdItem("Zurück zu den Einstellungen"));
+        }
+        void Refresh()
+        {
+            const auto nextCode=owner.pairingCodeText();
+            if(nextCode==code->Text()&&owner.visiblePairingStatus==status->Text())return;
+            code->SetText(nextCode.c_str());
+            status->SetText(owner.visiblePairingStatus.c_str());
+            Display();
+        }
+        eOSState ProcessKey(eKeys key) override
+        {
+            if(key!=kOk)return cOsdMenu::ProcessKey(key);
+            const auto *item=Get(Current());
+            if(item==back)return osBack;
+            if(owner.pairingJob.valid())owner.setStatus("Gerätevorgang läuft ...");
+            else if(item==check)owner.runPairing(PairAction::Complete);
+            else if(item==test)owner.runPairing(PairAction::Test);
+            Refresh();
+            return osContinue;
+        }
+    };
 protected:
     void Store(void) override
     {
@@ -4571,17 +4613,29 @@ public:
     eOSState ProcessKey(eKeys Key) override
     {
         updatePairing();
+        if(HasSubMenu()){
+            static_cast<PairingDialog*>(SubMenu())->Refresh();
+            const auto state=cMenuSetupPage::ProcessKey(Key);
+            if(!HasSubMenu()&&!visiblePairingStatus.empty())SetStatus(visiblePairingStatus.c_str());
+            return state;
+        }
         if (Key != kOk) return cMenuSetupPage::ProcessKey(Key);
         cOsdItem *item = Get(Current());
         if (item != startItem && item != finishItem &&
             item != testItem && item != forgetItem)
             return cMenuSetupPage::ProcessKey(Key);
+        if(item==startItem){
+            if(!pairingJob.valid()){
+                selectServer();
+                if(pairing.state!="pending"||pairing.origin!=coreUrl)runPairing(PairAction::Start);
+            }
+            return AddSubMenu(new PairingDialog(*this));
+        }
         if(pairingJob.valid()){
             setStatus("Gerätevorgang läuft ...");return osContinue;
         }
         selectServer();
-        if(item==startItem)runPairing(PairAction::Start);
-        else if(item==finishItem)runPairing(PairAction::Complete);
+        if(item==finishItem)runPairing(PairAction::Complete);
         else if(item==testItem)runPairing(PairAction::Test);
         else {
             if (!suiteosd::removeDeviceProfile(deviceProfilePath(),pairingClient.origin())) {

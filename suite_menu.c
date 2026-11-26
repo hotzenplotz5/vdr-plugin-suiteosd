@@ -10,6 +10,7 @@
 #include "scraper_detail.h"
 #include "recording_detail_view.h"
 #include "web_palette.h"
+#include "pairing_dialog.h"
 #include "vendor/tvscraper/services.h"
 
 #include <vdr/channels.h>
@@ -332,6 +333,31 @@ class SuiteMenu final : public cSkinDisplayMenu {
         }
     }
 
+    void drawPairingDialog()
+    {
+        rect(248,120,1104,684,kSurface);
+        rect(278,145,1044,2,kLine);
+        text(296,164,"GERÄT VERBINDEN",small,kCyan,980);
+        const auto &code=rows[PairCode].text;
+        const std::string prefix=kPairingCodePrefix;
+        const bool hasCode=code.compare(0,prefix.size(),prefix)==0;
+        text(296,212,hasCode?"Kopplungscode":"Gerätestatus",bodyFont,kMuted,980);
+        rect(296,254,1008,106,kCard);
+        const auto value=hasCode?code.substr(prefix.size()):code;
+        const cFont *codeFont=hasCode?heading:bodyFont;
+        const int codeWidth=codeFont?codeFont->Width(value.c_str())*1600/std::max(1,width):0;
+        text(std::max(312,800-codeWidth/2),hasCode?273:290,value,codeFont,kWhite,976);
+        drawParagraph(rows[PairStatus].text,296,382,1008,456,bodyFont,kCyan,34);
+        drawParagraph(rows[PairHelp1].text,296,468,1008,512,small,kWhite,27);
+        drawParagraph(rows[PairHelp2].text,296,512,1008,574,small,kMuted,27);
+        for(int i=PairCheck;i<=PairBack;++i){
+            const int y=586+(i-PairCheck)*57;
+            const auto &row=rows[i];
+            rect(296,y,1008,49,row.current?kCyan:kCard);
+            if(row.current)rect(299,y+3,1002,43,kFocusBg);
+            text(318,y+9,row.text,bodyFont,kWhite,963);
+        }
+    }
     void drawItems()
     {
         rect(25, 106, 1035, 697, kSurface);
@@ -730,7 +756,9 @@ public:
     {
         if (!osd) return;
         drawChrome();
-        if (mode == Body::Items) drawItems();
+        if(mode==Body::Items&&title==kPairingDialogTitle&&firstItem==0&&int(rows.size())>=PairRows)
+            drawPairingDialog();
+        else if (mode == Body::Items) drawItems();
         else drawDetails();
         drawMessage();
         osd->Flush();
