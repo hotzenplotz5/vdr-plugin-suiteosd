@@ -78,3 +78,16 @@ Home und Suche verlangen keine interaktive Human-Browsersitzung mehr. Weiterscha
 ## Native Core-Verbindung
 
 Home und Suche nutzen ausschließlich den lokalen Unix-HTTP-Socket (`/run/vdr-suite/osd.sock`, alternativ `VDR_SUITE_LOCAL_OSD_SOCKET`). Kein TCP-Fallback, kein Browser-Cookie, keine Passwortabfrage. Die bisherige HTTP-Verbindung bleibt ausschließlich für die separat aufrufbaren Core-Administrationsfunktionen bestehen. Der Socket benötigt den passenden Core-Transport; ein AF_UNIX-Client-Vertragstest prüft echte Socket-Nutzung und die Abwesenheit von Browser-Credentials. Core-seitige Zuordnung und reale yaVDR-Abnahme sind getrennt zu belegen.
+
+## Cinematic-Home 0.9.10 – freigegebene Gestaltung
+
+| Aspekt | Umsetzung / Abnahme |
+| --- | --- |
+| Eingaben und Reihen | Bestehende native VDR-Snapshot-/Core-Rails, kein neuer Index; drei erste Reihen, sechs Karten, weitere Rails per Fernbedienung. |
+| Geometrie | Gemeinsame 2:3-Kartenabmessungen, kein Zoom im Fokus; fest getrennte Live- und Fanart-Bereiche. Headless-Geometrie-/Navigationstest. |
+| Metadaten | VDR-Eventidentität aus Sender, Event-ID und Startzeit; Aufnahmen über exakten nativen Dateinamen im vorhandenen lokalen Kontext. TVScraper-Fanart und optionale Mitwirkende. Keine erfundenen Daten; Bildfallback. |
+| Aktionen und Paging | OK/Info/Zurück, Kanalwechsel, Timer, Wiedergabe und Sammlungen bleiben bei bisherigen Ownern. Kein Rechte-/API-Wechsel in diesem Design-Slice. |
+| Performance | Begrenzte Poster-/Fokus-Caches, Fokusmetadaten erst nach kurzem Verweilen, Bilddekodierung außerhalb der Locks; lokale Minutenuhr statt Netzwerkpolling. |
+| Abnahme | VDR 2.8.3/2.8.4 Build und Headless-Tests; reale Fanart-/Video-Komposition, Schriftlesbarkeit und Navigation auf yaVDR noch offen. |
+
+Kodi/Plex bleiben UX-Referenzen für Poster-Navigation und Detailvorschau; eine aktuelle Produktgegenüberstellung ist nicht verifiziert. Maßgeblich ist das ausdrücklich bestätigte SuiteOSD-Mockup, nicht ein neues Fremdprodukt-Design.

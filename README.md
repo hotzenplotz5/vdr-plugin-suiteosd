@@ -13,7 +13,13 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.9.4-dev, noch nicht auf TV abgenommen)
+## Aktueller Implementierungsstand (0.9.10-dev)
+
+- **Freigegebene Cinematic-Home-Oberfläche:** sechs gleich große 2:3-Portraitkarten pro Reihe, drei sichtbare Reihen (Jetzt, Als nächstes, Neu aufgenommen), weitere Reihen scrollbar. Abgerundete Rahmen, dezente Schatten, Cyan-Fokus ohne Vergrößerung und proportional beschnittene Poster mit opakem Textverlauf. Aufnahmekarten haben keine Senderlogos.
+- **Getrennte Vorschauen:** native Live-TV-Videoebene oben rechts, darunter die Fanart und Kurzinfo der fokussierten Sendung/Aufnahme. Nach kurzem Verweilen werden TVScraper-Daten geladen; VDR liefert reale Sendezeiten, Gesamtdauer, Restzeit und Aufnahmeinformationen. Keine zusätzliche Videoquelle, kein Netzwerkpolling. Das bisherige native Menü, die einklappbare Sidebar und bestehende Aktionen bleiben erhalten.
+- **Abnahme:** aktuelle Quellcode-/Buildtests und der [Designvertrag](docs/approved-tv-home-design.md) sind getrennt von der noch ausstehenden visuellen Hardwareabnahme. Die folgenden älteren Abschnitte sind historische Implementierungsstände.
+
+## Implementierungsstand zuvor (0.9.4-dev)
 
 - **Bilder-Karussell im freigegebenen SuiteOSD-Design (0.9.4-dev):** Die Galerie bietet jetzt Raster **und** Karussell als persistente Anzeigeart (`suiteosd.PhotoView` in VDRs `setup.conf`; Wechsel mit Taste `1`). Die Karussellansicht zeigt ein großes scharfes mittleres Foto und je zwei nach innen geneigte, verkleinerte und abgedunkelte Nachbarbilder mit dezenter Spiegelung. **Die Perspektive ist bewusst nach innen orientiert:** Bei linken Fotos ist die rechte Innenkante höher, bei rechten Fotos die linke. Beim Wechsel mit Links/Rechts bewegen sich die Karten in rund 220 ms Richtung Mitte beziehungsweise nach außen. Die Galerie füllt fast die gesamte OSD-Fläche: kein linkes Menü, keine rechte Infospalte, nur der aktuelle Ordnername oben und eine kompakte Tastenleiste unten. Die eigentliche Bilddekodierung, Quellenvalidierung und Vollbild-/Diashow-Wiedergabe verbleiben bei `image_next`. Reine CPU-OSD-Projektion der ARGB-Vorschaubilder, kein GPU-3D- oder Browser-Layer. Headless-Perspektivtests und CI-Builds sind eingerichtet; ein realer Fernsehtest steht aus.
 

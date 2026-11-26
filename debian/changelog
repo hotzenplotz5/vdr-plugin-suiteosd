@@ -1,3 +1,11 @@
+vdr-plugin-suiteosd (0.9.10~dev) unstable; urgency=medium
+
+  * Implement the approved cinematic Home with uniform portrait cards.
+  * Keep native live video separate from focused TVScraper fanart and details.
+  * Display channel, duration and remaining programme time; retain native navigation.
+
+ -- VDR-Suite contributors <noreply@github.com>  Thu, 26 Nov 2026 19:30:00 +0100
+
 vdr-plugin-suiteosd (0.9.9~dev) unstable; urgency=medium
 
   * Remove browser login from normal native TV navigation.
