@@ -63,6 +63,21 @@ struct CoreGlobalSearch {
     bool recordingHasMore = false, epgHasMore = false;
 };
 
+enum class HomeKind { Continue, Recent, New, Genres, Genre, Folders, Root, Movies };
+struct CoreHomeCard {
+    enum class Kind { Recording, Genre, Folder, Root };
+    Kind kind = Kind::Recording;
+    CoreSearchRecording recording;
+    std::string key, title, subtitle, posterUrl;
+    std::int64_t count = 0, position = -1, duration = -1;
+    bool completed = false;
+};
+struct CoreHomePage {
+    std::vector<CoreHomeCard> cards;
+    std::int64_t total = 0;
+    int nextOffset = 0;
+    bool hasMore = false;
+};
 class CoreAdminClient {
     std::string origin_;
     std::string sessionCookie_;
@@ -99,6 +114,8 @@ public:
                                 int limit, int offset, CorePersonSearch &results);
     CoreStatus globalSearch(const std::string &backendId, const std::string &query,
                             int limit, int offset, CoreGlobalSearch &results);
+    CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,
+                        int limit, int offset, int year, CoreHomePage &page);
     CoreStatus backends(std::vector<CoreItem> &items);
     CoreStatus addon(const std::string &backendId, CoreAddon &value);
     CoreStatus setAddon(const CoreAddon &previous, bool enabled, CoreAddon &updated);

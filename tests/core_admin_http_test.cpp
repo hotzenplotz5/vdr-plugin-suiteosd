@@ -111,6 +111,12 @@ int main() {
             "GET /api/vdr/recordings/persons/search?backend=default&name=Will%20Smith&limit=3&offset=0",
             "GET /api/search?backend=default&query=J%C3%BCrgen%20%26%20Co&limit=24&offset=24",
             "GET /api/search?backend=default&query=Will%20Smith&limit=3&offset=0",
+            "POST /api/media/continue-watching",
+            "POST /api/media/recently-watched",
+            "GET /api/metadata/genres?backend=default&scope=recordings&locale=de",
+            "GET /api/metadata/genres/recordings?backend=default&genre=action&limit=12&offset=0",
+            "GET /api/vdr/recordings/folder?backend=default&path=&limit=12&offset=0",
+            "GET /api/vdr/recordings/query?backend=default&sort=movieReleaseDate&order=desc&movieReleaseYearFrom=2022&movieReleaseYearTo=2026&limit=12&offset=0",
             "POST /api/security/browser-sessions/logout"
         };
         const std::vector<std::string> bodies = {
@@ -129,6 +135,12 @@ int main() {
             R"({"totalCount":10,"returnedCount":3,"limit":3,"offset":0,"matches":[{"recording":{"id":"33","backendId":"default","backendNativeId":"/video/SciFi/Men in Black 3/2026-01-01.20.15.1-0.rec","title":"SciFi/Men in Black 3","startTime":"1781935980","metadata":{"presentation":{"title":"Men in Black 3","subtitle":"Filmbeschreibung","posterUrl":"/recording-artwork/default/test"},"artwork":{"preferredUrl":"/recording-artwork/default/test"}}},"person":{"source":"tvscraper","originalName":"Will Smith","normalizedName":"will-smith","role":"actor","characterName":"Agent J","providerReference":""}},{"recording":{"id":"17","backendId":"default","backendNativeId":"/video/SciFi/Men in Black/2026-01-01.20.15.1-0.rec","title":"SciFi/Men in Black","startTime":"1781935980","metadata":{"presentation":{"title":"Men in Black","subtitle":"Filmbeschreibung","posterUrl":"/recording-artwork/default/test"},"artwork":{"preferredUrl":"/recording-artwork/default/test"}}},"person":{"source":"tvscraper","originalName":"Will Smith","normalizedName":"will-smith","role":"actor","characterName":"Jay","providerReference":""}},{"recording":{"id":"83","backendId":"default","backendNativeId":"/video/SciFi/Independence Day/2026-01-01.20.15.1-0.rec","title":"SciFi/Independence Day","startTime":"1781935980","metadata":{"presentation":{"title":"Independence Day","subtitle":"Filmbeschreibung","posterUrl":"/recording-artwork/default/test"},"artwork":{"preferredUrl":"/recording-artwork/default/test"}}},"person":{"source":"tvscraper","originalName":"Will Smith","normalizedName":"will-smith","role":"actor","characterName":"Capt. Steven Hiller","providerReference":""}}]})",
             R"({"query":"Jürgen & Co","backendId":"default","status":"ok","limit":24,"offset":24,"recordings":[{"id":"r2","backendId":"default","backendNativeId":"/video/a.rec","title":"Film","matchedPerson":"Jürgen","matchReason":"person"}],"recordingTotal":25,"recordingHasMore":false,"epg":[{"eventId":"7","backendId":"default","channelId":"C-1-2-3","title":"Sendung","matchedPerson":"Jürgen","artwork":{"available":true,"url":"/api/epg/cache/artwork?eventId=7"}}],"epgTotal":30,"epgHasMore":true,"people":[{"name":"Jürgen","role":"actor","recordingCount":25,"epgCount":30}]})",
             R"({"query":"Will Smith","backendId":"default","status":"ready","minimumQueryLength":2,"limit":3,"offset":0,"recordings":[{"id":"191","backendId":"default","backendNativeId":"/video/Drama/Das Streben nach Glück/2026-01-01.20.15.1-0.rec","title":"Das Streben nach Glück","matchedPerson":"Will Smith","matchedRole":"actor","matchReason":"person","artwork":{"available":true,"url":"/api/recordings/metadata/image?kind=preferred"}},{"id":"83","backendId":"default","backendNativeId":"/video/SciFi/Independence Day/2026-01-01.20.15.1-0.rec","title":"SciFi/Independence Day","matchedPerson":"Will Smith","matchedRole":"actor","matchReason":"person"},{"id":"239","backendId":"default","backendNativeId":"/video/Action/Gemini_Man/2026-01-01.20.15.1-0.rec","title":"Gemini Man","matchedPerson":"Will Smith","matchedRole":"actor","matchReason":"person"}],"recordingTotal":9,"recordingHasMore":true,"epg":[{"id":"62892","eventId":"62892","backendId":"default","channelId":"C-1-2-3","channelName":"Warner TV Film HD","title":"Der Staatsfeind Nr. 1","subtitle":"Mit Will Smith","startTime":"1795705200","endTime":"1795713300","matchedPerson":"","matchedRole":"","matchReason":"title","artwork":{"available":false,"url":""}}],"epgTotal":1,"epgHasMore":false,"people":[{"name":"Will Smith","role":"actor","recordingCount":3,"epgCount":0,"image":{"available":true,"url":"/api/recordings/metadata/image?kind=person&index=0"}}],"hasMore":true})",
+            R"({"items":[{"backendId":"default","recordingId":"1","backendNativeId":"/video/a.rec","title":"Film A","resumePositionSeconds":3541,"durationKnown":true,"durationSeconds":8716,"recording":{"id":"1","backendId":"default","backendNativeId":"/video/a.rec"}}]})",
+            R"({"items":[{"backendId":"default","recordingId":"2","title":"Film B","positionKnown":true,"positionSeconds":25,"completionKnown":true,"completed":false,"recording":{"id":"2","backendId":"default","backendNativeId":"/video/b.rec"}}]})",
+            R"({"genres":[{"id":"action","label":"Action","count":395},{"id":"empty","count":0}]})",
+            R"({"recordings":[{"id":"1","backendId":"default","backendNativeId":"/video/a.rec","title":"Film A"}],"totalCount":395,"limit":12,"offset":0,"hasMore":true})",
+            R"({"backendId":"default","recordingCount":1,"folders":[{"path":"Action","name":"Action","recordingCount":51},{"path":"Film B","name":"Film B","singleRecordingLeaf":true,"singleRecording":{"id":"2","backendId":"default","backendNativeId":"/video/b.rec","title":"Film B"}}],"recordings":[{"id":"1","backendId":"default","backendNativeId":"/video/a.rec","title":"Film A"}]})",
+            R"({"recordings":[{"id":"3","backendId":"default","backendNativeId":"/video/c.rec","metadata":{"presentation":{"title":"The Uprising"},"provider":{"contentKind":"movie","releaseDate":"2026-01-01"}}}],"totalCount":1})",
             ""
         };
         for (size_t i = 0; i < expected.size(); ++i) {
@@ -234,6 +246,22 @@ int main() {
     assert(search.people.size() == 1 && search.people[0].recordingCount == 3);
     assert(search.people[0].imageUrl == "/api/recordings/metadata/image?kind=person&index=0");
     assert(persons.total == 10);
+    suiteosd::CoreHomePage page;
+    using suiteosd::HomeKind;
+    assert(client.homePage("default",HomeKind::Continue,"",12,0,2026,page).ok);
+    assert(page.cards.size()==1&&page.cards[0].position==3541&&page.cards[0].duration==8716);
+    assert(page.cards[0].recording.nativeId=="/video/a.rec");
+    assert(client.homePage("default",HomeKind::Recent,"",12,0,2026,page).ok);
+    assert(page.cards.size()==1&&page.cards[0].position==25&&!page.cards[0].completed);
+    assert(client.homePage("default",HomeKind::Genres,"",12,0,2026,page).ok);
+    assert(page.cards.size()==1&&page.cards[0].count==395);
+    assert(client.homePage("default",HomeKind::Genre,"action",12,0,2026,page).ok);
+    assert(page.total==395&&page.hasMore&&page.nextOffset==1);
+    assert(client.homePage("default",HomeKind::Folders,"",12,0,2026,page).ok);
+    assert(page.cards.size()==2&&page.cards[0].title=="Hauptverzeichnis"&&page.cards[0].count==2);
+    assert(page.cards[1].count==51);
+    assert(client.homePage("default",HomeKind::Movies,"",12,0,2026,page).ok);
+    assert(page.cards.size()==1&&page.cards[0].subtitle=="2026"&&page.cards[0].title=="The Uprising");
     client.logout();
     assert(!client.authenticated());
     mock.join();

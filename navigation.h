@@ -9,10 +9,11 @@ namespace suiteosd {
 
 // Headless model: the VDR adapter translates remote keys into Direction.
 enum class Direction { Up, Down, Left, Right, Select, Back };
-enum class Activation { None, Close, Hero, ChannelNow, ChannelNext, Recording, Module };
+enum class Activation { None, Close, Hero, ChannelNow, ChannelNext, Recording, Module, HomeCard };
 
 struct Navigation {
-    static constexpr int kSections = 4; // hero, now, next, recordings
+    static constexpr int kSections = 9; // hero, now, next, continue, new, genres, folders, movies, recent
+    static constexpr int kContinue = 3, kNew = 4, kGenres = 5, kFolders = 6, kMovies = 7, kRecent = 8;
     static constexpr int kSidebarItems = 13;
     static constexpr int kClassicMenuItem = 12;
     static constexpr int kSearchItem = 11;
@@ -57,7 +58,7 @@ struct Navigation {
                 default: return Activation::Module; // VDR menus or installed plugins
                 }
                 KeepVisible(visibleCards, sectionCount);
-                firstVisibleSection = section >= 3 ? 2 : 1;
+                firstVisibleSection = std::max(1,section-1);
             }
             return Activation::None;
         }
@@ -77,13 +78,14 @@ struct Navigation {
             case 0: return Activation::Hero;
             case 1: return Activation::ChannelNow;
             case 2: return Activation::ChannelNext;
-            case 3: return Activation::Recording;
+            case kNew: return Activation::Recording;
+            default: return Activation::HomeCard;
             }
         }
         KeepVisible(visibleCards, sectionCount);
         // The hero occupies a full section and stays in the viewport until
         // moving to lower rails. No visible scroll bar is rendered.
-        firstVisibleSection = section >= 3 ? 2 : 1;
+        firstVisibleSection = std::max(1,section-1);
         return Activation::None;
     }
 };

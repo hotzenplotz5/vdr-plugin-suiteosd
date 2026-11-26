@@ -22,7 +22,9 @@ int main()
     assert(n.firstCard[1] == 4);
     n.Move(Direction::Down, 6, 4);
     assert(n.section == 3 && n.firstVisibleSection == 2);
-    assert(n.Move(Direction::Select, 6, 4) == Activation::Recording);
+    assert(n.Move(Direction::Select, 6, 4) == Activation::HomeCard);
+    n.Move(Direction::Down,6,4);
+    assert(n.section==Navigation::kNew && n.Move(Direction::Select,6,4)==Activation::Recording);
     n.Move(Direction::Left, 6, 4);
     assert(n.sideFocused);
     n.Move(Direction::Up, 6, 4);

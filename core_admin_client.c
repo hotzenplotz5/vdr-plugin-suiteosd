@@ -189,6 +189,7 @@ std::string searchImage(json_object *entry, const char *key) {
 CoreSearchRecording readSearchRecording(json_object *entry) {
     CoreSearchRecording row;
     row.id = stringOf(entry, "id");
+    if (row.id.empty()) row.id = stringOf(entry,"recordingId");
     row.backendId = stringOf(entry, "backendId");
     row.nativeId = stringOf(entry, "backendNativeId");
     row.title = stringOf(entry, "title");
@@ -283,6 +284,128 @@ bool parseGlobalSearch(const std::string &body, CoreGlobalSearch &output) {
     }
     output = std::move(next);
     return true;
+}
+
+json_object *homeArray(json_object *root,const char *name) {
+    auto *array=field(root,name);
+    if(!json_object_is_type(array,json_type_array)) array=field(root,"items");
+    return json_object_is_type(array,json_type_array)?array:nullptr;
+}
+CoreHomeCard homeRecording(json_object *rec) {
+    CoreHomeCard card;
+    card.recording=readSearchRecording(rec);
+    card.key=card.recording.id;
+    card.title=card.recording.title;
+    card.subtitle=card.recording.subtitle;
+    card.posterUrl=stringOf(field(field(rec,"metadata"),"presentation"),"posterUrl");
+    return card;
+}
+bool parseHomePage(const std::string &body,const std::string &backend,HomeKind kind,
+                   const std::string &key,int offset,CoreHomePage &output) {
+    auto root=parse(body); if(!root)return false;
+    CoreHomePage page;
+    auto append=[&](CoreHomeCard card){
+        if(card.recording.backendId.empty())card.recording.backendId=backend;
+        if(card.recording.backendId!=backend || card.key.empty())return;
+        if(std::none_of(page.cards.begin(),page.cards.end(),[&](const CoreHomeCard &c){
+            return c.kind==card.kind&&c.key==card.key;}))page.cards.push_back(std::move(card));
+    };
+    if(kind==HomeKind::Continue||kind==HomeKind::Recent) {
+        auto *items=homeArray(root.get(),"items");if(!items)return false;
+        for(size_t i=0;i<json_object_array_length(items);++i){
+            auto *item=json_object_array_get_idx(items,i);
+            auto card=homeRecording(field(item,"recording"));
+            if(card.recording.id.empty()) card.recording.id=stringOf(item,"recordingId");
+            if(card.recording.nativeId.empty())card.recording.nativeId=stringOf(item,"backendNativeId");
+            if(card.recording.backendId.empty())card.recording.backendId=stringOf(item,"backendId");
+            const auto title=stringOf(item,"title"); if(!title.empty())card.title=title;
+            const auto subtitle=stringOf(item,"subtitle");if(!subtitle.empty())card.subtitle=subtitle;
+            const auto poster=stringOf(item,"posterUrl");if(!poster.empty())card.posterUrl=poster;
+            card.key=card.recording.id;
+            if(kind==HomeKind::Continue) {
+                card.position=integerOf(item,"resumePositionSeconds",0);
+                if(boolOf(item,"durationKnown"))card.duration=integerOf(item,"durationSeconds",0);
+                if(card.position<=0||(card.duration>0&&card.position>=card.duration))continue;
+            }else{
+                if(boolOf(item,"positionKnown"))card.position=integerOf(item,"positionSeconds",0);
+                card.completed=boolOf(item,"completionKnown")&&boolOf(item,"completed");
+            }
+            append(std::move(card));
+        }
+        page.total=page.cards.size();
+    }else if(kind==HomeKind::Genres){
+        auto *items=homeArray(root.get(),"genres");if(!items)return false;
+        for(size_t i=0;i<json_object_array_length(items);++i){
+            auto *item=json_object_array_get_idx(items,i);
+            CoreHomeCard card;card.kind=CoreHomeCard::Kind::Genre;
+            card.key=stringOf(item,"id");card.title=stringOf(item,"label");
+            if(card.title.empty())card.title=stringOf(item,"labelDe");
+            if(card.title.empty())card.title=card.key;
+            card.count=integerOf(item,"count",0);
+            if(!card.key.empty()&&card.count>0){card.subtitle=std::to_string(card.count)+" Aufnahmen";page.cards.push_back(std::move(card));}
+        }
+        page.total=page.cards.size();
+    }else if(kind==HomeKind::Folders||kind==HomeKind::Root){
+        auto *folders=field(root.get(),"folders"), *records=field(root.get(),"recordings");
+        if(!json_object_is_type(folders,json_type_array)||!json_object_is_type(records,json_type_array))return false;
+        const auto n=json_object_array_length(records);
+        const auto total=integerOf(root.get(),"recordingCount",n);
+        if(offset==0){
+            std::vector<CoreHomeCard> leaves;
+            for(size_t i=0;i<json_object_array_length(folders);++i){
+                auto *folder=json_object_array_get_idx(folders,i);
+                if(boolOf(folder,"singleRecordingLeaf")){
+                    auto card=homeRecording(field(folder,"singleRecording"));
+                    if(!card.key.empty()&&std::none_of(leaves.begin(),leaves.end(),[&](const CoreHomeCard &c){return c.key==card.key;}))leaves.push_back(std::move(card));
+                    continue;
+                }
+                if(kind==HomeKind::Root)continue;
+                CoreHomeCard card;card.kind=CoreHomeCard::Kind::Folder;
+                card.key=stringOf(folder,"path");card.title=stringOf(folder,"name");
+                if(card.title.empty())card.title=card.key;
+                card.count=integerOf(folder,"recordingCount",0);
+                card.subtitle=std::to_string(card.count)+" Aufnahmen";
+                if(!card.key.empty())page.cards.push_back(std::move(card));
+            }
+            if(kind==HomeKind::Folders&&key.empty()){
+                // The Web root rail groups direct recordings and embedded leaves.
+                // Count duplicate leaves only once within the returned page.
+                size_t additional=leaves.size();
+                for(size_t i=0;i<n;++i){
+                    auto rec=homeRecording(json_object_array_get_idx(records,i));
+                    if(std::any_of(leaves.begin(),leaves.end(),[&](const CoreHomeCard &c){return c.key==rec.key;}))--additional;
+                }
+                if(total+additional>0){
+                    CoreHomeCard card;card.kind=CoreHomeCard::Kind::Root;card.key="root";
+                    card.title="Hauptverzeichnis";card.count=total+additional;
+                    card.subtitle=std::to_string(card.count)+" Aufnahmen";
+                    page.cards.insert(page.cards.begin(),std::move(card));
+                }
+                page.total=page.cards.size();output=std::move(page);return true;
+            }
+            for(auto &card:leaves)append(std::move(card));
+        }
+        for(size_t i=0;i<n;++i)append(homeRecording(json_object_array_get_idx(records,i)));
+        page.total=total;
+        page.nextOffset=offset+int(n);page.hasMore=n>0&&page.nextOffset<total;
+    }else{
+        auto *items=homeArray(root.get(),"recordings");if(!items)return false;
+        const auto n=json_object_array_length(items);
+        for(size_t i=0;i<n;++i) {
+            auto *item=json_object_array_get_idx(items,i);auto card=homeRecording(item);
+            if(kind==HomeKind::Movies){
+                auto *provider=field(field(item,"metadata"),"provider");
+                auto date=stringOf(provider,"releaseDate");
+                if(stringOf(provider,"contentKind")!="movie"||date.size()<4)continue;
+                card.subtitle=date.substr(0,4);
+            }
+            append(std::move(card));
+        }
+        page.nextOffset=offset+int(n);
+        page.total=integerOf(root.get(),"total",integerOf(root.get(),"totalCount",page.nextOffset));
+        page.hasMore=n>0&&(boolOf(root.get(),"hasMore")||page.nextOffset<page.total);
+    }
+    output=std::move(page);return true;
 }
 
 bool parseAddon(const std::string &body, CoreAddon &state) {
@@ -483,6 +606,30 @@ CoreStatus CoreAdminClient::globalSearch(const std::string &backendId,
     if (!status(r).ok) return last_;
     if (!parseGlobalSearch(r.body, results))
         last_ = {false, r.http, "Ungültige Suchantwort"};
+    return last_;
+}
+
+CoreStatus CoreAdminClient::homePage(const std::string &backend,HomeKind kind,
+    const std::string &key,int limit,int offset,int year,CoreHomePage &page) {
+    std::string route,method="GET",body;
+    const auto b=queryEncode(backend);
+    const auto pagination="&limit="+std::to_string(limit)+"&offset="+std::to_string(offset);
+    switch(kind){
+    case HomeKind::Continue: case HomeKind::Recent:
+        method="POST";route=kind==HomeKind::Continue?"/api/media/continue-watching":"/api/media/recently-watched";
+        body=encodeBody({{"operation","list"},{"backendId",backend}},{});
+        break;
+    case HomeKind::Genres:route="/api/metadata/genres?backend="+b+"&scope=recordings&locale=de";break;
+    case HomeKind::Genre:route="/api/metadata/genres/recordings?backend="+b+"&genre="+queryEncode(key)+pagination;break;
+    case HomeKind::Folders: case HomeKind::Root:
+        route="/api/vdr/recordings/folder?backend="+b+"&path="+queryEncode(key)+pagination;break;
+    case HomeKind::New:route="/api/vdr/recordings/query?backend="+b+"&sort=startTime&order=desc"+pagination;break;
+    case HomeKind::Movies:route="/api/vdr/recordings/query?backend="+b+"&sort=movieReleaseDate&order=desc&movieReleaseYearFrom="+
+        std::to_string(year-4)+"&movieReleaseYearTo="+std::to_string(year)+pagination;break;
+    }
+    const auto r=request(method,route,body);
+    if(!status(r).ok)return last_;
+    if(!parseHomePage(r.body,backend,kind,key,offset,page))last_={false,r.http,"Ungültige Home-Antwort"};
     return last_;
 }
 

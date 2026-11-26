@@ -467,6 +467,24 @@ private:
     suiteosd::CorePersonSearch personSearch;
     suiteosd::CoreGlobalSearch globalSearch;
     bool searchActive = false;
+    bool homeLogin = false;
+    struct HomeRail {
+        suiteosd::CoreHomePage page;
+        suiteosd::CoreStatus status;
+        bool attempted = false;
+    };
+    std::map<int,HomeRail> homeRails;
+    struct HomeCollection {
+        suiteosd::HomeKind kind;
+        std::string key,title;
+        HomeRail rail;
+        int offset=0,selected=0,first=0;
+        std::vector<int> previous;
+    };
+    std::vector<HomeCollection> homeCollections;
+    Recording homeDetailRecording;
+    std::int64_t homeResumeSeconds=-1;
+    bool homeResumeDetail=false;
     bool searchFromReplay = false;
     int detailScroll = 0, searchOriginScroll = 0;
     std::string searchNotice;
@@ -567,9 +585,13 @@ private:
         case 0: return 1;
         case 1: return int(data.now.size());
         case 2: return int(data.next.size());
-        case 3: return int(data.recordings.size());
+        case suiteosd::Navigation::kNew:
+            if(homeRails.find(section)==homeRails.end()||!homeRails.at(section).status.ok)
+                return int(data.recordings.size());
+            break;
         }
-        return 0;
+        auto it=homeRails.find(section);
+        return it==homeRails.end()?1:std::max(1,int(it->second.page.cards.size()));
     }
 
     const suiteosd::Artwork &channelLogo(const suiteosd::TimelineChannel &channel,int w,int h)
@@ -1603,11 +1625,11 @@ private:
     void drawRecordings(int y)
     {
         print(155,y,"Neu aufgenommen",fontLarge);
-        const int first=nav.firstCard[3];
+        const int first=nav.firstCard[suiteosd::Navigation::kNew];
         for(int col=0;col<7 && first+col<int(data.recordings.size());++col){
             const auto &item=data.recordings[first+col];
             int x=157+col*200,top=y+40;
-            homeCard(x,top,188,306,!nav.sideFocused&&nav.section==3&&nav.card[3]==first+col);
+            homeCard(x,top,188,306,!nav.sideFocused&&nav.section==suiteosd::Navigation::kNew&&nav.card[suiteosd::Navigation::kNew]==first+col);
             homePicture(recordingPoster(item),x+2,top+2,184,240);
             const auto &meta=metaFor(item);
             print(x+9,top+245,meta.episode.empty()?(meta.title.empty()?item.baseName:meta.title):meta.episode,fontBody,kText,172);
@@ -1700,9 +1722,15 @@ private:
 
     void drawRecordingDetails()
     {
-        if (recordingDetails && nav.section == 3 && nav.card[3] >= 0 &&
-            nav.card[3] < int(data.recordings.size()))
-            drawRecordingDetailPage(data.recordings[nav.card[3]]);
+        if (recordingDetails) {
+            drawRecordingDetailPage(homeDetailRecording);
+            if(homeResumeDetail&&!detailCastNav.active){
+                fill(20,822,1580,892,kSurface);
+                print(52,837,"OK / Rot: Fortsetzen · Grün: Von vorn",fontBody,kFocus,850);
+                print(900,837,"Runter: Personen · Zurück: Home",fontBody,kText,640);
+            }
+            if(!notice.empty())print(55,785,notice,fontSmall,kFocus,1470);
+        }
     }
 
     const Recording *browserSelectedRecording() const
@@ -3375,11 +3403,17 @@ private:
         using suiteosd::SearchPage;
         using suiteosd::SearchTab;
         if (searchNav.page == SearchPage::Login) {
-            if (base == kBack) closeSearch();
+            if (base == kBack) {homeLogin=false;closeSearch();}
             else if (base == kRed) {
                 const auto result = searchClient.login(searchLogin.username, searchLogin.password);
                 searchLogin.clearPassword();
-                if (result.ok) fetchSearch();
+                if (result.ok) {
+                    if(homeLogin){
+                        homeLogin=false;closeSearch();homeRails.clear();
+                        loadHomeRail(nav.section,true);
+                        if(!homeCollections.empty())loadHomeCollection(homeCollections.back());
+                    }else{homeRails.clear();fetchSearch();}
+                }
                 else searchNotice = result.message.empty() ? "Anmeldung fehlgeschlagen" : result.message;
             } else if (base == kGreen) searchLogin.passwordField = !searchLogin.passwordField;
             else if (base == kYellow) searchLogin.backspace();
@@ -3461,6 +3495,187 @@ private:
         return osContinue;
     }
 
+    static const char *homeRailTitle(int section) {
+        switch(section){
+        case suiteosd::Navigation::kContinue:return "Weiterschauen";
+        case suiteosd::Navigation::kNew:return "Neu aufgenommen";
+        case suiteosd::Navigation::kGenres:return "Genres";
+        case suiteosd::Navigation::kFolders:return "Aufnahmeordner";
+        case suiteosd::Navigation::kMovies:return "Filme der letzten 5 Jahre";
+        case suiteosd::Navigation::kRecent:return "Zuletzt angesehen";
+        default:return "";
+        }
+    }
+    static suiteosd::HomeKind homeRailKind(int section) {
+        using suiteosd::HomeKind;
+        switch(section){
+        case suiteosd::Navigation::kContinue:return HomeKind::Continue;
+        case suiteosd::Navigation::kGenres:return HomeKind::Genres;
+        case suiteosd::Navigation::kFolders:return HomeKind::Folders;
+        case suiteosd::Navigation::kMovies:return HomeKind::Movies;
+        case suiteosd::Navigation::kRecent:return HomeKind::Recent;
+        default:return HomeKind::New;
+        }
+    }
+    int currentYear() const {
+        const auto now=time(nullptr);tm t{};return localtime_r(&now,&t)?1900+t.tm_year:2026;
+    }
+    void loadHomeRail(int section,bool force=false) {
+        if(section<3)return;
+        auto &rail=homeRails[section];
+        if(rail.attempted&&!force)return;
+        rail.attempted=true;rail.page={};
+        rail.status=searchClient.homePage("default",homeRailKind(section),"",12,0,currentYear(),rail.page);
+    }
+    void loadHomeCollection(HomeCollection &collection) {
+        collection.rail.attempted=true;collection.rail.page={};
+        collection.rail.status=searchClient.homePage("default",collection.kind,collection.key,
+            12,collection.offset,currentYear(),collection.rail.page);
+        collection.selected=collection.first=0;
+    }
+    void openHomeLogin() {
+        openSearch();
+        homeLogin=true;
+        searchLogin.openLogin(suiteosd::CorePage::None);
+        searchNav.page=suiteosd::SearchPage::Login;
+    }
+    static std::string playbackClock(std::int64_t seconds) {
+        if(seconds<0)return "";
+        char buf[64];std::snprintf(buf,sizeof(buf),"%lld:%02lld:%02lld",
+          static_cast<long long>(seconds/3600),static_cast<long long>((seconds/60)%60),static_cast<long long>(seconds%60));
+        return buf;
+    }
+    void drawCoreCards(const HomeRail &rail,int first,int selected,int y,bool focus) {
+        if(!rail.status.ok){
+            homeCard(157,y+40,1390,112,focus);
+            print(180,y+58,rail.status.http==401?"OK: Bei VDR-Suite anmelden":
+                rail.attempted?"OK: Erneut laden":"OK: Daten laden",fontBody,kText,1310);
+            if(rail.attempted&&rail.status.http!=401)print(180,y+93,rail.status.message,fontSmall,kMuted,1310);
+            return;
+        }
+        if(rail.page.cards.empty()){
+            print(175,y+65,"Keine Einträge vorhanden",fontBody,kMuted);return;
+        }
+        for(int col=0;col<7&&first+col<int(rail.page.cards.size());++col){
+            int index=first+col,x=157+col*200,top=y+40;
+            const auto &card=rail.page.cards[index];
+            bool record=card.kind==suiteosd::CoreHomeCard::Kind::Recording;
+            homeCard(x,top,188,record?306:138,focus&&index==selected);
+            if(record){
+                const auto *local=findRecording(card.recording.nativeId);
+                if(local&&card.recording.backendId=="default")
+                    homePicture(recordingPoster(*local),x+2,top+2,184,220);
+                print(x+9,top+223,card.title,fontBody,kText,172);
+                const std::string subtitle=card.position>=0?playbackClock(card.position)+
+                    (card.duration>0?" / "+playbackClock(card.duration):""):
+                    card.completed?"Angesehen":card.subtitle;
+                print(x+9,top+256,subtitle,fontSmall,kMuted,172);
+                if(card.duration>0&&card.position>=0){
+                    fill(x+9,top+291,x+179,top+297,kLine);
+                    fill(x+9,top+291,x+9+int(170*std::clamp(double(card.position)/card.duration,0.0,1.0)),top+297,suiteosd::webProgress);
+                }
+            }else{
+                print(x+12,top+35,card.title,fontBody,kText,164);
+                print(x+12,top+76,card.subtitle,fontSmall,kMuted,164);
+            }
+        }
+    }
+    void drawHomeRail(int section,int y) {
+        if(section==1){drawPrograms(1,y,"Was läuft jetzt",data.now);return;}
+        if(section==2){drawPrograms(2,y,"Was läuft danach",data.next);return;}
+        auto it=homeRails.find(section);
+        if(section==suiteosd::Navigation::kNew&&(it==homeRails.end()||!it->second.status.ok)){
+            drawRecordings(y);return;
+        }
+        print(155,y,homeRailTitle(section),fontLarge);
+        static const HomeRail empty;
+        drawCoreCards(it==homeRails.end()?empty:it->second,nav.firstCard[section],nav.card[section],y,
+            !nav.sideFocused&&nav.section==section);
+    }
+    bool openHomeRecording(const suiteosd::CoreHomeCard &card,bool resume) {
+        if(!resolveSearchRecording(card.recording,homeDetailRecording)){
+            notice="Aufnahme nicht mehr im lokalen VDR vorhanden";return false;
+        }
+        detailCastNav.Close();detailScroll=0;recordingDetails=true;
+        homeResumeDetail=resume;homeResumeSeconds=resume?card.position:-1;
+        notice.clear();return true;
+    }
+    eOSState playHomeRecording(bool fromStart=false) {
+        const auto path=homeDetailRecording.fileName;
+        bool exists=false,pes=false;double fps=0;int frames=-1;
+        {
+            LOCK_RECORDINGS_READ;
+            const auto *r=Recordings?Recordings->GetByName(path.c_str()):nullptr;
+            if(r){exists=true;pes=r->IsPesRecording();fps=r->FramesPerSecond();frames=r->NumFrames();}
+        }
+        if(!exists){notice="Aufnahme nicht mehr vorhanden";return osContinue;}
+        if(fromStart||homeResumeSeconds>=0){
+            cResumeFile resume(path.c_str(),pes);
+            // VDR's own resume file, written only on an explicit playback action.
+            if(fromStart)resume.Delete();
+            else if(fps>0){
+                const double position=std::max(0.0,double(homeResumeSeconds)*fps);
+                const int target=int(std::min(position,frames>0?double(frames-1):double(2147483647)));
+                if(!resume.Save(target)){notice="Wiedergabeposition konnte nicht übernommen werden";return osContinue;}
+            }
+        }
+        restoreLivePreview();
+        cReplayControl::SetRecording(path.c_str());
+        cControl::Launch(new cSuiteReplayControl());
+        return osEnd;
+    }
+    void openHomeCard(const suiteosd::CoreHomeCard &card,bool resume=false){
+        using Kind=suiteosd::CoreHomeCard::Kind;using suiteosd::HomeKind;
+        if(card.kind==Kind::Recording){openHomeRecording(card,resume);return;}
+        HomeCollection collection;
+        collection.kind=card.kind==Kind::Genre?HomeKind::Genre:
+             card.kind==Kind::Root?HomeKind::Root:HomeKind::Folders;
+        collection.key=card.kind==Kind::Root?"":card.key;collection.title=card.title;
+        loadHomeCollection(collection);homeCollections.push_back(std::move(collection));
+    }
+    eOSState activateHomeRail(){
+        const int s=nav.section;
+        loadHomeRail(s);
+        auto &rail=homeRails[s];
+        if(!rail.status.ok){
+            if(rail.status.http==401)openHomeLogin();
+            else loadHomeRail(s,true);
+        }else if(nav.card[s]<int(rail.page.cards.size())){
+            const auto card=rail.page.cards[nav.card[s]];
+            openHomeCard(card,s==suiteosd::Navigation::kContinue);
+        }
+        return osContinue;
+    }
+    void drawHomeCollection(){
+        const auto &c=homeCollections.back();
+        fill(0,0,1599,899,kBackground);drawHeader();
+        print(155,96,c.title,fontTitle,kText,1390);
+        drawCoreCards(c.rail,c.first,c.selected,190,true);
+        print(155,600,"Links/Rechts: Auswahl · OK: Öffnen · Zurück",fontBody,kFocus,1400);
+        print(155,650,"Gelb: Vorherige Seite · Blau: Nächste Seite",fontBody,kText,1400);
+        if(!notice.empty())print(155,725,notice,fontSmall,kFocus,1390);
+        drawSidebar();
+    }
+    eOSState homeCollectionKey(eKeys key){
+        auto &c=homeCollections.back();notice.clear();
+        if(key==kBack)homeCollections.pop_back();
+        else if(key==kOk||key==kInfo){
+            if(!c.rail.status.ok){if(c.rail.status.http==401)openHomeLogin();else loadHomeCollection(c);}
+            else if(c.selected<int(c.rail.page.cards.size())){
+                const auto card=c.rail.page.cards[c.selected];openHomeCard(card);
+            }
+        }else if(key==kBlue&&c.rail.page.hasMore){
+            c.previous.push_back(c.offset);c.offset=c.rail.page.nextOffset;loadHomeCollection(c);
+        }else if(key==kYellow&&!c.previous.empty()){
+            c.offset=c.previous.back();c.previous.pop_back();loadHomeCollection(c);
+        }else if(key==kLeft||key==kRight){
+            c.selected=std::clamp(c.selected+(key==kLeft?-1:1),0,std::max(0,int(c.rail.page.cards.size())-1));
+            if(c.selected<c.first)c.first=c.selected;
+            if(c.selected>=c.first+7)c.first=c.selected-6;
+        }
+        draw();return osContinue;
+    }
+
     void drawSidebar()
     {
         // Expanded sidebar overlays the content; it never permanently
@@ -3507,7 +3722,7 @@ private:
             return;
         }
         const bool home = !photosActive && !settingsActive && !recordingsActive && !timelineActive;
-        if (home && !recordingDetails && !homeProgrammeDetails && nav.section <= 1)
+        if (home && homeCollections.empty() && !recordingDetails && !homeProgrammeDetails && nav.section <= 1)
             startLivePreview(true);
         else if (recordingsActive && !browserDetails && !browserDeleteConfirm)
             startLivePreview(false);
@@ -3535,15 +3750,13 @@ private:
         }
         fill(0, 0, 1599, 899, kBackground);
         drawHeader();
+        if(!homeCollections.empty()){
+            drawHomeCollection();drawRecordingDetails();osd->Flush();return;
+        }
         if(nav.section<=1){
-            drawHero(0);
-            drawPrograms(1,390,"Was läuft jetzt",data.now);
-        } else if(nav.section==2){
-            drawPrograms(1,83,"Was läuft jetzt",data.now);
-            drawPrograms(2,449,"Was läuft danach",data.next);
-        } else {
-            drawPrograms(2,83,"Was läuft danach",data.next);
-            drawRecordings(449);
+            drawHero(0);drawHomeRail(1,390);
+        }else{
+            drawHomeRail(nav.section-1,83);drawHomeRail(nav.section,449);
         }
         drawFooter();
         drawSidebar();
@@ -3571,17 +3784,17 @@ private:
         case suiteosd::Activation::ChannelNext:
             homeProgrammeDetails=true; homeTimerConfirm=false; homeTimerNotice.clear();
             break;
-        case suiteosd::Activation::Recording:
-            if (nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) &&
-                cDevice::PrimaryDevice() &&
-                !data.recordings[nav.card[3]].fileName.empty()) {
-                restoreLivePreview();
-                cReplayControl::SetRecording(data.recordings[nav.card[3]].fileName.c_str());
-                cControl::Launch(new cSuiteReplayControl());
-                return osEnd; // VDR launches its own canonical replay control
+        case suiteosd::Activation::Recording: {
+            auto it=homeRails.find(nav.section);
+            if(it!=homeRails.end()&&it->second.status.ok)return activateHomeRail();
+            const int index=nav.card[nav.section];
+            if(index>=0&&index<int(data.recordings.size())){
+                homeDetailRecording=data.recordings[index];homeResumeDetail=false;homeResumeSeconds=-1;
+                detailCastNav.Close();detailScroll=0;recordingDetails=true;
             }
-            notice = "Aufnahmewiedergabe aktuell nicht verfügbar";
             break;
+        }
+        case suiteosd::Activation::HomeCard:return activateHomeRail();
         case suiteosd::Activation::Module: {
             // VDR handles direct-menu keys in its main loop and creates
             // its own cMenuMain submenus. Returning osSchedule/osTimers
@@ -3708,30 +3921,21 @@ public:
             draw();return osContinue;
         }
         if (recordingDetails) {
-            const Recording *selected = nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) ?
-                &data.recordings[nav.card[3]] : nullptr;
-            if (handleDetailCast(base, selected)) return osContinue;
-            if ((base == kOk || base == kPlay || base == kRed) &&
-                nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) &&
-                !data.recordings[nav.card[3]].fileName.empty()) {
-                cReplayControl::SetRecording(data.recordings[nav.card[3]].fileName.c_str());
-                cControl::Launch(new cSuiteReplayControl());
-                return osEnd;
-            }
-            if (base == kInfo || base == kBack) {
-                recordingDetails = false;
-                draw();
-            }
-            return osContinue;
+            if(handleDetailCast(base,&homeDetailRecording))return osContinue;
+            if(base==kOk||base==kPlay||base==kRed||(base==kGreen&&homeResumeDetail)){
+                const auto result=playHomeRecording(base==kGreen);
+                if(result!=osContinue)return result;
+            }else if(base==kInfo||base==kBack){recordingDetails=false;notice.clear();}
+            draw();return osContinue;
         }
+        if(!homeCollections.empty())return homeCollectionKey(base);
         if ((base == kInfo || base == kYellow) && !nav.sideFocused) {
-            if (nav.section == 3 && nav.card[3] >= 0 &&
-                nav.card[3] < int(data.recordings.size()))
-                { detailCastNav.Close(); detailScroll=0; recordingDetails = true; }
-            else if (selectedHomeProgramme())
-                homeProgrammeDetails = true;
-            draw();
-            return osContinue;
+            if(nav.section>=3) {
+                const auto result=action(nav.section==suiteosd::Navigation::kNew?
+                    suiteosd::Activation::Recording:suiteosd::Activation::HomeCard);
+                if(result!=osContinue)return result;
+            }else if(selectedHomeProgramme())homeProgrammeDetails=true;
+            draw();return osContinue;
         }
         if (base == kRed) {
             openRecordingBrowser();
@@ -3755,6 +3959,7 @@ public:
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
             recordingDetailImages.clear();
             homeArtwork.clear();
+            homeRails.clear();loadHomeRail(nav.section);
             nav.KeepVisible(7, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
             draw();
@@ -3776,12 +3981,13 @@ public:
         // Use the destination section's actual item count, not the old row's.
         int target = nav.section;
         if (!nav.sideFocused && direction == suiteosd::Direction::Down)
-            target = std::min(3, target + 1);
+            target = std::min(suiteosd::Navigation::kSections-1, target + 1);
         if (!nav.sideFocused && direction == suiteosd::Direction::Up)
             target = std::max(0, target - 1);
         if (nav.sideFocused && direction == suiteosd::Direction::Select &&
             nav.sideIndex == 0)
             target = 0;
+        if(target>=3)loadHomeRail(target);
         const eOSState result = action(nav.Move(direction, count(target), 7));
         if (result != osContinue)
             return result;
