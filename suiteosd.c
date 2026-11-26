@@ -490,11 +490,12 @@ private:
         suiteosd::CoreHomePage page;
         suiteosd::CoreStatus status;
         bool attempted = false;
+        bool stale = false;
     };
     std::map<int,HomeRail> homeRails;
     std::atomic<bool> homeEventStop{false},homeEventChanged{false};
     std::future<void> homeEventJob;
-    bool movieScanRequested=false,movieScanReady=false;
+    bool movieScanRequested=false,movieScanReady=false,movieScanAvailable=false;
     size_t movieScanOffset=0;
     std::vector<std::pair<std::string,suiteosd::CoreHomeCard>> movieCandidates;
     std::string recommendedGenreId,recommendedGenreTitle;
@@ -3825,7 +3826,7 @@ private:
         if(!movieScanRequested||movieScanReady)return;
         auto *scraper=cPluginManager::GetPlugin("tvscraper");
         const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(12);
-        for(int n=0;scraper&&movieScanOffset<data.recordings.size()&&n<4&&
+        for(int n=0;scraper&&movieScanOffset<data.recordings.size()&&n<32&&
             std::chrono::steady_clock::now()<until;++n){
             const auto &rec=data.recordings[movieScanOffset++];
             std::string title,release;
@@ -3848,13 +3849,16 @@ private:
             movieCandidates.emplace_back(release,std::move(card));
         }
         if(scraper&&movieScanOffset<data.recordings.size())return;
-        movieScanReady=true;
+        movieScanReady=true;movieScanRequested=false;movieScanAvailable=scraper!=nullptr;
         std::stable_sort(movieCandidates.begin(),movieCandidates.end(),[](const auto &a,const auto &b){return a.first>b.first;});
         auto it=homeRails.find(suiteosd::Navigation::kMovies);
-        if(it!=homeRails.end()&&!it->second.status.ok){
-            if(scraper&&nativeHomePage(suiteosd::HomeKind::Movies,"",0,it->second.page))
-                it->second.status={true,0,"Lokaler VDR / TVScraper"};
+        if(it!=homeRails.end()&&(!it->second.status.ok||it->second.status.http==0)){
+            if(scraper&&nativeHomePage(suiteosd::HomeKind::Movies,"",0,it->second.page)){
+                it->second.status={true,0,"Lokaler VDR / TVScraper"};it->second.stale=false;
+            }
             else it->second.status={false,0,"Filmmetadaten nicht verfügbar"};
+            if(nav.section==suiteosd::Navigation::kMovies)
+                nav.KeepVisible(HL::columns,count(nav.section));
             const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
             redrawHomeRail(suiteosd::Navigation::kMovies,first,true);
             drawHomeFocusPanel();osd->Flush();
@@ -3906,7 +3910,7 @@ private:
         }else if(kind==HomeKind::New){
             for(const auto &rec:data.recordings)cards.push_back(recordingCard(rec));
         }else if(kind==HomeKind::Movies){
-            if(!movieScanReady)return false;
+            if(!movieScanReady||!movieScanAvailable)return false;
             for(const auto &movie:movieCandidates)cards.push_back(movie.second);
         }else if(kind==HomeKind::Folders||kind==HomeKind::Root||
                  kind==HomeKind::Genres||kind==HomeKind::Genre){
@@ -3950,7 +3954,8 @@ private:
         if(section<3)return;
         auto &rail=homeRails[section];
         if(rail.attempted&&!force)return;
-        rail.attempted=true;rail.page={};
+        const auto previous=rail;
+        rail.attempted=true;rail.stale=false;rail.page={};
         std::string key;
         if(section==suiteosd::Navigation::kRecommendation){
             loadHomeRail(suiteosd::Navigation::kGenres,force);
@@ -3967,10 +3972,13 @@ private:
         if(!rail.status.ok&&nativeHomePage(homeRailKind(section),key,0,rail.page))
             rail.status={true,0,"Lokaler VDR"};
         else if(!rail.status.ok&&section==suiteosd::Navigation::kMovies){
-            movieScanRequested=true;
+            movieScanRequested=!movieScanReady;
             rail.status.message=movieScanReady?"Filmmetadaten nicht verfügbar":"Filmmetadaten werden geladen …";
         }else if(!rail.status.ok&&section==suiteosd::Navigation::kRecent)
             rail.status.message="Verlauf: Public-v1-Lesevertrag fehlt";
+        if(!rail.status.ok&&previous.status.ok&&rail.status.http!=401&&rail.status.http!=403){
+            rail.page=previous.page;rail.status=previous.status;rail.stale=true;
+        }
     }
     void loadHomeCollection(HomeCollection &collection) {
         collection.rail.attempted=true;collection.rail.page={};
@@ -4033,7 +4041,9 @@ private:
             drawRecordings(y);return;
         }
         cinematicHeading(y,homeRailTitle(section));
-        if(section==suiteosd::Navigation::kMovies&&it!=homeRails.end()&&it->second.status.ok&&it->second.status.http==0)
+        if(it!=homeRails.end()&&it->second.stale)
+            print(homeLeft()+520,y+4,"Wird aktualisiert …",fontCinemaMeta,kMuted,440);
+        else if(section==suiteosd::Navigation::kMovies&&it!=homeRails.end()&&it->second.status.ok&&it->second.status.http==0)
             print(homeLeft()+520,y+4,"Lokaler VDR / TVScraper",fontCinemaMeta,kMuted,440);
         static const HomeRail empty;
         drawCoreCards(it==homeRails.end()?empty:it->second,nav.firstCard[section],nav.card[section],y,
@@ -4445,17 +4455,14 @@ public:
                 const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
                 for(int row=first;row<first+HL::rows;++row){
                     if(row>=3&&(homeRails.find(row)==homeRails.end()||!homeRails.at(row).attempted)){
-                        const auto prior=homeRails[row];
                         loadHomeRail(row);
-                        auto &current=homeRails[row];
-                        if(!current.status.ok&&prior.status.ok&&current.status.http!=401&&current.status.http!=403)
-                            {current.page=prior.page;current.status=prior.status;}
                         if(row==nav.section)nav.KeepVisible(HL::columns,count(row));
                         redrawHomeRail(row,first,true);drawHomeFocusPanel();osd->Flush();
                         break;
                     }
                 }
-                advanceMovieScan();
+                if(suiteosd::Navigation::kMovies>=first&&suiteosd::Navigation::kMovies<first+HL::rows)
+                    advanceMovieScan();
             }
             if(osd&&focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
                 drawHomeFocusPanel();osd->Flush();

@@ -348,7 +348,8 @@ int main() {
                 }else{
                     assert(req.path=="/api/v1/events?backendId=default&domain=recordings");
                     assert(req.headers.at("accept")=="text/event-stream");
-                    const std::string body="event: hello\ndata: {\"backendId\":\"default\",\"authorizedDomains\":[\"recordings\"]}\n\n";
+                    const std::string body="event: hello\ndata: {\"backendId\":\"default\",\"daemonEpoch\":\"daemon_test\",\"subscriptionSequence\":0,\"authorizedDomains\":[\"recordings\"]}\n\n"
+                        "event: update\ndata: {\"backendId\":\"default\",\"daemonEpoch\":\"daemon_test\",\"subscriptionSequence\":1,\"changedDomains\":[\"recordings\"]}\n\n";
                     const std::string response="HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"+body;
                     assert(send(fd,response.data(),response.size(),MSG_NOSIGNAL)==ssize_t(response.size()));
                 }

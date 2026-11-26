@@ -848,22 +848,29 @@ void CoreAdminClient::recordingEvents(const std::string &backend,const std::atom
         const std::string &backend;
         const std::atomic<bool> &stop;
         std::atomic<bool> &changed;
-        std::string buffer,event,data;
+        std::string buffer,event,data,epoch;
         bool admitted=false;
+        std::int64_t sequence=0;
         void frame(){
             if(event=="resync"&&admitted)changed.store(true);
             else if(event=="hello"||event=="update"){
                 const auto root=parse(data);
                 if(stringOf(root.get(),"backendId")==backend){
                     const bool hello=event=="hello";
+                    const auto incomingEpoch=stringOf(root.get(),"daemonEpoch");
+                    const auto incomingSequence=integerOf(root.get(),"subscriptionSequence");
+                    if(hello){admitted=false;epoch=incomingEpoch;sequence=0;}
+                    else if(incomingEpoch!=epoch||incomingSequence<=sequence){
+                        event.clear();data.clear();return;
+                    }
                     auto *domains=field(root.get(),hello?"authorizedDomains":"changedDomains");
                     if(json_object_is_type(domains,json_type_array))
                         for(size_t i=0;i<json_object_array_length(domains);++i){
                             auto *d=json_object_array_get_idx(domains,i);
                             if(json_object_is_type(d,json_type_string)&&
                                std::string(json_object_get_string(d))=="recordings"){
-                                if(hello)admitted=true;
-                                if(admitted)changed.store(true);
+                                if(hello)admitted=!epoch.empty()&&incomingSequence==0;
+                                if(admitted){sequence=incomingSequence;changed.store(true);}
                             }
                         }
                 }
@@ -887,7 +894,7 @@ void CoreAdminClient::recordingEvents(const std::string &backend,const std::atom
             }
             return count;
         }
-    } stream{backend,stop,changed,{},{},{},false};
+    } stream{backend,stop,changed,{},{},{},{},false,0};
     const auto url=origin_+"/api/v1/events?backendId="+queryEncode(backend)+"&domain=recordings";
     const auto auth="Authorization: VDR-Suite-Device "+device_.credentialId+"."+device_.secret;
     curl_slist *headers=nullptr;
