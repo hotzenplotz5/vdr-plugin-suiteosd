@@ -30,8 +30,8 @@ inline Artwork CinematicBackground(int w,int h,int sideRight) {
     for(int y=0;y<h;++y)for(int x=0;x<w;++x) {
         const double u=(x+.5)*1600/w,v=(y+.5)*900/h;
         uint32_t c=0xFF031020u;
-        c=CinemaMix(c,0xFF082C54u,.55*CinemaGaussian(u-670,530)*CinemaGaussian(v-90,320));
-        c=CinemaMix(c,0xFF003D7Cu,.48*CinemaGaussian(u-90,380)*CinemaGaussian(v-710,340));
+        c=CinemaMix(c,0xFF08233Eu,.38*CinemaGaussian(u-670,530)*CinemaGaussian(v-90,320));
+        c=CinemaMix(c,0xFF123353u,.25*CinemaGaussian(u-90,380)*CinemaGaussian(v-710,340));
         // Wide blue illumination and a concentrated cyan curve in the
         // header only. Do not run a bright diagonal through the posters.
         if(v<71) {
@@ -88,7 +88,7 @@ inline CinemaPatch CinematicFrame(const Artwork &bg,int x,int y,int w,int h,
     const int ph=std::min(bg.height,y+h+margin)-out.y;
     if(pw<=0||ph<=0)return {};
     out.image={pw,ph,std::vector<uint32_t>(size_t(pw)*ph)};
-    const double border=(focus?3.5:sidebar?1.8:1.2)*scale;
+    const double border=(focus?2.8:sidebar?1.5:0.85)*scale;
     for(int j=0;j<ph;++j)for(int i=0;i<pw;++i) {
         const int gx=out.x+i,gy=out.y+j;
         const double lx=gx+.5-x,ly=gy+.5-y;
@@ -102,7 +102,7 @@ inline CinemaPatch CinematicFrame(const Artwork &bg,int x,int y,int w,int h,
         if(focus||sidebar)c=CinemaMix(c,0xFF00C9FFu,edge*(focus?.85:.45)*CinemaGaussian(std::max(0.0,d),3.4*scale));
         const double t=std::clamp(ly/h,0.0,1.0);
         const uint32_t rim=focus?0xFF20ECFFu:sidebar?0xFF00BDEAu:
-            CinemaMix(0xFF859BB0u,0xFF36536Eu,t);
+            CinemaMix(0xFF4D6378u,0xFF233A51u,t);
         const uint32_t inside=sidebar?CinemaMix(0xFF0889ADu,0xFF053452u,t):
             pill?0xFF102C41u:style==CinemaStyle::Panel?CinemaMix(0xFF102B48u,0xFF041426u,t):
             0xFF061626u;

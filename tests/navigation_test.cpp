@@ -47,6 +47,8 @@ int main()
     for(int i=0;i<6;++i)posterRails.Move(Direction::Right,12,Navigation::kHomeVisibleCards);
     assert(posterRails.card[1]==6 && posterRails.firstCard[1]==1);
     static_assert(HomeLayout::cardWidth*3==HomeLayout::cardHeight*2);
+    static_assert(HomeLayout::videoY+HomeLayout::videoH<=HomeLayout::liveY+HomeLayout::liveH-56);
+    static_assert(HomeLayout::videoW*9==HomeLayout::videoH*16);
     assert(HomeLayout::firstRow(0,10)==1);
     assert(HomeLayout::firstRow(2,10)==1);
     assert(HomeLayout::firstRow(3,10)==1);

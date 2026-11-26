@@ -535,6 +535,8 @@ private:
     std::map<std::string, suiteosd::Artwork> timelineArtwork;
     Snapshot data;
     std::map<std::string, RecordingMeta> recordingMeta;
+    // Titles are copied together with the portrait path, not obtained by a second scraper request.
+    std::map<std::string, suiteosd::DetailMetadata> homeRecordingTitles;
     std::map<std::string, RecordingDetailImage> recordingDetailImages;
     suiteosd::CreditNavigation detailCastNav;
     std::map<std::string, suiteosd::Artwork> detailCastCache;
@@ -568,6 +570,7 @@ private:
     struct FocusPreview {
         suiteosd::DetailMetadata metadata;
         suiteosd::Artwork fanart;
+        std::array<suiteosd::CinemaPatch,2> composedFanart;
         std::string channel;
         int duration = -1;
     };
@@ -1214,6 +1217,8 @@ private:
             cVideoDiskUsage::ForceCheck();
             cRecordings::TouchUpdate();
             recordingMeta.erase(fileName);
+            homeRecordingTitles.erase(fileName);
+            cinematicComposites.clear();homeArtwork.clear();homeRecordingTitles.clear();
             recordingDetailImages.erase(fileName);
             recordingGenres.erase(fileName);
             data = readVdrSnapshot();
@@ -1399,7 +1404,7 @@ private:
         const std::string key="epg:"+std::to_string(item.channelNumber)+":"+std::to_string(item.eventId)+":"+std::to_string(item.start);
         auto it=homeArtwork.find(key);
         if(it!=homeArtwork.end()) return it->second;
-        if(homeArtwork.size()>=48){cinematicComposites.clear();homeArtwork.clear();}
+        if(homeArtwork.size()>=48){cinematicComposites.clear();homeArtwork.clear();homeRecordingTitles.clear();}
         std::string path;
         if (item.start && item.eventId) if (auto *scraper=cPluginManager::GetPlugin("tvscraper")) {
             LOCK_CHANNELS_READ;
@@ -1483,7 +1488,18 @@ private:
     {
         const int w=HL::cardWidth,h=HL::cardHeight,r=HL::radius;
         const auto &frame=cinemaFrame(x,y,w,h,r,focused?suiteosd::CinemaStyle::Focus:suiteosd::CinemaStyle::Poster);
-        if(!art||!art->valid()){drawCinemaImage(frame.image,frame.x,frame.y);return;}
+        if(!art||!art->valid()){
+            drawCinemaImage(frame.image,frame.x,frame.y);
+            if(art) {
+                // A deliberately neutral image placeholder, no invented poster or metadata.
+                const int cx=x+w/2,cy=y+55;
+                fill(cx-15,cy-18,cx+15,cy+18,0xFF324257u);
+                fill(cx-11,cy-14,cx+11,cy+14,0xFF142335u);
+                for(int j=-11;j<=11;j+=8){fill(cx-14,cy+j,cx-11,cy+j+2,kMuted);fill(cx+11,cy+j,cx+14,cy+j+2,kMuted);}
+                print(x+8,cy+26,"Kein Poster",fontCinemaMeta,kMuted,w-16);
+            }
+            return;
+        }
         const std::array<int,7> geom{{x,y,w,h,r,int(focused),int(nav.sideFocused)}};
         const auto key=std::make_pair(geom,reinterpret_cast<std::uintptr_t>(art));
         auto it=cinematicComposites.find(key);
@@ -1497,9 +1513,14 @@ private:
         }
         drawCinemaImage(it->second.image,it->second.x,it->second.y);
     }
-    void portraitTitle(int x,int top,const std::string &title,const std::string &subtitle) {
+    void portraitTitle(int x,int top,const std::string &title,const std::string &subtitle,
+                       const std::string &episode={}) {
         const auto *f=fontCinemaCard?fontCinemaCard:fontSmall;
-        const auto lines=suiteosd::HeroLines(title,f,X(HL::cardWidth-16));
+        auto lines=suiteosd::HeroLines(title,f,X(HL::cardWidth-16));
+        if(lines.size()==1&&!episode.empty()) {
+            auto episodes=suiteosd::HeroLines(episode,f,X(HL::cardWidth-16));
+            if(!episodes.empty())lines.push_back(episodes.front());
+        }
         for(int i=0;i<2&&i<int(lines.size());++i)
             print(x+8,top+HL::cardHeight-65+i*18,lines[i],f,kText,HL::cardWidth-16);
         print(x+8,top+HL::cardHeight-28,subtitle,fontCinemaMeta?fontCinemaMeta:fontSmall,0xFFD8E4F2u,HL::cardWidth-16);
@@ -1720,22 +1741,45 @@ private:
         nav.section = 0;
     }
 
+    std::string homeRecordingTitle(const Recording &rec,const std::string &fallback) const
+    {
+        const auto found=homeRecordingTitles.find(rec.fileName);
+        return found==homeRecordingTitles.end()?fallback:suiteosd::RecordingDisplayTitle(found->second,fallback);
+    }
+    std::string homeRecordingEpisode(const Recording &rec) const
+    {
+        const auto found=homeRecordingTitles.find(rec.fileName);
+        return found==homeRecordingTitles.end()?std::string{}:suiteosd::RecordingEpisodeLabel(found->second);
+    }
+    static std::string homeRecordingDate(time_t t)
+    {
+        if(!t)return {};
+        tm value{};char buf[32]={};
+        if(localtime_r(&t,&value))strftime(buf,sizeof(buf),"%d.%m. %H:%M",&value);
+        return buf;
+    }
     const suiteosd::Artwork &recordingPoster(const Recording &rec,int w=184,int h=240)
     {
         const std::string key="rec:"+rec.fileName+":"+std::to_string(w)+":"+std::to_string(h);
         auto it=homeArtwork.find(key);if(it!=homeArtwork.end())return it->second;
-        if(homeArtwork.size()>=48){cinematicComposites.clear();homeArtwork.clear();}
+        if(homeArtwork.size()>=48){cinematicComposites.clear();homeArtwork.clear();homeRecordingTitles.clear();}
         std::string path;
+        suiteosd::DetailMetadata metadata;
         if(auto *scraper=cPluginManager::GetPlugin("tvscraper")){
             LOCK_RECORDINGS_READ;
             const auto *r=Recordings?Recordings->GetByName(rec.fileName.c_str()):nullptr;
             if(r){
                 cGetScraperVideo req(nullptr,r);
-                if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo)
-                    path=req.m_scraperVideo->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
+                if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo){
+                    auto *video=req.m_scraperVideo.get();
+                    video->getOverview(&metadata.title,&metadata.episode,nullptr,nullptr,nullptr,nullptr,nullptr);
+                    metadata.season=video->getSeasonNumber();metadata.episodeNumber=video->getEpisodeNumber();
+                    path=video->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
                         cOrientations(eOrientation::portrait,eOrientation::landscape),true).path;
+                }
             }
         }
+        homeRecordingTitles[rec.fileName]=std::move(metadata);
         return homeArtwork.emplace(key,w==HL::posterW&&h==HL::posterH?loadHomePoster(path):suiteosd::LoadDetailArtwork(path,X(w),Y(h))).first->second;
     }
     void drawRecordings(int y)
@@ -1748,7 +1792,7 @@ private:
             const auto &poster=recordingPoster(item,HL::posterW,HL::posterH);
             portraitCard(x,top,!nav.sideFocused&&nav.section==suiteosd::Navigation::kNew&&
                          nav.card[suiteosd::Navigation::kNew]==first+col,&poster);
-            portraitTitle(x,top,item.baseName,recordingDate(item.start));
+            portraitTitle(x,top,homeRecordingTitle(item,item.baseName),homeRecordingDate(item.start),homeRecordingEpisode(item));
         }
     }
 
@@ -2035,8 +2079,11 @@ private:
             drawCinemaImage(logo,X(HL::right+HL::rightWidth-14)-logo.width,Y(HL::liveY+10));
         }else print(HL::right+HL::rightWidth-132,HL::liveY+10,data.live.channel,fontSmall,kText,120);
         fill(HL::right+11,HL::liveY+HL::liveH-56,HL::right+HL::rightWidth-12,HL::liveY+HL::liveH-11,0xFF061626u);
-        print(HL::right+20,HL::liveY+HL::liveH-54,data.live.title,fontBody,kText,HL::rightWidth-150);
-        print(HL::right+HL::rightWidth-130,HL::liveY+HL::liveH-51,data.live.time,fontSmall,kText,119);
+        const auto *timeFont=fontCinemaMeta?fontCinemaMeta:fontSmall;
+        const int timeWidth=timeFont?(timeFont->Width(data.live.time.c_str())*1600+width-1)/std::max(1,width)+6:144;
+        const int timeX=HL::right+HL::rightWidth-20-timeWidth;
+        print(HL::right+20,HL::liveY+HL::liveH-54,data.live.title,fontBody,kText,std::max(1,timeX-HL::right-28));
+        print(timeX,HL::liveY+HL::liveH-51,data.live.time,timeFont,kText,timeWidth);
         cinemaProgress(HL::right+20,HL::liveY+HL::liveH-21,HL::rightWidth-40,
             HL::progressPercent(data.live.start,data.live.end,time(nullptr)));
         cinemaPanel(HL::right,HL::detailY,HL::rightWidth,HL::detailBottom-HL::detailY,16,suiteosd::CinemaStyle::Panel);
@@ -2094,7 +2141,7 @@ private:
             // Decode only the settled selection, outside native VDR read locks.
             preview.fanart=suiteosd::CoverHomePoster(
                 suiteosd::LoadArtwork(preview.metadata.fanartPath,std::min(1024,X(HL::rightWidth)*2),std::min(1024,Y(250)*2)),
-                X(HL::rightWidth-4),Y(246),0,0xFF0B2138u);
+                X(HL::rightWidth-4),Y(210),0,0xFF0B2138u);
             if(focusPreviews.size()>=8)focusPreviews.clear();
             cached=focusPreviews.emplace(key,std::move(preview)).first;
             focusPending=false;
@@ -2103,9 +2150,12 @@ private:
             const auto &v=cached->second;
             if(v.fanart.valid()){
                 const auto &frame=cinemaFrame(HL::right,HL::detailY,HL::rightWidth,HL::detailBottom-HL::detailY,16,suiteosd::CinemaStyle::Panel);
-                auto patch=frame;
-                suiteosd::CinematicArtwork(patch,v.fanart,X(HL::right+2),Y(HL::detailY+2),
-                    X(HL::right),Y(HL::detailY),X(HL::rightWidth),Y(HL::detailBottom-HL::detailY),X(16),std::max(1,X(2)));
+                auto &patch=cached->second.composedFanart[nav.sideFocused?1:0];
+                if(!patch.image.valid()){
+                    patch=frame;
+                    suiteosd::CinematicArtwork(patch,v.fanart,X(HL::right+2),Y(HL::detailY+2),
+                        X(HL::right),Y(HL::detailY),X(HL::rightWidth),Y(HL::detailBottom-HL::detailY),X(16),std::max(1,X(2)));
+                }
                 drawCinemaImage(patch.image,patch.x,patch.y);
             }else print(HL::right+20,HL::detailY+92,"Keine Fanart verfügbar",fontSmall,kMuted,HL::rightWidth-40);
             if(!v.metadata.title.empty())title=v.metadata.title;
@@ -2120,7 +2170,7 @@ private:
         }
         const int tx=HL::right+20,tw=HL::rightWidth-40;
         const auto titleLines=suiteosd::HeroLines(title.empty()?"Sendung oder Aufnahme auswählen":title,fontLarge,X(tw));
-        int y=HL::detailY+215;
+        int y=HL::detailY+185;
         for(int i=0;i<2&&i<int(titleLines.size());++i){
             print(tx,y,titleLines[i],fontLarge,kText,tw);y+=30;
         }
@@ -3571,6 +3621,11 @@ private:
                 if (searchNav.tab == SearchTab::Recordings) {
                     const auto &row = searchRecordings()[i];
                     title = row.title;
+                    if(row.backendId=="default")if(const auto *local=findRecording(row.nativeId)){
+                        const auto &meta=metaFor(*local);
+                        if(!meta.title.empty())title=meta.title;
+                        if(!meta.episode.empty()&&meta.episode!=title)title+=" – "+meta.episode;
+                    }
                     info = row.character.empty() ? row.subtitle : row.person + " · " + row.character;
                 } else if (searchNav.tab == SearchTab::Epg) {
                     const auto &row = globalSearch.epg[i];
@@ -3825,8 +3880,10 @@ private:
                 const auto *local=findRecording(card.recording.nativeId);
                 const auto *poster=local&&card.recording.backendId=="default"?&recordingPoster(*local,HL::posterW,HL::posterH):nullptr;
                 portraitCard(x,top,focus&&index==selected,poster);
-                const std::string subtitle=card.completed?"Angesehen":card.position>=0?playbackClock(card.position):card.subtitle;
-                portraitTitle(x,top,card.title,subtitle);
+                const bool native=local&&card.recording.backendId=="default";
+                const std::string subtitle=card.completed?"Angesehen":card.position>=0?playbackClock(card.position):native?homeRecordingDate(local->start):card.subtitle;
+                portraitTitle(x,top,native?homeRecordingTitle(*local,card.title):card.title,subtitle,
+                              native?homeRecordingEpisode(*local):std::string{});
                 if(card.duration>0&&card.position>=0){
                     cinemaProgress(x+9,top+HL::cardHeight-9,HL::cardWidth-18,int(100*std::clamp(double(card.position)/card.duration,0.0,1.0)));
                 }
@@ -4212,7 +4269,9 @@ public:
             draw();return osContinue;
         }
         if(base==kNone){
-            if(focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220))draw();
+            if(osd&&focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
+                drawHomeSidePanel();osd->Flush();
+            }
             else if(osd&&notice.empty()&&focusClockMinute!=time(nullptr)/60){
                 drawHomeSidePanel();osd->Flush(); // local clock only, no status polling
             }
@@ -4249,7 +4308,7 @@ public:
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
             recordingDetailImages.clear();
             focusPreviews.clear();focusKey.clear();focusPending=false;
-            cinematicComposites.clear();cinematicLogos.clear();homeArtwork.clear();
+            cinematicComposites.clear();cinematicLogos.clear();homeArtwork.clear();homeRecordingTitles.clear();
             homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();loadHomeRail(nav.section);
             nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
@@ -4279,10 +4338,14 @@ public:
             nav.sideIndex == 0)
             target = 0;
         if(target>=3)loadHomeRail(target);
+        const auto previous=nav;
         const eOSState result = action(nav.Move(direction, count(target), suiteosd::Navigation::kHomeVisibleCards));
         if (result != osContinue)
             return result;
-        draw();
+        if(direction==suiteosd::Direction::Select||previous.section!=nav.section||
+            previous.sideFocused!=nav.sideFocused||previous.sideIndex!=nav.sideIndex||
+            previous.card!=nav.card||previous.firstCard!=nav.firstCard)
+            draw();
         return osContinue;
     }
 };

@@ -23,6 +23,20 @@ struct DetailMetadata {
     float rating = 0;
 };
 
+inline std::string RecordingDisplayTitle(const DetailMetadata &data,const std::string &fallback)
+{
+    return data.title.empty()?fallback:data.title;
+}
+inline std::string RecordingEpisodeLabel(const DetailMetadata &data)
+{
+    std::string label;
+    if(data.season>0&&data.episodeNumber>0)
+        label="S"+std::to_string(data.season)+" E"+std::to_string(data.episodeNumber);
+    if(!data.episode.empty()&&data.episode!=data.title)
+        label+=(label.empty()?"":" · ")+data.episode;
+    return label;
+}
+
 inline std::string HeroFacts(const DetailMetadata &data)
 {
     std::string result;

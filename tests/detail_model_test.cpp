@@ -4,6 +4,15 @@
 
 int main()
 {
+    {
+        suiteosd::DetailMetadata rom;
+        rom.title="Rom";rom.episode="Wie Titus Pullo die Republik stürzte";rom.season=1;rom.episodeNumber=2;
+        assert(suiteosd::RecordingDisplayTitle(rom,"DE - Rom (2005) (US)")=="Rom");
+        assert(suiteosd::RecordingEpisodeLabel(rom)=="S1 E2 · Wie Titus Pullo die Republik stürzte");
+        assert(suiteosd::RecordingDisplayTitle({},"Native Aufnahme")=="Native Aufnahme");
+        assert(suiteosd::RecordingEpisodeLabel({}).empty());
+    }
+
     using namespace suiteosd;
     DetailMetadata data;
     AddCredit(data, {"Will Smith", "Schauspiel", "Del Spooner", ""});
