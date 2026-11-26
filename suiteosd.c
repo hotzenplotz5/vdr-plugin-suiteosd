@@ -473,7 +473,7 @@ private:
     std::string settingsNotice;
     suiteosd::CoreAdminClient coreAdmin{gCoreUrl};
     suiteosd::CoreAdminNavigation coreNav;
-    // Search reuses the Human session contract; admin login/logout is unchanged.
+    // Existing native local data transport stays independent of remote Device pairing.
     suiteosd::CoreAdminClient searchClient{"http://localhost",
         std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") && *std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") ?
         std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") : "/run/vdr-suite/osd.sock"};
@@ -1038,7 +1038,7 @@ private:
     {
         photosActive = false;
         photoThumbnails.clear();
-        if (settingsActive) coreAdmin.logout();
+
         settingsActive = false;
         if (recordingsActive) closeRecordingBrowser();
         timeline = ReadNativeTimeline();
@@ -1582,7 +1582,7 @@ private:
     {
         photosActive = false;
         photoThumbnails.clear();
-        if (settingsActive) coreAdmin.logout();
+
         settingsActive = false;
         if (timelineActive) timelineActive = false;
         recordingBrowser.ChangeView(suiteosd::RecordingBrowser::View::Folders);
@@ -2009,11 +2009,13 @@ private:
                 result = {true, 200, ""};
         } else return;
         coreReport(result, result.ok ? "Core-Daten aktualisiert" : "");
-        if (!coreAdmin.authenticated()) {
-            // A stale Human session is not a mutation credential. Present the
-            // existing login again, preserving no password or stale authority.
-            coreNav.openLogin(page == suiteosd::CorePage::BackendSettings ?
-                              suiteosd::CorePage::Backends : page);
+        if (result.http == 401 || result.http == 403) {
+            if (page == suiteosd::CorePage::Backends) coreBackends.clear();
+            if (page == suiteosd::CorePage::Accounts) coreAccounts.clear();
+            if (page == suiteosd::CorePage::Devices) coreDevices.clear();
+            coreNotice = result.http == 401 ?
+                "Geräteanmeldung prüfen: VDR-Setup / Plugins / suiteosd" :
+                "Berechtigungen und Administration im Webfrontend verwalten";
         }
         if (coreNav.selected >= int(coreList().size()))
             coreNav.selected = std::max(0, int(coreList().size()) - 1);
@@ -2025,18 +2027,19 @@ private:
         coreNotice.clear();
         coreNav.selected = coreNav.action = 0;
         coreNav.confirmation = suiteosd::CoreConfirmation::None;
-        if (!coreAdmin.authenticated()) {
-            coreNav.openLogin(target);
-        } else {
-            coreNav.page = target;
-            refreshCoreAdmin();
+        coreNav.page = target;
+        if (!restoreDevice(coreAdmin)) {
+            coreAdmin.forgetDevice();
+            coreBackends.clear(); coreAccounts.clear(); coreDevices.clear();
+            coreNotice = "Gerät koppeln: VDR-Setup / Plugins / suiteosd";
+            return;
         }
+        refreshCoreAdmin();
     }
 
     static const char *corePageName(suiteosd::CorePage page)
     {
         switch (page) {
-        case suiteosd::CorePage::Login: return "Human-Admin-Anmeldung";
         case suiteosd::CorePage::Backends: return "Backend auswählen";
         case suiteosd::CorePage::BackendSettings: return "Backend und Addons";
         case suiteosd::CorePage::Accounts: return "Benutzerkonten";
@@ -2058,32 +2061,12 @@ private:
         panel(148, 113, 1417, 700, false, kSurface);
 
         const auto *item = coreSelectedItem();
-        const bool editing = coreNav.page == suiteosd::CorePage::Login ||
-                             coreNav.page == suiteosd::CorePage::Rename;
-        if (editing) {
-            const bool login = coreNav.page == suiteosd::CorePage::Login;
-            print(189, 140, login ?
-                  "Bestehende Human-Account-Anmeldung (keine Device-Identität)" :
-                  "Anzeigename des ausgewählten Benutzerkontos",
+        if (coreNav.page == suiteosd::CorePage::Rename) {
+            print(189, 140, "Anzeigename des ausgewählten Benutzerkontos",
                   fontBody, kFocus, 1280);
-            if (login) {
-                panel(183, 187, 659, 63, !coreNav.passwordField, kCard);
-                panel(868, 187, 658, 63, coreNav.passwordField, kCard);
-                print(199, 198, "Benutzer: " + coreNav.username, fontBody, kText, 625);
-                print(882, 198, "Passwort: " +
-                      std::string(std::min(size_t(52),coreNav.password.size()), '*'),
-                      fontBody, kText, 608);
-            } else {
-                panel(185, 187, 1326, 64, true, kCard);
-                print(207, 200, "Anzeigename: " + coreNav.editingName,
-                      fontBody, kText, 1270);
-            }
-            if (login && std::string(gCoreUrl).compare(0, 7, "http://") == 0 &&
-                std::string(gCoreUrl).compare(0, 16, "http://127.0.0.1") != 0 &&
-                std::string(gCoreUrl).compare(0, 16, "http://localhost") != 0 &&
-                std::string(gCoreUrl).compare(0, 12, "http://[::1]") != 0)
-                print(194, 260, "Hinweis: Core-HTTP ohne TLS, HTTPS empfohlen",
-                      fontSmall, 0xFFFFB877, 1180);
+            panel(185, 187, 1326, 64, true, kCard);
+            print(207, 200, "Anzeigename: " + coreNav.editingName,
+                  fontBody, kText, 1270);
             print(192, 281, coreNav.uppercase ? "GROSSBUCHSTABEN" :
                   "Kleinbuchstaben", fontSmall, kFocus);
             const std::string &chars = suiteosd::CoreAdminNavigation::keys();
@@ -2096,9 +2079,7 @@ private:
                 print(x + 39, y + 15, c == ' ' ? "␣" : std::string(1,c),
                       fontBody, kText, 79);
             }
-            print(193, 740, login ?
-                  "OK: Zeichen  ·  Grün: Benutzer/Passwort  ·  Rot: Anmelden" :
-                  "OK: Zeichen  ·  Grün: Feld leeren  ·  Rot: Namen speichern",
+            print(193, 740, "OK: Zeichen  ·  Grün: Feld leeren  ·  Rot: Namen speichern",
                   fontSmall, kText, 1200);
             print(193, 777, "Gelb: Löschen  ·  Blau: Groß/Klein  ·  Zifferntasten: Direkt",
                   fontSmall, kMuted, 1220);
@@ -2106,7 +2087,9 @@ private:
                    coreNav.page == suiteosd::CorePage::Accounts ||
                    coreNav.page == suiteosd::CorePage::Devices) {
             const auto &items = coreList();
-            print(185, 144, "Anmeldung aktiv · Daten direkt von VDR-Suite Core",
+            print(185, 144, coreAdmin.hasDeviceCredential() ?
+                  "Geräteberechtigung gespeichert · VDR-Suite Core" :
+                  "Nicht gekoppelt · VDR-Suite Core",
                   fontBody, kFocus, 1280);
             const int rows = 8;
             const int first = coreNav.selected / rows * rows;
@@ -2124,7 +2107,7 @@ private:
             }
             if (items.empty())
                 print(211, 298, "Keine Einträge gefunden", fontBody, kMuted, 1000);
-            print(189, 775, "OK: Öffnen   ·   Blau: Konten / Geräte   ·   Gelb: Abmelden",
+            print(189, 775, "OK: Öffnen   ·   Blau: Konten / Geräte   ·   Gelb: Aktualisieren",
                   fontSmall, kFocus, 1210);
         } else {
             if (item) {
@@ -2228,10 +2211,8 @@ private:
             if (result.ok) {
                 coreNav.page = suiteosd::CorePage::Accounts;
                 refreshCoreAdmin();
-                // Self-deactivation can revoke the Human Browser Session.
-                // Never replace a fresh login prompt with stale account detail.
-                if (coreAdmin.authenticated() &&
-                    coreNav.page == suiteosd::CorePage::Accounts)
+                if (coreNav.page == suiteosd::CorePage::Accounts &&
+                    coreSelectedItem())
                     coreNav.page = suiteosd::CorePage::AccountDetails;
                 coreNotice = target.active ? "Konto deaktiviert" : "Konto aktiviert";
             } else coreReport(result);
@@ -2250,20 +2231,7 @@ private:
 
     void submitCoreKeyboard()
     {
-        if (coreNav.page == suiteosd::CorePage::Login) {
-            const suiteosd::CoreStatus result =
-                coreAdmin.login(coreNav.username, coreNav.password);
-            coreNav.clearPassword(); // credentials never persist on the TV
-            if (!result.ok) {
-                coreReport(result);
-                return;
-            }
-            coreNav.page = coreNav.afterLogin;
-            coreNav.selected = coreNav.action = 0;
-            refreshCoreAdmin();
-            if (coreAdmin.authenticated() && coreNav.page != suiteosd::CorePage::Login)
-                coreNotice = "Human-Admin-Sitzung authentifiziert";
-        } else if (coreNav.page == suiteosd::CorePage::Rename) {
+        if (coreNav.page == suiteosd::CorePage::Rename) {
             const auto *item = coreSelectedItem();
             if (!item) {
                 coreNotice = "Benutzerkonto nicht ausgewählt";
@@ -2296,14 +2264,11 @@ private:
             return osContinue;
         }
 
-        if (coreNav.page == CorePage::Login || coreNav.page == CorePage::Rename) {
+        if (coreNav.page == CorePage::Rename) {
             if (base == kBack) {
                 coreNav.back();
             } else if (base == kGreen) {
-                if (coreNav.page == CorePage::Login)
-                    coreNav.passwordField = !coreNav.passwordField;
-                else
-                    coreNav.editingName.clear();
+                coreNav.editingName.clear();
             } else if (base == kBlue)
                 coreNav.uppercase = !coreNav.uppercase;
             else if (base == kYellow)
@@ -2364,10 +2329,7 @@ private:
                 coreNav.selected = 0;
                 refreshCoreAdmin();
             } else if (base == kYellow) {
-                coreAdmin.logout();
-                coreNav.clearPassword();
-                coreNav.page = CorePage::None;
-                coreNotice = "Abgemeldet";
+                refreshCoreAdmin();
             } else if (base == kOk) {
                 if (coreSelectedItem()) {
                     if (coreNav.page == CorePage::Backends) {
@@ -2473,7 +2435,7 @@ private:
             case suiteosd::SettingsNavigation::Suite:
                 print(194, 327, "Backend, Addons und Media Tools direkt im Core verwalten.",
                       fontBody, kText, 1160);
-                print(194, 368, "Anmeldung mit bestehendem VDR-Suite Benutzerkonto.",
+                print(194, 368, "Gerät in VDR-Setup / Plugins / suiteosd koppeln.",
                       fontBody, kMuted, 1200);
                 print(194, 418, "Core: " + std::string(gCoreUrl),
                       fontSmall, kFocus, 1160);
@@ -2504,11 +2466,11 @@ private:
                       fontSmall, kMuted, 1160);
                 break;
             case suiteosd::SettingsNavigation::Accounts:
-                print(194, 328, "Konten und TV-Geräte direkt im Suite-Core verwalten.",
+                print(194, 328, "Konten und Geräteberechtigungen im Webfrontend verwalten.",
                       fontBody, kText, 1150);
-                print(194, 369, "Kontenstatus, Anzeigenamen und gekoppelte Geräte.",
+                print(194, 369, "Geräte koppeln: VDR-Setup / Plugins / suiteosd.",
                       fontBody, kMuted, 1170);
-                print(194, 420, "Rechte / CSRF / ETag prüft der bestehende Core.",
+                print(194, 420, "Der Core prüft die bestehenden Geräteberechtigungen.",
                       fontSmall, kFocus, 1190);
                 break;
             case suiteosd::SettingsNavigation::System:
@@ -2538,7 +2500,7 @@ private:
                     else if (category == suiteosd::SettingsNavigation::Suite)
                         title = "Backend und Media Tools im Core verwalten";
                     else if (category == suiteosd::SettingsNavigation::Accounts)
-                        title = "Benutzer und gekoppelte Geräte verwalten";
+                        title = "Konten- und Geräteinformationen";
                     else if (category == suiteosd::SettingsNavigation::Plugins)
                         title = "VDR-Setup mit Plugin-Einstellungen öffnen";
                     else if (category == suiteosd::SettingsNavigation::Television)
@@ -2577,7 +2539,7 @@ private:
         settingsNotice.clear();
         coreAdmin.setOrigin(gCoreUrl);
         coreNav.page = suiteosd::CorePage::None;
-        coreNav.clearPassword();
+
         settingsNav.Open();
         nav.sideFocused = false;
     }
@@ -2668,8 +2630,7 @@ private:
         } else
             return osContinue;
         if (!settingsActive) {
-            coreAdmin.logout(); // never carry a Human session into Home or Live-TV
-            coreNav.clearPassword();
+
             coreNav.page = suiteosd::CorePage::None;
         }
         draw();
@@ -2732,7 +2693,7 @@ private:
 
     void openPhotoGallery()
     {
-        if (settingsActive) coreAdmin.logout();
+
         settingsActive = false;
         if (recordingsActive) closeRecordingBrowser();
         timelineActive = false;
@@ -3906,8 +3867,7 @@ private:
 public:
     ~cSuiteHome() override
     {
-        coreAdmin.logout();
-        coreNav.clearPassword();
+
         restoreLivePreview();
         delete osd;
         delete fontTitle;
@@ -4118,10 +4078,12 @@ public:
             restoreDevice(pairingClient) ? "Geräteberechtigung gespeichert" : "Nicht gekoppelt",
             osUnknown, false));
         Add(codeItem = new cOsdItem("Im Webfrontend bestätigen",osUnknown,false));
+        Add(new cOsdItem("Für entfernte Server HTTPS verwenden",osUnknown,false));
         Add(startItem = new cOsdItem("Gerät koppeln"));
         Add(finishItem = new cOsdItem("Bestätigung prüfen / Kopplung abschließen"));
         Add(testItem = new cOsdItem("Verbindung testen"));
         Add(forgetItem = new cOsdItem("Lokale Kopplung aufheben"));
+        Add(new cOsdItem("Einstellungen speichern"));
     }
     eOSState ProcessKey(eKeys Key) override
     {

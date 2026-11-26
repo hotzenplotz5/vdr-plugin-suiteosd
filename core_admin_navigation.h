@@ -6,7 +6,7 @@
 namespace suiteosd {
 
 enum class CorePage {
-    None, Login, Backends, BackendSettings, Accounts, AccountDetails,
+    None, Backends, BackendSettings, Accounts, AccountDetails,
     Devices, DeviceDetails, Rename
 };
 enum class CoreConfirmation { None, ToggleAddon, ToggleAccount, RevokeDevice };
@@ -14,34 +14,16 @@ enum class CoreConfirmation { None, ToggleAddon, ToggleAccount, RevokeDevice };
 struct CoreAdminNavigation {
     static constexpr int kKeyboardColumns = 10;
     CorePage page = CorePage::None;
-    CorePage afterLogin = CorePage::Backends;
     CoreConfirmation confirmation = CoreConfirmation::None;
     int selected = 0;
     int action = 0;
     int keyIndex = 0;
-    bool passwordField = false;
     bool uppercase = false;
-    std::string username;
-    std::string password;
     std::string editingName;
 
     static const std::string &keys() {
         static const std::string chars = "abcdefghijklmnopqrstuvwxyz0123456789 @._-!?#%+";
         return chars;
-    }
-    void openLogin(CorePage next) {
-        page = CorePage::Login;
-        afterLogin = next;
-        selected = action = keyIndex = 0;
-        passwordField = false;
-        uppercase = false;
-        clearPassword();
-        username.clear();
-        confirmation = CoreConfirmation::None;
-    }
-    void clearPassword() {
-        std::fill(password.begin(), password.end(), '\0');
-        password.clear();
     }
     void moveKey(int dx, int dy) {
         const int next = keyIndex + dx + dy * kKeyboardColumns;
@@ -50,22 +32,14 @@ struct CoreAdminNavigation {
     void typeKey() {
         const char c = keys()[keyIndex];
         const char v = uppercase && c >= 'a' && c <= 'z' ? char(c - 'a' + 'A') : c;
-        std::string &field = page == CorePage::Rename ? editingName :
-                             passwordField ? password : username;
-        const size_t max = page == CorePage::Rename || !passwordField ? 128U : 1024U;
-        if (field.size() < max) field.push_back(v);
+        if (editingName.size() < 128U) editingName.push_back(v);
     }
     void digit(char c) {
         if (c < '0' || c > '9') return;
-        std::string &field = page == CorePage::Rename ? editingName :
-                             passwordField ? password : username;
-        const size_t max = page == CorePage::Rename || !passwordField ? 128U : 1024U;
-        if (field.size() < max) field.push_back(c);
+        if (editingName.size() < 128U) editingName.push_back(c);
     }
     void backspace() {
-        std::string &field = page == CorePage::Rename ? editingName :
-                             passwordField ? password : username;
-        if (!field.empty()) field.pop_back();
+        if (!editingName.empty()) editingName.pop_back();
     }
     bool back() {
         if (confirmation != CoreConfirmation::None) {
@@ -88,7 +62,6 @@ struct CoreAdminNavigation {
         }
         if (page != CorePage::None) {
             page = CorePage::None;
-            clearPassword();
             return true;
         }
         return false;

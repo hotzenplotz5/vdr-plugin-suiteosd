@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Verify Human login keyboard and TV admin navigation
+      - name: Verify TV admin navigation without Human login
         run: make check-core-admin-navigation
 
   core-admin-http:
@@ -48,7 +48,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libjson-c-dev
-      - name: Verify Human session, CSRF and ETag operations via mock Core
+      - name: Verify existing Core contracts, device pairing and private server profiles
         run: make check-core-admin-http
 
   settings-navigation:

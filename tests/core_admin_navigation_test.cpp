@@ -5,29 +5,16 @@ int main() {
     using namespace suiteosd;
     CoreAdminNavigation n;
     assert(n.page == CorePage::None);
-    n.openLogin(CorePage::Backends);
-    assert(n.page == CorePage::Login);
+    n.page = CorePage::Rename;
     n.typeKey(); // a
-    assert(n.username == "a");
     n.moveKey(1,0);
     n.uppercase = true;
     n.typeKey(); // B
-    assert(n.username == "aB");
-    n.passwordField = true;
-    n.moveKey(1,0);
-    n.typeKey(); // C, must not appear in username
     n.digit('9');
-    assert(n.password == "C9");
+    assert(n.editingName == "aB9");
     n.backspace();
-    assert(n.password == "C");
-    n.clearPassword();
-    assert(n.password.empty() && n.username == "aB");
-    n.passwordField = false;
-    n.digit('7');
-    assert(n.username == "aB7");
-    n.moveKey(-1,0);
-    n.moveKey(-1,0);
-    assert(n.keyIndex == 0);
+    assert(n.editingName == "aB");
+    assert(n.back() && n.page == CorePage::AccountDetails && n.editingName.empty());
 
     n.page = CorePage::Accounts;
     n.confirmation = CoreConfirmation::ToggleAccount;
@@ -47,8 +34,6 @@ int main() {
     assert(n.editingName == "Test3");
     assert(n.back() && n.page == CorePage::AccountDetails);
     assert(n.editingName.empty());
-    n.page = CorePage::Login;
-    n.password = "secret";
+    n.page = CorePage::Backends;
     assert(n.back() && n.page == CorePage::None);
-    assert(n.password.empty());
 }
