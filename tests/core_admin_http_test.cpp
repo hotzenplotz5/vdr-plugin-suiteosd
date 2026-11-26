@@ -108,8 +108,9 @@ int main() {
             "GET /api/v1/devices?limit=100",
             "GET /api/v1/devices/dev-a/lifecycle",
             "POST /api/v1/devices/dev-a/lifecycle",
-            "GET /api/vdr/recordings/persons/search?backend=default&name=Will%20Smith&limit=20&offset=0",
+            "GET /api/vdr/recordings/persons/search?backend=default&name=Will%20Smith&limit=3&offset=0",
             "GET /api/search?backend=default&query=J%C3%BCrgen%20%26%20Co&limit=24&offset=24",
+            "GET /api/search?backend=default&query=Will%20Smith&limit=3&offset=0",
             "POST /api/security/browser-sessions/logout"
         };
         const std::vector<std::string> bodies = {
@@ -125,8 +126,9 @@ int main() {
             R"({"items":[{"deviceId":"dev-a","displayName":"Samsung TV","active":true,"revoked":false}]})",
             R"({"deviceId":"dev-a","active":true,"revoked":false})",
             R"({"deviceId":"dev-a","active":false,"revoked":true})",
-            R"({"totalCount":2,"returnedCount":1,"limit":20,"offset":0,"matches":[{"recording":{"id":"r1","backendId":"default","backendNativeId":"/video/Robot.rec","title":"Action~I, Robot","startTime":"2026-11-09","metadata":{"presentation":{"title":"I, Robot"}}},"person":{"originalName":"Will Smith","role":"actor","characterName":"Del Spooner"}}]})",
+            R"({"totalCount":10,"returnedCount":3,"limit":3,"offset":0,"matches":[{"recording":{"id":"33","backendId":"default","backendNativeId":"/video/SciFi/Men in Black 3/2026-01-01.20.15.1-0.rec","title":"SciFi/Men in Black 3","startTime":"1781935980","metadata":{"presentation":{"title":"Men in Black 3","subtitle":"Filmbeschreibung","posterUrl":"/recording-artwork/default/test"},"artwork":{"preferredUrl":"/recording-artwork/default/test"}}},"person":{"source":"tvscraper","originalName":"Will Smith","normalizedName":"will-smith","role":"actor","characterName":"Agent J","providerReference":""}},{"recording":{"id":"17","backendId":"default","backendNativeId":"/video/SciFi/Men in Black/2026-01-01.20.15.1-0.rec","title":"SciFi/Men in Black","startTime":"1781935980","metadata":{"presentation":{"title":"Men in Black","subtitle":"Filmbeschreibung","posterUrl":"/recording-artwork/default/test"},"artwork":{"preferredUrl":"/recording-artwork/default/test"}}},"person":{"source":"tvscraper","originalName":"Will Smith","normalizedName":"will-smith","role":"actor","characterName":"Jay","providerReference":""}},{"recording":{"id":"83","backendId":"default","backendNativeId":"/video/SciFi/Independence Day/2026-01-01.20.15.1-0.rec","title":"SciFi/Independence Day","startTime":"1781935980","metadata":{"presentation":{"title":"Independence Day","subtitle":"Filmbeschreibung","posterUrl":"/recording-artwork/default/test"},"artwork":{"preferredUrl":"/recording-artwork/default/test"}}},"person":{"source":"tvscraper","originalName":"Will Smith","normalizedName":"will-smith","role":"actor","characterName":"Capt. Steven Hiller","providerReference":""}}]})",
             R"({"query":"Jürgen & Co","backendId":"default","status":"ok","limit":24,"offset":24,"recordings":[{"id":"r2","backendId":"default","backendNativeId":"/video/a.rec","title":"Film","matchedPerson":"Jürgen","matchReason":"person"}],"recordingTotal":25,"recordingHasMore":false,"epg":[{"eventId":"7","backendId":"default","channelId":"C-1-2-3","title":"Sendung","matchedPerson":"Jürgen","artwork":{"available":true,"url":"/api/epg/cache/artwork?eventId=7"}}],"epgTotal":30,"epgHasMore":true,"people":[{"name":"Jürgen","role":"actor","recordingCount":25,"epgCount":30}]})",
+            R"({"query":"Will Smith","backendId":"default","status":"ready","minimumQueryLength":2,"limit":3,"offset":0,"recordings":[{"id":"191","backendId":"default","backendNativeId":"/video/Drama/Das Streben nach Glück/2026-01-01.20.15.1-0.rec","title":"Das Streben nach Glück","matchedPerson":"Will Smith","matchedRole":"actor","matchReason":"person","artwork":{"available":true,"url":"/api/recordings/metadata/image?kind=preferred"}},{"id":"83","backendId":"default","backendNativeId":"/video/SciFi/Independence Day/2026-01-01.20.15.1-0.rec","title":"SciFi/Independence Day","matchedPerson":"Will Smith","matchedRole":"actor","matchReason":"person"},{"id":"239","backendId":"default","backendNativeId":"/video/Action/Gemini_Man/2026-01-01.20.15.1-0.rec","title":"Gemini Man","matchedPerson":"Will Smith","matchedRole":"actor","matchReason":"person"}],"recordingTotal":9,"recordingHasMore":true,"epg":[{"id":"62892","eventId":"62892","backendId":"default","channelId":"C-1-2-3","channelName":"Warner TV Film HD","title":"Der Staatsfeind Nr. 1","subtitle":"Mit Will Smith","startTime":"1795705200","endTime":"1795713300","matchedPerson":"","matchedRole":"","matchReason":"title","artwork":{"available":false,"url":""}}],"epgTotal":1,"epgHasMore":false,"people":[{"name":"Will Smith","role":"actor","recordingCount":3,"epgCount":0,"image":{"available":true,"url":"/api/recordings/metadata/image?kind=person&index=0"}}],"hasMore":true})",
             ""
         };
         for (size_t i = 0; i < expected.size(); ++i) {
@@ -166,7 +168,7 @@ int main() {
                 header = "Set-Cookie: vdr_suite_session=sid-abc; Path=/; HttpOnly\r\n";
             if (i == 7) header = "ETag: \"account-etag\"\r\n";
             if (i == 10) header = "ETag: \"device-etag\"\r\n";
-            answer(fd, bodies[i], header, i == 14 ? 204 : 200);
+            answer(fd, bodies[i], header, i == expected.size() - 1 ? 204 : 200);
             close(fd);
         }
         close(listenFd);
@@ -203,17 +205,35 @@ int main() {
     assert(client.devices(devices).ok && devices.size() == 1);
     assert(client.revokeDevice(devices[0]).ok);
     suiteosd::CorePersonSearch persons;
-    assert(client.recordingPersons("default", "Will Smith", 20, 0, persons).ok);
-    assert(persons.total == 2 && persons.recordings.size() == 1);
-    assert(persons.recordings[0].title == "I, Robot");
-    assert(persons.recordings[0].nativeId == "/video/Robot.rec");
-    assert(persons.recordings[0].character == "Del Spooner");
+    assert(client.recordingPersons("default", "Will Smith", 3, 0, persons).ok);
+    assert(persons.total == 10 && persons.recordings.size() == 3);
+    assert(persons.limit == 3 && persons.offset == 0);
+    assert(persons.recordings[0].title == "Men in Black 3");
+    assert(persons.recordings[0].nativeId == "/video/SciFi/Men in Black 3/2026-01-01.20.15.1-0.rec");
+    assert(persons.recordings[0].character == "Agent J");
+    assert(persons.recordings[0].role == "actor");
+    assert(persons.recordings[0].artworkUrl == "/recording-artwork/default/test");
+    assert(persons.recordings[1].title == "Men in Black");
+    assert(persons.recordings[2].character == "Capt. Steven Hiller");
     suiteosd::CoreGlobalSearch search;
     assert(client.globalSearch("default", "Jürgen & Co", 24, 24, search).ok);
     assert(search.offset == 24 && search.recordingTotal == 25 && search.epgTotal == 30);
     assert(search.recordings[0].matchReason == "person");
     assert(search.epg[0].eventId == "7" && search.epgHasMore);
     assert(search.people[0].recordingCount == 25);
+    // Real-host response shapes, reduced fixtures with synthetic native paths.
+    // Independent person/global counts and ordering must not be conflated.
+    assert(client.globalSearch("default", "Will Smith", 3, 0, search).ok);
+    assert(search.status == "ready" && search.recordingTotal == 9 && search.epgTotal == 1);
+    assert(search.recordingHasMore && !search.epgHasMore);
+    assert(search.recordings.size() == 3 && search.recordings[0].title == "Das Streben nach Glück");
+    assert(search.recordings[1].nativeId == persons.recordings[2].nativeId);
+    assert(search.recordings[1].title == "SciFi/Independence Day");
+    assert(search.epg.size() == 1 && search.epg[0].eventId == "62892");
+    assert(search.epg[0].channelName == "Warner TV Film HD" && search.epg[0].matchReason == "title");
+    assert(search.people.size() == 1 && search.people[0].recordingCount == 3);
+    assert(search.people[0].imageUrl == "/api/recordings/metadata/image?kind=person&index=0");
+    assert(persons.total == 10);
     client.logout();
     assert(!client.authenticated());
     mock.join();
