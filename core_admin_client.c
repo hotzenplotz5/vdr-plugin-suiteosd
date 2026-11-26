@@ -1,6 +1,7 @@
 #include "core_admin_client.h"
 
 #include <curl/curl.h>
+#include <openssl/evp.h>
 #include <json-c/json.h>
 #include <algorithm>
 #include <cctype>
@@ -1038,16 +1039,34 @@ CoreStatus CoreAdminClient::publicPeopleSearch(const std::string &backendId,cons
     return (last_={true,200,std::string(recOk?"EPG":"Aufnahmen")+" nicht vollständig: "+
         (missing.ok?"Personenprojektion fehlt":"HTTP "+std::to_string(missing.http)+" · "+missing.message)});
 }
-CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row,CoreSearchEvent &detail) {
+std::string matchNativeRecording(const CoreSearchRecording &recording,const std::string &proof,
+        const std::vector<std::string> &nativeNames) {
+    if(recording.id.rfind("rec_",0)!=0||recording.backendId!="default"||proof.size()!=64)return {};
+    const std::string prefix="suiteosd-native-match/1\n"+recording.backendId+"\n"+recording.id+"\n";
+    static constexpr char hex[]="0123456789abcdef";
+    std::string matched;
+    for(const auto &name:nativeNames){
+        const auto input=prefix+name;
+        unsigned char digest[EVP_MAX_MD_SIZE];unsigned int length=0;
+        if(EVP_Digest(input.data(),input.size(),digest,&length,EVP_sha256(),nullptr)!=1||length!=32U)return {};
+        std::string value;value.reserve(64);
+        for(unsigned int i=0;i<length;++i){value.push_back(hex[digest[i]>>4]);value.push_back(hex[digest[i]&15]);}
+        if(value==proof){if(!matched.empty()&&matched!=name)return {};matched=name;}
+    }
+    return matched;
+}
+CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row,CoreSearchEvent &detail,bool nativeMatch) {
     if(!safeId(row.id)||row.id.compare(0,4,"rec_")!=0||row.backendId.empty())
         return (last_={false,0,"Ungültige Aufnahme-ID"});
-    const auto r=request("GET","/api/v1/recordings/"+row.id+"?backendId="+queryEncode(row.backendId));
+    const auto r=request("GET","/api/v1/recordings/"+row.id+"?backendId="+queryEncode(row.backendId)+
+        (nativeMatch?"&nativeMatch=1":""));
     if(!status(r).ok)return last_;
     const auto root=parse(r.body);
     if(stringOf(root.get(),"recordingId")!=row.id||stringOf(root.get(),"backendId")!=row.backendId)
         return (last_={false,r.http,"Ungültige Aufnahmedetails"});
     CoreSearchEvent next;
     next.title=row.title;next.backendId=row.backendId;
+    next.nativeMatchProof=stringOf(root.get(),"nativeMatchProof");
     auto *meta=field(root.get(),"metadata");
     next.subtitle=stringOf(meta,"episodeTitle");
     if(next.subtitle.empty())next.subtitle=stringOf(meta,"subtitle");

@@ -11,6 +11,7 @@ Build-Depends: debhelper-compat (= 13),
  libjpeg-dev,
  librsvg2-dev,
  libcurl4-openssl-dev,
+ libssl-dev,
  libjson-c-dev
 Standards-Version: 4.7.0
 Rules-Requires-Root: no

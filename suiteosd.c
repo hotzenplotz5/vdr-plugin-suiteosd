@@ -483,7 +483,9 @@ private:
         std::string origin, profile, query;
         suiteosd::CoreSearchRecording recording;
         int offset=0, selected=0;
-        bool epg=false, detail=false, people=false;
+        bool epg=false, detail=false, people=false, home=false, resume=false;
+        std::int64_t position=-1;
+        std::vector<std::string> nativeNames;
         unsigned long generation=0;
     };
     struct SearchReadback {
@@ -491,7 +493,9 @@ private:
         suiteosd::CoreStatus status;
         suiteosd::CoreGlobalSearch results;
         suiteosd::CoreSearchEvent detail;
+        std::string nativeId;
     };
+    bool homeDetailPending=false;
     std::future<SearchReadback> searchJob;
     SearchRead pendingSearch;
     bool searchQueued=false;
@@ -3569,7 +3573,9 @@ private:
                    !client.setDeviceCredential(credential)){
                     result.status={false,0,"Keine Geräteanmeldung – Kopplung in den Plugin-Einstellungen prüfen"};
                 }else if(request.detail){
-                    result.status=client.publicRecordingDetail(request.recording,result.detail);
+                    result.status=client.publicRecordingDetail(request.recording,result.detail,true);
+                    if(result.status.ok)result.nativeId=suiteosd::matchNativeRecording(
+                        request.recording,result.detail.nativeMatchProof,request.nativeNames);
                 }else if(request.people){
                     result.status=client.publicPeopleSearch("default",request.query,
                         suiteosd::SearchNavigation::pageSize,request.offset,result.results);
@@ -3588,6 +3594,10 @@ private:
         request.origin=gCoreUrl;
         request.profile=deviceProfilePath();
         request.generation=++searchGeneration;
+        if(request.detail){
+            request.nativeNames.reserve(data.recordings.size());
+            for(const auto &rec:data.recordings)request.nativeNames.push_back(rec.fileName);
+        }
         pendingSearch=std::move(request);
         searchQueued=true;
         searchNotice=pendingSearch.detail?"Aufnahmedetails werden geladen …":"Suche läuft …";
@@ -3600,15 +3610,30 @@ private:
         bool redraw=false;
         try {
             auto result=searchJob.get();
-            if(searchActive&&result.request.generation==searchGeneration&&
+            if(result.request.home&&homeDetailPending&&result.request.generation==searchGeneration){
+                homeDetailPending=false;
+                if(result.status.ok&&!result.nativeId.empty()){
+                    suiteosd::CoreHomeCard card;
+                    card.recording=result.request.recording;card.recording.nativeId=result.nativeId;
+                    card.position=result.request.position;
+                    openHomeRecording(card,result.request.resume);
+                }else notice=result.status.ok?"Aufnahme konnte nicht exakt dem lokalen VDR zugeordnet werden":
+                    "HTTP "+std::to_string(result.status.http)+" · "+result.status.message;
+                redraw=true;
+            }else if(searchActive&&result.request.generation==searchGeneration&&
                searchNav.page==suiteosd::SearchPage::Results){
                 if(result.request.detail&&result.request.selected!=searchNav.selected){
                     searchNotice.clear();
                 }else if(result.status.ok){
                     searchNotice.clear();
                     if(result.request.detail){
-                        searchEvent=std::move(result.detail);
-                        searchNav.page=suiteosd::SearchPage::PublicRecording;
+                        auto row=result.request.recording;row.nativeId=result.nativeId;
+                        if(resolveSearchRecording(row,searchRecording)){
+                            detailCastNav.Close();detailScroll=0;searchNav.page=suiteosd::SearchPage::Recording;
+                        }else{
+                            searchEvent=std::move(result.detail);
+                            searchNav.page=suiteosd::SearchPage::PublicRecording;
+                        }
                     }else{
                         globalSearch=std::move(result.results);
                         searchNotice=result.status.message;
@@ -4151,6 +4176,12 @@ private:
             !nav.sideFocused&&nav.section==section,true);
     }
     bool openHomeRecording(const suiteosd::CoreHomeCard &card,bool resume) {
+        if(card.recording.nativeId.empty()&&card.recording.id.rfind("rec_",0)==0){
+            SearchRead request;request.detail=true;request.home=true;request.resume=resume;
+            request.position=card.position;request.recording=card.recording;
+            homeDetailPending=true;notice="Aufnahmedetails werden geladen …";
+            queueSearchRead(std::move(request));return false;
+        }
         if(!resolveSearchRecording(card.recording,homeDetailRecording)){
             notice="Öffentliche Aufnahme-ID noch nicht nativ zugeordnet";return false;
         }
@@ -4503,8 +4534,10 @@ public:
                 }
             }
         }
+        if(homeDetailPending&&base!=kNone){homeDetailPending=false;invalidateSearchRead();notice.clear();}
         const bool homeChanged=finishHomeRead();
         const bool searchChanged=finishSearchRead();
+        if(searchChanged&&!searchActive&&base==kNone&&osd){draw();return osContinue;}
         if (searchActive) {
             if(base==kNone){if(searchChanged)draw();return osContinue;}
             return searchKey(base);

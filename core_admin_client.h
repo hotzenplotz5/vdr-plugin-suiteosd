@@ -44,6 +44,7 @@ struct CoreSearchRecording {
 struct CoreSearchEvent {
     std::string eventId, backendId, channelId, channelName, title, subtitle;
     std::string description, startTime, endTime, person, role, matchReason, artworkUrl, personKey;
+    std::string nativeMatchProof;
 };
 struct CoreSearchPerson {
     std::string name, role, imageUrl;
@@ -64,6 +65,10 @@ struct CoreGlobalSearch {
     bool recordingHasMore = false, epgHasMore = false;
     bool personProjection = false;
 };
+
+// Exact correlation only; no title/date/folder heuristics or second index.
+std::string matchNativeRecording(const CoreSearchRecording &recording, const std::string &proof,
+                                 const std::vector<std::string> &nativeNames);
 
 enum class HomeKind { Continue, Recent, New, Genres, Genre, Folders, Root, Movies };
 struct CoreHomeCard {
@@ -155,7 +160,8 @@ public:
                             bool epg, int limit, int offset, CoreGlobalSearch &results);
     CoreStatus publicPeopleSearch(const std::string &backendId, const std::string &query,
                                   int limit, int offset, CoreGlobalSearch &results);
-    CoreStatus publicRecordingDetail(const CoreSearchRecording &row, CoreSearchEvent &detail);
+    CoreStatus publicRecordingDetail(const CoreSearchRecording &row, CoreSearchEvent &detail,
+                                     bool nativeMatch = false);
     CoreStatus publicHomePage(const std::string &backend, HomeKind kind, const std::string &key,
                         int limit, int offset, int year, CoreHomePage &page);
     CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,

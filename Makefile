@@ -15,7 +15,7 @@ SOURCE_FLAGS = $(if $(VDR_SOURCE_PARENT),-I$(VDR_SOURCE_PARENT))
 
 CXXFLAGS += -std=c++17 -fPIC $(SOURCE_FLAGS) $(VDR_CXXFLAGS) $(VDR_CFLAGS) $(shell $(PKG_CONFIG) --cflags libpng librsvg-2.0 libcurl json-c)
 ARTWORK_LIBS = $(shell $(PKG_CONFIG) --libs libpng librsvg-2.0) -ljpeg
-CORE_LIBS = $(shell $(PKG_CONFIG) --libs libcurl json-c)
+CORE_LIBS = $(shell $(PKG_CONFIG) --libs libcurl json-c libcrypto)
 DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"'
 
 .PHONY: all clean show-vdr-api check-navigation check-artwork check-epg-timeline check-logos check-recording-browser check-photo-gallery check-photo-carousel check-settings-navigation check-core-admin-navigation check-core-admin-http
