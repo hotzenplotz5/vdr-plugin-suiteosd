@@ -399,7 +399,7 @@ public:
         label(56,837,castNav.active ? "OK: Person suchen · Links/Rechts: Auswahl" :
               "OK / Info / Zurück: Wiedergabe",bodyFont,kFocus,820);
         label(925,837,castNav.active ? "Hoch / Zurück: Details" :
-              "Links/Rechts: Text · Runter: Personen",bodyFont,kText,610);
+              "Runter / Blau: Personen",bodyFont,kText,610);
         view->Flush();
     }
     eOSState ProcessKey(eKeys key) override
@@ -418,7 +418,7 @@ public:
             Render();
             return osContinue;
         }
-        if (base == kDown && !detail.people.empty()) {
+        if ((base == kDown || base == kBlue) && !detail.people.empty()) {
             castNav.Open(); Render(); return osContinue;
         }
         if (base == kLeft || base == kRight) {
@@ -1285,8 +1285,9 @@ private:
             case kOk: {
                 const std::string fileName = recordingBrowser.Open();
                 if (!fileName.empty()) {
-                    const eOSState result = playBrowserRecording();
-                    if (result != osContinue) return result;
+                    detailCastNav.Close();
+                    detailScroll = 0;
+                    browserDetails = true;
                 }
                 break;
             }
@@ -1676,7 +1677,7 @@ private:
               "OK: Person suchen · Links/Rechts: Auswahl" : "OK / Rot: Wiedergabe",
               fontBody,kFocus,810);
         print(900,838,detailCastNav.active ? "Hoch / Zurück: Details" :
-              "Links/Rechts: Text · Runter: Personen",fontBody,kText,640);
+              "Runter / Blau: Personen",fontBody,kText,640);
     }
 
     bool handleDetailCast(eKeys base, const Recording *rec)
@@ -1703,7 +1704,7 @@ private:
                           std::max(0,int(lines.size())-suiteosd::kHeroTextRows));
             draw(); return true;
         }
-        if ((base == kDown || (base == kGreen && !homeResumeDetail)) && !detailImageFor(*rec).metadata.people.empty()) {
+        if ((base == kDown || base == kBlue) && !detailImageFor(*rec).metadata.people.empty()) {
             detailCastNav.Open();
             draw();
             return true;
@@ -1718,7 +1719,7 @@ private:
             if(homeResumeDetail&&!detailCastNav.active){
                 fill(20,822,1580,892,kSurface);
                 print(52,837,"OK / Rot: Fortsetzen · Grün: Von vorn",fontBody,kFocus,850);
-                print(900,837,"Runter: Personen · Zurück: Home",fontBody,kText,640);
+                print(900,837,"Runter / Blau: Personen",fontBody,kText,640);
             }
             if(!notice.empty())print(55,785,notice,fontSmall,kFocus,1470);
         }
@@ -1853,7 +1854,7 @@ private:
         print(155, 848, "Rot: Abspielen", fontSmall);
         print(397, 848, "Grün: Sortieren", fontSmall);
         print(650, 848, "Gelb: Löschen", fontSmall);
-        print(885, 848, "Blau: Info", fontSmall);
+        print(885, 848, "OK / Blau: Info", fontSmall);
         print(1105, 848, "0: Sortierung  ·  Zurück: Ordner/Home", fontSmall);
         if (!browserNotice.empty()) {
             fill(159, 782, 1563, 823, kSurface);
