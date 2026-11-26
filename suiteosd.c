@@ -513,7 +513,8 @@ private:
     };
     std::map<int,HomeRail> homeRails;
     std::atomic<bool> homeEventStop{false},homeEventChanged{false};
-    std::future<void> homeEventJob;
+    std::future<void> homeEventJob,homeProgressJob;
+    std::atomic<bool> homeProgressChanged{false};
     struct HomeRead {
         unsigned long id=0;
         int section=-1, offset=0, year=0;
@@ -3950,18 +3951,20 @@ private:
         const std::string origin=gCoreUrl,path=deviceProfilePath();
         suiteosd::DeviceCredential saved;
         if(!suiteosd::loadDeviceProfile(path,origin,saved))return;
-        try {
-            homeEventJob=std::async(std::launch::async,[this,origin,path]{
-                while(!homeEventStop.load()){
-                    suiteosd::DeviceCredential credential;
-                    suiteosd::CoreAdminClient client(origin);
-                    if(!suiteosd::loadDeviceProfile(path,origin,credential)||!client.setDeviceCredential(credential))break;
-                    client.recordingEvents("default",homeEventStop,homeEventChanged);
-                    // Reconnect transport only; no repeated snapshot/status GET.
-                    for(int i=0;i<30&&!homeEventStop.load();++i)
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-            });
+        auto subscribe=[this,origin,path](const std::string &domain,std::atomic<bool> &changed){
+            while(!homeEventStop.load()){
+                suiteosd::DeviceCredential credential;
+                suiteosd::CoreAdminClient client(origin);
+                if(!suiteosd::loadDeviceProfile(path,origin,credential)||!client.setDeviceCredential(credential))break;
+                client.recordingEvents("default",homeEventStop,changed,domain);
+                // Reconnect transport only; no snapshot/status polling.
+                for(int i=0;i<30&&!homeEventStop.load();++i)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        };
+        try{
+            homeEventJob=std::async(std::launch::async,[this,subscribe]{subscribe("recordings",homeEventChanged);});
+            homeProgressJob=std::async(std::launch::async,[this,subscribe]{subscribe("continueWatching",homeProgressChanged);});
         }catch(const std::exception &){}
     }
     bool nativeHomePage(suiteosd::HomeKind kind,const std::string &key,int offset,
@@ -4476,6 +4479,7 @@ public:
     {
         homeEventStop.store(true);
         if(homeEventJob.valid())homeEventJob.wait();
+        if(homeProgressJob.valid())homeProgressJob.wait();
         restoreLivePreview();
         delete osd;
         delete fontTitle;
@@ -4585,6 +4589,12 @@ public:
         if(base==kNone){
             if(homeChanged&&osd){draw();return osContinue;}
             if(osd&&homeCollections.empty()){
+                if(homeProgressChanged.exchange(false)){
+                    for(const int section:{suiteosd::Navigation::kContinue,suiteosd::Navigation::kRecent}){
+                        auto it=homeRails.find(section);
+                        if(it!=homeRails.end()){it->second.attempted=false;it->second.loading=false;it->second.requestId=0;}
+                    }
+                }
                 if(homeEventChanged.exchange(false)){
                     data=readVdrSnapshot();
                     // Invalidate once on hello/change; keep visible last data until refreshed.

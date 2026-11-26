@@ -148,7 +148,7 @@ public:
     CoreStatus testDevice();
     // One authorized SSE subscription. Only publish invalidation hints, never data.
     void recordingEvents(const std::string &backend, const std::atomic<bool> &stop,
-                         std::atomic<bool> &changed);
+                         std::atomic<bool> &changed, const std::string &domain = "recordings");
     void forgetDevice() { device_ = {}; }
     bool hasDeviceCredential() const { return !device_.credentialId.empty(); }
 

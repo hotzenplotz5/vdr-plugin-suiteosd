@@ -844,12 +844,13 @@ CoreStatus CoreAdminClient::testDevice() {
 }
 
 void CoreAdminClient::recordingEvents(const std::string &backend,const std::atomic<bool> &stop,
-                                      std::atomic<bool> &changed) {
+                                      std::atomic<bool> &changed,const std::string &domain) {
     if(stop.load()||device_.credentialId.empty()||!localSocket_.empty())return;
     initializeCurl();
     CURL *curl=curl_easy_init();if(!curl)return;
     struct Stream {
         const std::string &backend;
+        const std::string &domain;
         const std::atomic<bool> &stop;
         std::atomic<bool> &changed;
         std::string buffer,event,data,epoch;
@@ -872,7 +873,7 @@ void CoreAdminClient::recordingEvents(const std::string &backend,const std::atom
                         for(size_t i=0;i<json_object_array_length(domains);++i){
                             auto *d=json_object_array_get_idx(domains,i);
                             if(json_object_is_type(d,json_type_string)&&
-                               std::string(json_object_get_string(d))=="recordings"){
+                               std::string(json_object_get_string(d))==domain){
                                 if(hello)admitted=!epoch.empty()&&incomingSequence==0;
                                 if(admitted){sequence=incomingSequence;changed.store(true);}
                             }
@@ -898,8 +899,8 @@ void CoreAdminClient::recordingEvents(const std::string &backend,const std::atom
             }
             return count;
         }
-    } stream{backend,stop,changed,{},{},{},{},false,0};
-    const auto url=origin_+"/api/v1/events?backendId="+queryEncode(backend)+"&domain=recordings";
+    } stream{backend,domain,stop,changed,{},{},{},{},false,0};
+    const auto url=origin_+"/api/v1/events?backendId="+queryEncode(backend)+"&domain="+queryEncode(domain);
     const auto auth="Authorization: VDR-Suite-Device "+device_.credentialId+"."+device_.secret;
     curl_slist *headers=nullptr;
     headers=curl_slist_append(headers,"Accept: text/event-stream");
