@@ -56,7 +56,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.16-dev";
+static const char *VERSION = "0.9.17-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
