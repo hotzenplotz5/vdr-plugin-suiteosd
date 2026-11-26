@@ -12,7 +12,7 @@ namespace suiteosd {
 inline void DrawCastPage(cOsd *osd, int width, int height, const cFont *titleFont,
                          const cFont *bodyFont, const cFont *smallFont,
                          const DetailMetadata &detail, const CreditNavigation &nav,
-                         std::map<std::string, Artwork> &cache)
+                         std::map<std::string, Artwork> &cache, bool canSearch = false)
 {
     if (!osd) return;
     auto X = [width](int x) { return x * width / 1600; };
@@ -67,7 +67,8 @@ inline void DrawCastPage(cOsd *osd, int width, int height, const cFont *titleFon
              bodyFont, white, 1490);
     }
     rect(18, 817, 1564, 72, surface);
-    text(52, 839, "Links/Rechts: Personen", bodyFont, white, 630);
+    text(52, 839, canSearch ? "Links/Rechts: Personen · OK: Suche" :
+         "Links/Rechts: Personen", bodyFont, white, 780);
     text(855, 839, "Zurück / Hoch: Aufnahmedetails", bodyFont, white, 700);
 }
 } // namespace suiteosd

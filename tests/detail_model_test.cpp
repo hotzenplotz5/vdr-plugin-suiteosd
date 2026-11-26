@@ -1,4 +1,5 @@
 #include "../detail_model.h"
+#include "../search_navigation.h"
 #include <cassert>
 
 int main()
@@ -23,4 +24,21 @@ int main()
     nav.Open();
     nav.Move(1, 0);
     assert(nav.selected == 0 && nav.first == 0);
+    SearchNavigation search;
+    search.Open("Will Smith");
+    assert(search.person && search.page == SearchPage::Results);
+    search.NextPage();
+    assert(search.offset == 20 && search.selected == 0);
+    search.CycleTab();
+    assert(search.tab == SearchTab::Epg && search.offset == 0);
+    search.CycleTab();
+    assert(search.tab == SearchTab::Recordings);
+    search.Open();
+    search.key = 26;
+    search.Type();
+    assert(search.query == "ä");
+    search.Erase();
+    assert(search.query.empty());
+    search.Move(9, 12);
+    assert(search.First() == 6);
 }

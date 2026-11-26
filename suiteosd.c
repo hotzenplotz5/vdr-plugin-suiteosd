@@ -16,6 +16,7 @@
 #include "artwork_decode.h"
 #include "scraper_detail.h"
 #include "cast_page.h"
+#include "search_navigation.h"
 #include "vendor/tvscraper/services.h"
 
 #include <vdr/channels.h>
@@ -248,13 +249,13 @@ suiteosd::Timeline ReadNativeTimeline()
     return timeline;
 }
 
-const std::array<const char *, 11> kSidebar = {{
+const std::array<const char *, 12> kSidebar = {{
     "Home", "Live-TV", "EPG", "Aufnahmen", "Timer",
     "Suchtimer", "HbbTV", "Teletext", "Bilder", "Media Tools",
-    "Einstellungen"
+    "Einstellungen", "Suche"
 }};
-const std::array<const char *, 11> kSymbols = {{
-    "H", "TV", "E", "REC", "T", "S", "Hb", "TXT", "IMG", "M", "SET"
+const std::array<const char *, 12> kSymbols = {{
+    "H", "TV", "E", "REC", "T", "S", "Hb", "TXT", "IMG", "M", "SET", "SUC"
 }};
 
 
@@ -463,6 +464,27 @@ private:
     std::string settingsNotice;
     suiteosd::CoreAdminClient coreAdmin{gCoreUrl};
     suiteosd::CoreAdminNavigation coreNav;
+    // Search reuses the Human session contract; admin login/logout is unchanged.
+    suiteosd::CoreAdminClient searchClient{gCoreUrl};
+    suiteosd::CoreAdminNavigation searchLogin;
+    suiteosd::SearchNavigation searchNav;
+    suiteosd::CorePersonSearch personSearch;
+    suiteosd::CoreGlobalSearch globalSearch;
+    bool searchActive = false;
+    std::string searchNotice;
+    Recording searchRecording;
+    suiteosd::CoreSearchEvent searchEvent;
+    struct SearchFrame {
+        suiteosd::SearchNavigation nav;
+        suiteosd::CorePersonSearch person;
+        suiteosd::CoreGlobalSearch global;
+        Recording recording;
+        suiteosd::CoreSearchEvent event;
+        suiteosd::CreditNavigation cast;
+        std::string notice;
+    };
+    std::vector<SearchFrame> searchHistory;
+    suiteosd::CreditNavigation searchOriginCast;
     std::vector<suiteosd::CoreItem> coreBackends;
     std::vector<suiteosd::CoreItem> coreAccounts;
     std::vector<suiteosd::CoreItem> coreDevices;
@@ -1600,7 +1622,7 @@ private:
         const auto &detail = image.metadata;
         if (detailCastNav.active) {
             suiteosd::DrawCastPage(osd, width, height, fontTitle, fontBody, fontSmall,
-                                   detail, detailCastNav, detailCastCache);
+                                   detail, detailCastNav, detailCastCache, true);
             return;
         }
         fill(0, 0, 1599, 899, kBackground);
@@ -1678,7 +1700,13 @@ private:
     {
         if (!rec) { detailCastNav.Close(); return false; }
         if (detailCastNav.active) {
-            if (base == kBack || base == kInfo || base == kUp) detailCastNav.Close();
+            if (base == kOk) {
+                const auto &people = detailImageFor(*rec).metadata.people;
+                if (detailCastNav.selected >= 0 && detailCastNav.selected < int(people.size())) {
+                    const std::string name = people[detailCastNav.selected].name;
+                    openSearch(name);
+                }
+            } else if (base == kBack || base == kInfo || base == kUp) detailCastNav.Close();
             else if (base == kLeft || base == kRight)
                 detailCastNav.Move(base == kLeft ? -1 : 1, int(detailImageFor(*rec).metadata.people.size()));
             draw();
@@ -3144,6 +3172,311 @@ private:
         }
     }
 
+    // Resolve exact native IDs in the existing local VDR recording list.
+    bool resolveSearchRecording(const suiteosd::CoreSearchRecording &row, Recording &out)
+    {
+        if (row.backendId != "default" || row.nativeId.empty()) return false;
+        LOCK_RECORDINGS_READ;
+        const cRecording *rec = Recordings ? Recordings->GetByName(row.nativeId.c_str()) : nullptr;
+        if (!rec) return false;
+        out = Recording{};
+        out.fileName = rec->FileName() ? rec->FileName() : "";
+        out.title = rec->Name() ? rec->Name() : "";
+        const cString base = rec->BaseName();
+        out.baseName = *base ? *base : out.title;
+        out.start = rec->Start();
+        out.time = formatTime(out.start);
+        if (rec->Info() && rec->Info()->Description()) out.description = rec->Info()->Description();
+        return !out.fileName.empty();
+    }
+
+    void fetchSearch()
+    {
+        searchNotice.clear();
+        searchNav.page = suiteosd::SearchPage::Results;
+        personSearch = {};
+        globalSearch = {};
+        suiteosd::CoreStatus result;
+        if (searchNav.person && searchNav.tab == suiteosd::SearchTab::Recordings)
+            result = searchClient.recordingPersons("default", searchNav.query,
+                         suiteosd::SearchNavigation::pageSize, searchNav.offset, personSearch);
+        else
+            result = searchClient.globalSearch("default", searchNav.query,
+                         suiteosd::SearchNavigation::pageSize, searchNav.offset, globalSearch);
+        if (result.http == 401) {
+            searchLogin.openLogin(suiteosd::CorePage::None);
+            searchNav.page = suiteosd::SearchPage::Login;
+        } else if (!result.ok) {
+            searchNotice = result.message.empty() ? "Suche fehlgeschlagen" : result.message;
+        } else if (!globalSearch.status.empty() && globalSearch.status != "ready" &&
+                   globalSearch.status != "ok") {
+            searchNotice = "Suchindex: " + globalSearch.status;
+        }
+    }
+
+    void openSearch(const std::string &person = "")
+    {
+        if (!searchActive) {
+            searchOriginCast = detailCastNav;
+            searchHistory.clear();
+        } else {
+            searchHistory.push_back({searchNav, personSearch, globalSearch,
+                 searchRecording, searchEvent, detailCastNav, searchNotice});
+        }
+        searchActive = true;
+        detailCastNav.Close();
+        searchClient.setOrigin(gCoreUrl);
+        searchNav.Open(person);
+        personSearch = {};
+        globalSearch = {};
+        searchNotice.clear();
+        if (!person.empty()) fetchSearch();
+    }
+
+    void closeSearch()
+    {
+        searchLogin.clearPassword();
+        if (!searchHistory.empty()) {
+            auto frame = std::move(searchHistory.back());
+            searchHistory.pop_back();
+            searchNav = std::move(frame.nav);
+            personSearch = std::move(frame.person);
+            globalSearch = std::move(frame.global);
+            searchRecording = std::move(frame.recording);
+            searchEvent = std::move(frame.event);
+            detailCastNav = frame.cast;
+            searchNotice = std::move(frame.notice);
+        } else {
+            searchActive = false;
+            detailCastNav = searchOriginCast;
+        }
+    }
+
+    const std::vector<suiteosd::CoreSearchRecording> &searchRecordings() const
+    {
+        return searchNav.person ? personSearch.recordings : globalSearch.recordings;
+    }
+    int searchCount() const
+    {
+        switch (searchNav.tab) {
+        case suiteosd::SearchTab::Recordings: return int(searchRecordings().size());
+        case suiteosd::SearchTab::Epg: return int(globalSearch.epg.size());
+        case suiteosd::SearchTab::People: return int(globalSearch.people.size());
+        }
+        return 0;
+    }
+    bool searchHasMore() const
+    {
+        switch (searchNav.tab) {
+        case suiteosd::SearchTab::Recordings:
+            return searchNav.person ? personSearch.total > searchNav.offset + searchCount() &&
+                                      searchCount() > 0 : globalSearch.recordingHasMore;
+        case suiteosd::SearchTab::Epg: return globalSearch.epgHasMore;
+        case suiteosd::SearchTab::People:
+            return globalSearch.recordingHasMore || globalSearch.epgHasMore;
+        }
+        return false;
+    }
+
+    void drawSearch()
+    {
+        using suiteosd::SearchPage;
+        using suiteosd::SearchTab;
+        if (searchNav.page == SearchPage::Recording) {
+            drawRecordingDetailPage(searchRecording);
+            if (!searchNotice.empty()) print(58, 784, searchNotice, fontSmall, kFocus, 1480);
+            return;
+        }
+        fill(0, 0, 1599, 899, kBackground);
+        fill(0, 0, 1599, 76, kSurface);
+        print(34, 23, "VDR Suite", fontLarge, kText, 226);
+        print(284, 22, searchNav.person ? "Aufnahmen & EPG zur Person" : "Suche", fontLarge);
+        if (searchNav.page == SearchPage::Query || searchNav.page == SearchPage::Login) {
+            const bool login = searchNav.page == SearchPage::Login;
+            print(154, 110, login ? "VDR-Suite-Anmeldung" : "Aufnahmen, EPG und Personen",
+                  fontTitle, kText, 1400);
+            if (login) {
+                panel(158, 189, 680, 63, !searchLogin.passwordField, kCard);
+                panel(855, 189, 680, 63, searchLogin.passwordField, kCard);
+                print(180, 205, "Benutzer: " + searchLogin.username, fontBody, kText, 630);
+                print(877, 205, "Passwort: " + std::string(std::min(size_t(50), searchLogin.password.size()), '*'),
+                      fontBody, kText, 630);
+            } else {
+                panel(158, 189, 1377, 63, true, kCard);
+                print(180, 205, searchNav.query.empty() ? "Suchbegriff eingeben" : searchNav.query,
+                      fontBody, kText, 1300);
+            }
+            const int keys = login ? int(suiteosd::CoreAdminNavigation::keys().size()) :
+                                     int(suiteosd::SearchNavigation::Keys().size());
+            for (int i = 0; i < keys; ++i) {
+                int x = 158 + (i % 10) * 138, y = 286 + (i / 10) * 84;
+                panel(x, y, 118, 70, i == (login ? searchLogin.keyIndex : searchNav.key), kCardAlt);
+                std::string value;
+                if (login) {
+                    char c = suiteosd::CoreAdminNavigation::keys()[i];
+                    if (searchLogin.uppercase && c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
+                    value = std::string(1, c);
+                } else value = searchNav.KeyLabel(i);
+                print(x+40, y+18, value == " " ? "␣" : value, fontLarge, kText, 76);
+            }
+            print(158, 744, login ? "Rot: Anmelden · Grün: Benutzer/Passwort" :
+                                   "Rot: Suchen · Grün: Leeren", fontBody, kFocus, 1360);
+            print(158, 787, "OK: Zeichen · Gelb: Löschen · Blau: Groß/Klein · Zurück: Abbrechen",
+                  fontSmall, kText, 1360);
+        } else if (searchNav.page == SearchPage::Event) {
+            print(90, 120, searchEvent.title, fontTitle, kText, 1410);
+            print(90, 198, searchEvent.channelName + " · " + searchEvent.subtitle, fontBody, kMuted, 1410);
+            std::istringstream words(searchEvent.description);
+            std::string word, line;
+            int y = 267;
+            while (words >> word && y < 730) {
+                const auto candidate = line.empty() ? word : line + " " + word;
+                if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(1390)) {
+                    print(90, y, line, fontBody, kText, 1390);
+                    y += 36; line = word;
+                } else line = candidate;
+            }
+            if (y < 730) print(90, y, line, fontBody, kText, 1390);
+            print(90, 768, "Zurück: Suchergebnisse", fontBody, kFocus);
+        } else {
+            print(157, 108, searchNav.query, fontTitle, kText, 1350);
+            const char *labels[] = {"Aufnahmen", "EPG", "Personen"};
+            for (int i = 0; i < (searchNav.person ? 2 : 3); ++i) {
+                const int x = 157 + i * 230;
+                panel(x, 181, 210, 51, i == int(searchNav.tab), kCardAlt);
+                print(x + 16, 193, labels[i], fontBody, kText, 180);
+            }
+            const int count = searchCount();
+            if (searchNav.tab != SearchTab::People) {
+                const auto total = searchNav.tab == SearchTab::Epg ? globalSearch.epgTotal :
+                    (searchNav.person ? personSearch.total : globalSearch.recordingTotal);
+                print(1080, 192, std::to_string(total) + " Treffer", fontBody, kMuted, 420);
+            }
+            const int first = searchNav.First();
+            for (int n = 0; n < suiteosd::SearchNavigation::visibleRows && first+n < count; ++n) {
+                const int i = first+n, y = 253+n*83;
+                panel(157, y, 1380, 73, i == searchNav.selected, kCardAlt);
+                std::string title, info;
+                if (searchNav.tab == SearchTab::Recordings) {
+                    const auto &row = searchRecordings()[i];
+                    title = row.title;
+                    info = row.character.empty() ? row.subtitle : row.person + " · " + row.character;
+                } else if (searchNav.tab == SearchTab::Epg) {
+                    const auto &row = globalSearch.epg[i];
+                    title = row.title;
+                    info = row.channelName + " · " + row.subtitle;
+                } else {
+                    const auto &row = globalSearch.people[i];
+                    title = row.name;
+                    info = row.role + " · " + std::to_string(row.recordingCount) + " Aufnahmen auf dieser Suche";
+                }
+                print(180, y+7, title, fontBody, kText, 1320);
+                print(180, y+38, info, fontSmall, kMuted, 1320);
+            }
+            if (!count && searchNotice.empty())
+                print(180, 335, "Keine Treffer in dieser Ansicht", fontBody, kMuted);
+            print(157, 768, "OK: Öffnen · Grün: Treffergruppe · Rot: Neue Suche",
+                  fontSmall, kFocus, 1370);
+            print(157, 796, "Gelb/Blau: Vorherige/Nächste Seite · Pfeile: Auswahl · Zurück",
+                  fontSmall, kText, 1370);
+        }
+        if (!searchNotice.empty()) {
+            fill(155, 837, 1538, 891, kSurface);
+            print(175, 850, searchNotice, fontSmall, kFocus, 1340);
+        }
+        if (searchNav.page != SearchPage::Event) drawSidebar();
+    }
+
+    eOSState searchKey(eKeys base)
+    {
+        using suiteosd::SearchPage;
+        using suiteosd::SearchTab;
+        if (searchNav.page == SearchPage::Login) {
+            if (base == kBack) closeSearch();
+            else if (base == kRed) {
+                const auto result = searchClient.login(searchLogin.username, searchLogin.password);
+                searchLogin.clearPassword();
+                if (result.ok) fetchSearch();
+                else searchNotice = result.message.empty() ? "Anmeldung fehlgeschlagen" : result.message;
+            } else if (base == kGreen) searchLogin.passwordField = !searchLogin.passwordField;
+            else if (base == kYellow) searchLogin.backspace();
+            else if (base == kBlue) searchLogin.uppercase = !searchLogin.uppercase;
+            else if (base == kOk) searchLogin.typeKey();
+            else if (base == kUp) searchLogin.moveKey(0,-1);
+            else if (base == kDown) searchLogin.moveKey(0,1);
+            else if (base == kLeft) searchLogin.moveKey(-1,0);
+            else if (base == kRight) searchLogin.moveKey(1,0);
+            else if (base >= k0 && base <= k9) searchLogin.digit(char('0' + int(base-k0)));
+        } else if (searchNav.page == SearchPage::Query) {
+            if (base == kBack) closeSearch();
+            else if (base == kRed) {
+                searchNav.offset = searchNav.selected = 0;
+                searchNav.person = false;
+                searchNav.tab = SearchTab::Recordings;
+                fetchSearch();
+            } else if (base == kGreen) searchNav.query.clear();
+            else if (base == kYellow) searchNav.Erase();
+            else if (base == kBlue) searchNav.uppercase = !searchNav.uppercase;
+            else if (base == kOk) searchNav.Type();
+            else if (base == kUp) searchNav.MoveKey(0,-1);
+            else if (base == kDown) searchNav.MoveKey(0,1);
+            else if (base == kLeft) searchNav.MoveKey(-1,0);
+            else if (base == kRight) searchNav.MoveKey(1,0);
+            else if (base >= k0 && base <= k9) searchNav.query += char('0' + int(base-k0));
+        } else if (searchNav.page == SearchPage::Recording) {
+            if (handleDetailCast(base, &searchRecording)) return osContinue;
+            if (base == kBack || base == kInfo) searchNav.page = SearchPage::Results;
+            else if (base == kOk || base == kRed || base == kPlay) {
+                bool present = false;
+                {
+                    LOCK_RECORDINGS_READ;
+                    present = Recordings && Recordings->GetByName(searchRecording.fileName.c_str());
+                }
+                if (present) {
+                    restoreLivePreview();
+                    cReplayControl::SetRecording(searchRecording.fileName.c_str());
+                    cControl::Launch(new cSuiteReplayControl());
+                    return osEnd;
+                }
+                searchNotice = "Aufnahme nicht mehr im lokalen VDR vorhanden";
+            }
+        } else if (searchNav.page == SearchPage::Event) {
+            if (base == kBack || base == kInfo || base == kOk)
+                searchNav.page = SearchPage::Results;
+        } else {
+            if (base == kBack) closeSearch();
+            else if (base == kRed) {
+                searchNav.Open();
+                searchNotice.clear();
+            } else if (base == kGreen) {
+                searchNav.CycleTab(); fetchSearch();
+            } else if (base == kYellow && searchNav.offset > 0) {
+                searchNav.PreviousPage(); fetchSearch();
+            } else if (base == kBlue && searchHasMore()) {
+                searchNav.NextPage(); fetchSearch();
+            } else if (base == kUp) searchNav.Move(-1, searchCount());
+            else if (base == kDown) searchNav.Move(1, searchCount());
+            else if (base == kLeft) searchNav.Move(-suiteosd::SearchNavigation::visibleRows, searchCount());
+            else if (base == kRight) searchNav.Move(suiteosd::SearchNavigation::visibleRows, searchCount());
+            else if (base == kOk && searchNav.selected < searchCount()) {
+                searchNotice.clear();
+                const int i = searchNav.selected;
+                if (searchNav.tab == SearchTab::Recordings) {
+                    if (resolveSearchRecording(searchRecordings()[i], searchRecording)) {
+                        detailCastNav.Close(); searchNav.page = SearchPage::Recording;
+                    } else searchNotice = "Aufnahme nicht mehr im lokalen VDR vorhanden";
+                } else if (searchNav.tab == SearchTab::Epg) {
+                    searchEvent = globalSearch.epg[i]; searchNav.page = SearchPage::Event;
+                } else {
+                    const std::string name = globalSearch.people[i].name;
+                    openSearch(name);
+                }
+            }
+        }
+        draw();
+        return osContinue;
+    }
+
     void drawSidebar()
     {
         // Expanded sidebar overlays the content; it never permanently
@@ -3151,12 +3484,12 @@ private:
         const int right = nav.sideFocused ? 270 : 99;
         panel(18, 90, right - 18, 726, false, kSurface);
         for (int i = 0; i < int(kSidebar.size()); ++i) {
-            const int y = 107 + i * 61;
+            const int y = 104 + i * 58;
             const bool selected = nav.sideFocused && nav.sideIndex == i;
             if (selected)
                 panel(31, y, right - 51, 48, true, kHighlight);
             else if (!nav.sideFocused && i ==
-                     (photosActive ? 8 : settingsActive ? 10 : timelineActive ? 2 : recordingsActive ? 3 : 0))
+                     (searchActive ? 11 : photosActive ? 8 : settingsActive ? 10 : timelineActive ? 2 : recordingsActive ? 3 : 0))
                 panel(31, y, 52, 48, false, kHighlight);
             print(41, y + 13, kSymbols[i], fontSmall, kText, 56);
             if (nav.sideFocused)
@@ -3181,6 +3514,12 @@ private:
     {
         if (!osd)
             return;
+        if (searchActive) {
+            restoreLivePreview();
+            drawSearch();
+            osd->Flush();
+            return;
+        }
         const bool home = !photosActive && !settingsActive && !recordingsActive && !timelineActive;
         if (home && !recordingDetails && !homeProgrammeDetails && nav.firstVisibleSection != 2)
             startLivePreview(true);
@@ -3262,6 +3601,7 @@ private:
             case 3: openRecordingBrowser(); return osContinue; // Native Suite recording grid
             case 8: openPhotoGallery(); return osContinue; // image_next VDR service
             case 4: nativeKey = kTimers; break;     // Timers
+            case 11: openSearch(); return osContinue;
             case 10: openSettings(); return osContinue; // Unified VDR+Suite settings
             default: break;
             }
@@ -3335,6 +3675,7 @@ public:
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        if (searchActive) return searchKey(base);
         if (base == kSetup) {
             openSettings();
             draw();
