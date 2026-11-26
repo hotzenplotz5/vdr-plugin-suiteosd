@@ -85,8 +85,7 @@ struct Navigation {
             }
         }
         KeepVisible(visibleCards, sectionCount);
-        // The first three rails stay visible together; subsequent rails scroll
-        // vertically. Section zero focuses the separate live panel.
+        // The visible rails stay together; subsequent rails scroll vertically. Section zero focuses the separate live panel.
         firstVisibleSection = HomeLayout::firstRow(section,kSections);
         return Activation::None;
     }

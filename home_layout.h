@@ -12,9 +12,9 @@ constexpr PreviewRect AlignPreviewRect(int x,int y,int w,int h) {
     return {ax,ay,std::max(0,(w-(ax-x))&~1),std::max(0,(h-(ay-y))&~1)};
 }
 struct HomeLayout {
-    static constexpr int columns=6, rows=3;
-    static constexpr int cardWidth=132, cardHeight=198, gap=36;
-    static constexpr int left=150, top=82, rowStep=252, titleHeight=38;
+    static constexpr int columns=5, rows=2;
+    static constexpr int cardWidth=160, cardHeight=240, gap=20, expandedGap=14;
+    static constexpr int left=150, top=82, rowStep=304, titleHeight=38;
     static constexpr int radius=16;
     static constexpr int posterW=cardWidth-2, posterH=cardHeight-2;
     static constexpr int right=1156, rightWidth=426;
@@ -22,7 +22,7 @@ struct HomeLayout {
     static constexpr int videoW=320, videoH=180, videoY=100;
     static constexpr int videoX=right+(rightWidth-videoW)/2;
     static constexpr int detailY=355, detailBottom=850;
-    static constexpr int cardX(int column,bool expanded=false){return (expanded?282:left)+column*(cardWidth+(expanded?14:gap));}
+    static constexpr int cardX(int column,bool expanded=false){return (expanded?282:left)+column*(cardWidth+(expanded?expandedGap:gap));}
     static constexpr int headingY(int row){return top+row*rowStep;}
     static constexpr int firstRow(int section,int sections){
         return std::clamp(section-rows+1,1,std::max(1,sections-rows));
@@ -37,7 +37,11 @@ struct HomeLayout {
 static_assert(HomeLayout::cardWidth*3==HomeLayout::cardHeight*2);
 static_assert(HomeLayout::cardX(HomeLayout::columns-1)+HomeLayout::cardWidth<HomeLayout::right);
 static_assert(HomeLayout::cardX(HomeLayout::columns-1,true)+HomeLayout::cardWidth<HomeLayout::right);
-static_assert(HomeLayout::headingY(2)+HomeLayout::titleHeight+HomeLayout::cardHeight<836);
+static_assert(HomeLayout::headingY(HomeLayout::rows-1)+HomeLayout::titleHeight+HomeLayout::cardHeight+9<850);
+static_assert(HomeLayout::headingY(HomeLayout::rows)<=850);
+static_assert(HomeLayout::rowStep>=HomeLayout::titleHeight+HomeLayout::cardHeight+18);
+static_assert(HomeLayout::cardX(HomeLayout::columns-1,true)+HomeLayout::cardWidth+7<=HomeLayout::right-9);
+static_assert(HomeLayout::gap>=18 && HomeLayout::expandedGap>=14);
 static_assert(HomeLayout::videoY+HomeLayout::videoH<=HomeLayout::liveY+HomeLayout::liveH-56);
 static_assert(HomeLayout::videoW*9==HomeLayout::videoH*16);
 static_assert(HomeLayout::liveY+HomeLayout::liveH<HomeLayout::detailY);

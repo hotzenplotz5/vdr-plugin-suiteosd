@@ -21,7 +21,7 @@ int main()
     assert(n.section == 2);
     assert(n.firstCard[1] == 4);
     n.Move(Direction::Down, 6, 4);
-    assert(n.section == Navigation::kNew && n.firstVisibleSection == 1);
+    assert(n.section == Navigation::kNew && n.firstVisibleSection == 2);
     assert(n.Move(Direction::Select, 6, 4) == Activation::Recording);
     n.Move(Direction::Down,6,4);
     assert(n.section==Navigation::kContinue && n.Move(Direction::Select,6,4)==Activation::HomeCard);
@@ -45,8 +45,21 @@ int main()
     Navigation posterRails;
     posterRails.Move(Direction::Down, 12, Navigation::kHomeVisibleCards);
     for(int i=0;i<6;++i)posterRails.Move(Direction::Right,12,Navigation::kHomeVisibleCards);
-    assert(posterRails.card[1]==6 && posterRails.firstCard[1]==1);
+    assert(posterRails.card[1]==6 && posterRails.firstCard[1]==2);
+    static_assert(HomeLayout::columns==5 && HomeLayout::rows==2);
+    static_assert(HomeLayout::cardWidth==160 && HomeLayout::cardHeight==240);
     static_assert(HomeLayout::cardWidth*3==HomeLayout::cardHeight*2);
+    for(bool expanded:{false,true}){
+        for(int i=1;i<HomeLayout::columns;++i)
+            assert(HomeLayout::cardX(i,expanded)-HomeLayout::cardX(i-1,expanded)-HomeLayout::cardWidth==(expanded?14:20));
+        assert(HomeLayout::cardX(HomeLayout::columns-1,expanded)+HomeLayout::cardWidth+7<=HomeLayout::right-9);
+    }
+    posterRails.Move(Direction::Down,12,Navigation::kHomeVisibleCards);
+    posterRails.Move(Direction::Down,12,Navigation::kHomeVisibleCards);
+    assert(posterRails.section==Navigation::kNew && posterRails.firstVisibleSection==2);
+    posterRails.Move(Direction::Up,12,Navigation::kHomeVisibleCards);
+    posterRails.Move(Direction::Up,12,Navigation::kHomeVisibleCards);
+    assert(posterRails.card[1]==6 && posterRails.firstCard[1]==2);
     static_assert(HomeLayout::videoY+HomeLayout::videoH<=HomeLayout::liveY+HomeLayout::liveH-56);
     static_assert(HomeLayout::videoW*9==HomeLayout::videoH*16);
     // An odd OSD origin must not cause the output provider's chroma
@@ -59,9 +72,9 @@ int main()
     }
     assert(HomeLayout::firstRow(0,10)==1);
     assert(HomeLayout::firstRow(2,10)==1);
-    assert(HomeLayout::firstRow(3,10)==1);
-    assert(HomeLayout::firstRow(4,10)==2);
-    assert(HomeLayout::firstRow(9,10)==7);
+    assert(HomeLayout::firstRow(3,10)==2);
+    assert(HomeLayout::firstRow(4,10)==3);
+    assert(HomeLayout::firstRow(9,10)==8);
     assert(HomeLayout::remainingMinutes(100,5500,2800)==45);
     assert(HomeLayout::remainingMinutes(100,5500,5500)==-1);
     assert(HomeLayout::remainingMinutes(100,5500,99)==-1);

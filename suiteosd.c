@@ -4140,9 +4140,9 @@ private:
             const int index=first+col,x=homeCardX(col),top=y+HL::titleHeight;
             if(index==size){
                 portraitCard(x,top,focus&&index==selected);
-                print(x+12,top+65,"Weitere",fontBody,kText,116);
-                print(x+12,top+95,"Aufnahmen",fontSmall,kText,116);
-                print(x+12,top+168,"OK: Öffnen",fontSmall,kFocus,116);
+                print(x+12,top+65,"Weitere",fontBody,kText,HL::cardWidth-24);
+                print(x+12,top+95,"Aufnahmen",fontSmall,kText,HL::cardWidth-24);
+                print(x+12,top+HL::cardHeight-30,"OK: Öffnen",fontSmall,kFocus,HL::cardWidth-24);
                 continue;
             }
             const auto &card=rail.page.cards[index];
@@ -4159,8 +4159,8 @@ private:
                 }
             }else{
                 portraitCard(x,top,focus&&index==selected);
-                print(x+12,top+60,card.title,fontBody,kText,116);
-                print(x+12,top+98,card.subtitle,fontSmall,kMuted,116);
+                printFit(x+12,top+60,card.title,fontBody,kText,HL::cardWidth-24);
+                printFit(x+12,top+98,card.subtitle,fontSmall,kMuted,HL::cardWidth-24);
             }
         }
     }
@@ -4321,7 +4321,7 @@ private:
         if(row<0||row>=HL::rows)return;
         if(clearRow){
             const auto &bg=cinematicBackground();
-            const int x0=X(homeLeft()-12),x1=X(HL::right-12);
+            const int x0=X(homeLeft()-12),x1=X(HL::right-9);
             const int y0=Y(HL::headingY(row)),y1=Y(HL::headingY(row+1));
             suiteosd::Artwork strip{x1-x0,y1-y0,std::vector<uint32_t>(size_t(x1-x0)*(y1-y0))};
             for(int y=y0;y<y1;++y)
