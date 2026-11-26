@@ -4452,6 +4452,7 @@ private:
     std::future<PairResult> pairingJob;
     std::chrono::steady_clock::time_point nextPairingCheck{};
     std::string visiblePairingStatus;
+    bool verifyOnOpen=false;
 
     bool pairingConnected() const { return visiblePairingStatus=="Erfolgreich gekoppelt"; }
     std::string pairingCodeText() const
@@ -4467,6 +4468,7 @@ private:
         if(!changed&&code==codeItem->Text())return;
         stateItem->SetText(message.c_str());
         codeItem->SetText(code.c_str());
+        startItem->SetText(pairingConnected()?"Gerätestatus anzeigen":"Gerät koppeln");
         if(!HasSubMenu()){
             Display();
             SetStatus(message.c_str());
@@ -4580,7 +4582,7 @@ private:
             if(item==back)return osBack;
             if(owner.pairingJob.valid())owner.setStatus("Gerätevorgang läuft ...");
             else if(item==check)owner.runPairing(PairAction::Complete);
-             Refresh();
+            Refresh();
             return osContinue;
         }
     };
@@ -4609,9 +4611,9 @@ public:
                                   &photoView, 2, views));
         Add(new cMenuEditStrItem("VDR-Suite Core URL", coreUrl, sizeof(coreUrl)));
         Add(new cMenuEditStrItem("Gerätename", deviceName, sizeof(deviceName)));
-        Add(stateItem = new cOsdItem(
-            restoreDevice(pairingClient) ? "Geräteberechtigung gespeichert" : "Nicht gekoppelt",
-            osUnknown, false));
+        verifyOnOpen=restoreDevice(pairingClient);
+        visiblePairingStatus=verifyOnOpen?"Geräteberechtigung gespeichert":"Nicht gekoppelt";
+        Add(stateItem = new cOsdItem(visiblePairingStatus.c_str(),osUnknown,false));
         Add(codeItem = new cOsdItem("Kein offener Kopplungscode",osUnknown,false));
         Add(new cOsdItem("Für entfernte Server HTTPS verwenden",osUnknown,false));
         Add(startItem = new cOsdItem("Gerät koppeln"));
@@ -4622,6 +4624,10 @@ public:
     }
     eOSState ProcessKey(eKeys Key) override
     {
+        if(verifyOnOpen){
+            verifyOnOpen=false;
+            if(pairingClient.origin()==coreUrl)runPairing(PairAction::Test);
+        }
         updatePairing();
         if(HasSubMenu()){
             static_cast<PairingDialog*>(SubMenu())->Refresh();
@@ -4636,8 +4642,10 @@ public:
             return cMenuSetupPage::ProcessKey(Key);
         if(item==startItem){
             if(!pairingJob.valid()){
+                const bool alreadyConnected=pairingConnected()&&pairingClient.origin()==coreUrl;
                 selectServer();
-                if(pairing.state!="pending"||pairing.origin!=coreUrl)runPairing(PairAction::Start);
+                if(alreadyConnected)runPairing(PairAction::Test);
+                else if(pairing.state!="pending"||pairing.origin!=coreUrl)runPairing(PairAction::Start);
             }
             return AddSubMenu(new PairingDialog(*this));
         }
