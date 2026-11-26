@@ -1,4 +1,6 @@
 #include "../artwork_decode.h"
+#include "../cinematic_home.h"
+#include "../home_layout.h"
 
 #include <cassert>
 #include <cstdio>
@@ -9,6 +11,22 @@
 
 int main()
 {
+    using suiteosd::HomeLayout;
+    const auto bg=suiteosd::CinematicBackground(800,450,136);
+    assert(bg.valid()&&bg.argb[0]!=bg.argb[400]);
+    for(auto px:bg.argb)assert((px>>24)==255);
+    const int cx=HomeLayout::cardX(0,true)/2,cy=(HomeLayout::top+HomeLayout::titleHeight)/2;
+    auto normal=suiteosd::CinematicFrame(bg,cx,cy,66,99,8,suiteosd::CinemaStyle::Poster,.5);
+    auto focused=suiteosd::CinematicFrame(bg,cx,cy,66,99,8,suiteosd::CinemaStyle::Focus,.5);
+    assert(normal.x==focused.x&&normal.y==focused.y);
+    assert(normal.image.width==focused.image.width&&normal.image.height==focused.image.height);
+    assert(normal.image.argb!=focused.image.argb);
+    const auto sample=focused.image.argb[size_t(cy+20-focused.y)*focused.image.width+cx-focused.x];
+    assert((sample&255u)>200u);
+    suiteosd::Artwork fixture{64,97,std::vector<uint32_t>(64*97,0xFFFF0000u)};
+    suiteosd::CinematicArtwork(focused,fixture,cx+1,cy+1,cx,cy,66,99,8,2);
+    assert(focused.image.argb[size_t(cy+30-focused.y)*focused.image.width+cx+30-focused.x]==0xFFFF0000u);
+    for(auto px:focused.image.argb)assert((px>>24)==255);
     const std::string pngPath = "suiteosd-artwork-test.png";
     const std::string jpegPath = "suiteosd-artwork-test.jpg";
     const std::string invalidPath = "suiteosd-artwork-broken.png";

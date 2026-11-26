@@ -5,14 +5,15 @@
 namespace suiteosd {
 struct HomeLayout {
     static constexpr int columns=6, rows=3;
-    static constexpr int cardWidth=140, cardHeight=210, gap=28;
-    static constexpr int left=157, top=83, rowStep=246, titleHeight=30;
-    static constexpr int radius=12;
-    static constexpr int posterW=cardWidth-12, posterH=cardHeight-8;
-    static constexpr int right=1184, rightWidth=372;
-    static constexpr int videoX=1197, videoY=105, videoW=338, videoH=190;
-    static constexpr int detailY=354, detailBottom=820;
-    static constexpr int cardX(int column){return left+column*(cardWidth+gap);}
+    static constexpr int cardWidth=132, cardHeight=198, gap=36;
+    static constexpr int left=150, top=82, rowStep=252, titleHeight=38;
+    static constexpr int radius=16;
+    static constexpr int posterW=cardWidth-2, posterH=cardHeight-2;
+    static constexpr int right=1156, rightWidth=426;
+    static constexpr int liveY=94, liveH=211;
+    static constexpr int videoX=1193, videoY=96, videoW=352, videoH=198;
+    static constexpr int detailY=323, detailBottom=850;
+    static constexpr int cardX(int column,bool expanded=false){return (expanded?282:left)+column*(cardWidth+(expanded?14:gap));}
     static constexpr int headingY(int row){return top+row*rowStep;}
     static constexpr int firstRow(int section,int sections){
         return std::clamp(section-rows+1,1,std::max(1,sections-rows));
@@ -26,6 +27,7 @@ struct HomeLayout {
 };
 static_assert(HomeLayout::cardWidth*3==HomeLayout::cardHeight*2);
 static_assert(HomeLayout::cardX(HomeLayout::columns-1)+HomeLayout::cardWidth<HomeLayout::right);
+static_assert(HomeLayout::cardX(HomeLayout::columns-1,true)+HomeLayout::cardWidth<HomeLayout::right);
 static_assert(HomeLayout::headingY(2)+HomeLayout::titleHeight+HomeLayout::cardHeight<836);
 static_assert(HomeLayout::videoY+HomeLayout::videoH<HomeLayout::detailY);
 }
