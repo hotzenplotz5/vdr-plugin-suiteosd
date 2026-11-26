@@ -51,7 +51,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.7-dev";
+static const char *VERSION = "0.9.8-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -543,7 +543,6 @@ private:
     std::string browserNotice;
     cDevice *scaledDevice = nullptr;
     cRect scaledRect;
-    bool scaledForHome = false;
     std::string notice;
     bool recordingDetails = false;
     bool homeProgrammeDetails = false;
@@ -1311,7 +1310,7 @@ private:
         int y = 89 - scroll;
         if (y + 275 < 80 || y > 830)
             return;
-        panel(154, y, 1415, 270, nav.section == 0 && !nav.sideFocused, kSurface);
+        panel(154, y, 1000, 270, nav.section == 0 && !nav.sideFocused, kSurface);
         suiteosd::TimelineChannel logo; logo.name=data.live.channel;
         drawChannelLogo(logo,187,y+22,130,88);
         print(337, y + 23, "LIVE-TV  ·  KANAL " + std::to_string(data.live.channelNumber),
@@ -1347,19 +1346,7 @@ private:
             } else line = candidate;
         }
         if (lineY <= y + 200) print(845, lineY, line, fontSmall, kText, 242);
-        // Same primary video plane already proven in the recording browser.
-        panel(1124, y + 18, 400, 225, false, kCardAlt);
-        if (scaledForHome && scaledDevice && !scaledRect.IsEmpty() && scroll == 0) {
-            osd->DrawRectangle(scaledRect.X(), scaledRect.Y(),
-                scaledRect.X() + scaledRect.Width() - 1,
-                scaledRect.Y() + scaledRect.Height() - 1, clrTransparent);
-        } else {
-            suiteosd::TimelineChannel logoChannel;
-            logoChannel.name = data.live.channel;
-            drawChannelLogo(logoChannel, 1264, y + 57, 120, 65);
-            print(1150, y + 156, data.live.channel, fontBody, kText, 350);
-            print(1150, y + 189, "Live-TV", fontSmall, kMuted, 350);
-        }
+
     }
 
     const suiteosd::Artwork &programmePoster(const Programme &item)
@@ -1399,7 +1386,7 @@ private:
     void drawPrograms(int section, int y, const char *heading, const std::vector<Programme> &items)
     {
         print(155,y,heading,fontLarge);
-        for(int col=0;col<7 && nav.firstCard[section]+col<int(items.size());++col){
+        for(int col=0;col<suiteosd::Navigation::kHomeVisibleCards && nav.firstCard[section]+col<int(items.size());++col){
             int index=nav.firstCard[section]+col, x=157+col*200, top=y+40;
             const auto &item=items[index];
             bool focus=!nav.sideFocused&&nav.section==section&&nav.card[section]==index;
@@ -1542,10 +1529,10 @@ private:
         recordingBrowser.Refresh();
     }
 
-    void startLivePreview(bool home)
+    void startLivePreview()
     {
         if (!gLivePreviewEnabled) { restoreLivePreview(); return; }
-        if (scaledDevice && scaledForHome == home) return;
+        if (scaledDevice) return;
         restoreLivePreview();
         cDevice *device = cDevice::PrimaryDevice();
         // Live DVB transfer mode has an attached player too. Only exclude
@@ -1554,9 +1541,8 @@ private:
             return;
         const int left = cOsd::OsdLeft();
         const int top = cOsd::OsdTop();
-        const cRect requested = home ?
-            cRect(left + X(1124), top + Y(107), X(400), Y(225)) :
-            cRect(left + X(1197), top + Y(151), X(338), Y(190));
+        // Reuse the exact rectangle verified by the user in recordings.
+        const cRect requested(left + X(1197), top + Y(151), X(338), Y(190));
         const cRect available = device->CanScaleVideo(requested);
         if (available.IsEmpty() ||
             available.X() < requested.X() || available.Y() < requested.Y() ||
@@ -1564,7 +1550,6 @@ private:
             available.Y() + available.Height() > requested.Y() + requested.Height())
             return; // never cover surrounding controls with the video plane
         scaledDevice = device;
-        scaledForHome = home;
         // The device uses screen coordinates, the OSD draws locally.
         scaledRect = cRect(available.X() - left, available.Y() - top,
                            available.Width(), available.Height());
@@ -1576,7 +1561,6 @@ private:
         if (!scaledDevice) return;
         scaledDevice->ScaleVideo(cRect::Null);
         scaledDevice = nullptr;
-        scaledForHome = false;
         scaledRect = cRect::Null;
     }
 
@@ -1606,9 +1590,9 @@ private:
         nav.section = 0;
     }
 
-    const suiteosd::Artwork &recordingPoster(const Recording &rec)
+    const suiteosd::Artwork &recordingPoster(const Recording &rec,int w=184,int h=240)
     {
-        const std::string key="rec:"+rec.fileName;
+        const std::string key="rec:"+rec.fileName+":"+std::to_string(w)+":"+std::to_string(h);
         auto it=homeArtwork.find(key);if(it!=homeArtwork.end())return it->second;
         if(homeArtwork.size()>=48)homeArtwork.clear();
         std::string path;
@@ -1622,20 +1606,25 @@ private:
                         cOrientations(eOrientation::portrait,eOrientation::landscape),true).path;
             }
         }
-        return homeArtwork.emplace(key,suiteosd::LoadDetailArtwork(path,X(184),Y(240))).first->second;
+        return homeArtwork.emplace(key,suiteosd::LoadDetailArtwork(path,X(w),Y(h))).first->second;
     }
     void drawRecordings(int y)
     {
         print(155,y,"Neu aufgenommen",fontLarge);
         const int first=nav.firstCard[suiteosd::Navigation::kNew];
-        for(int col=0;col<7 && first+col<int(data.recordings.size());++col){
+        for(int col=0;col<suiteosd::Navigation::kHomeVisibleCards && first+col<int(data.recordings.size());++col){
             const auto &item=data.recordings[first+col];
             int x=157+col*200,top=y+40;
             homeCard(x,top,188,306,!nav.sideFocused&&nav.section==suiteosd::Navigation::kNew&&nav.card[suiteosd::Navigation::kNew]==first+col);
             homePicture(recordingPoster(item),x+2,top+2,184,240);
             const auto &meta=metaFor(item);
-            print(x+9,top+245,meta.episode.empty()?(meta.title.empty()?item.baseName:meta.title):meta.episode,fontBody,kText,172);
-            print(x+9,top+277,recordingDate(item.start),fontSmall,kMuted,172);
+            const auto title=meta.episode.empty()?(meta.title.empty()?item.baseName:meta.title):meta.episode;
+            const auto lines=suiteosd::HeroLines(title,fontBody,X(172));
+            for(int row=0;row<2 && row<int(lines.size());++row)
+                print(x+9,top+242+row*24,lines[row],fontBody,kText,172);
+            print(x+9,top+290,meta.season>0&&meta.episodeNumber>0?
+                "S"+std::to_string(meta.season)+"E"+std::to_string(meta.episodeNumber):
+                recordingDate(item.start),fontSmall,kMuted,172);
         }
     }
 
@@ -1714,7 +1703,7 @@ private:
                           std::max(0,int(lines.size())-suiteosd::kHeroTextRows));
             draw(); return true;
         }
-        if (base == kDown && !detailImageFor(*rec).metadata.people.empty()) {
+        if ((base == kDown || (base == kGreen && !homeResumeDetail)) && !detailImageFor(*rec).metadata.people.empty()) {
             detailCastNav.Open();
             draw();
             return true;
@@ -1759,6 +1748,31 @@ private:
         print(409, 512, "OK: Löschen   ·   Zurück: Abbrechen", fontBody, kFocus);
     }
 
+    void drawLivePreviewPanel()
+    {
+        // Live-TV preview is VDR's existing primary video plane, not a
+        // streamed thumbnail or another player.
+        panel(1184, 105, 372, 667, false, kSurface);
+        print(1207, 115, "LIVE-TV", fontBody, kFocus);
+        if (scaledDevice && !scaledRect.IsEmpty()) {
+            // Carve an actual transparent OSD hole above the scaled video.
+            // This must happen AFTER the background was painted.
+            osd->DrawRectangle(
+                scaledRect.X(), scaledRect.Y(),
+                scaledRect.X() + scaledRect.Width() - 1,
+                scaledRect.Y() + scaledRect.Height() - 1, clrTransparent);
+        } else {
+            panel(1197, 151, 338, 190, false, kCard);
+            suiteosd::TimelineChannel logoChannel;
+            logoChannel.name = data.live.channel;
+            drawChannelLogo(logoChannel, 1207, 175, 318, 86);
+            print(1217, 273, "Live-TV läuft weiter", fontBody, kText, 300);
+        }
+        print(1202, 365, data.live.channel.empty() ? "Live-TV" : data.live.channel,
+              fontBody, kText, 322);
+        print(1202, 403, data.live.title, fontSmall, kMuted, 322);
+    }
+
     void drawRecordingBrowser()
     {
         fill(0, 0, 1599, 899, kBackground);
@@ -1798,62 +1812,29 @@ private:
             if (index >= int(recordingBrowser.entries.size())) break;
             const auto &entry = recordingBrowser.entries[index];
             const int x = 157 + (i % columns) * 247;
-            const int y = 236 + (i / columns) * 187;
+            const int y = 236 + (i / columns) * 291;
             const bool focus = !nav.sideFocused && !recordingBrowser.tabsFocused &&
                                index == recordingBrowser.selected;
-            panel(x, y, 224, 167, focus, kCardAlt);
+            homeCard(x,y,224,276,focus);
             if (entry.kind != suiteosd::BrowserEntry::Kind::Recording) {
-                fill(x + 12, y + 12, x + 211, y + 93, kLine);
-                print(x + 27, y + 26,
-                      entry.kind == suiteosd::BrowserEntry::Kind::Folder ?
-                      "ORDNER" : "GENRE", fontBody, kFocus);
-                print(x + 16, y + 105, entry.title, fontBody, kText, 197);
-                print(x + 16, y + 143, std::to_string(entry.count) + " Aufnahmen",
-                      fontSmall, kMuted, 194);
+                print(x+16,y+76,entry.title,fontBody,kText,192);
+                print(x+16,y+125,std::to_string(entry.count)+" Aufnahmen",fontSmall,kMuted,192);
                 continue;
             }
             const Recording *rec = findRecording(entry.fileName);
             if (!rec) continue;
             const RecordingMeta &meta = metaFor(*rec);
-            fill(x + 13, y + 10, x + 211, y + 106, kLine);
-            if (meta.artwork.valid()) {
-                const suiteosd::Artwork &art = meta.artwork;
-                cImage image(cSize(art.width, art.height), art.argb.data());
-                const int centerX = X(x + 112) - art.width / 2;
-                const int centerY = Y(y + 58) - art.height / 2;
-                osd->DrawImage(cPoint(centerX, centerY), image);
-            } else
-                print(x + 27, y + 37, "AUFNAHME", fontBody, kMuted);
-            print(x + 15, y + 113, meta.title.empty() ? entry.title : meta.title,
-                  fontBody, kText, 192);
-            print(x + 15, y + 144,
-                  meta.episode.empty() ? rec->time : meta.episode,
-                  fontSmall, kMuted, 194);
+            homePicture(recordingPoster(*rec,204,194),x+10,y+8,204,194);
+            const auto lines=suiteosd::HeroLines(meta.title.empty()?entry.title:meta.title,fontBody,X(192));
+            for(int row=0;row<2 && row<int(lines.size());++row)
+                print(x+15,y+201+row*24,lines[row],fontBody,kText,192);
+            print(x+15,y+251,meta.episode.empty()?recordingDate(rec->start):meta.episode,
+                  fontSmall,kMuted,192);
         }
         if (recordingBrowser.entries.empty())
             print(178, 345, "Keine Aufnahmen in dieser Ansicht", fontBody, kMuted, 922);
 
-        // Live-TV preview is VDR's existing primary video plane, not a
-        // streamed thumbnail or another player.
-        panel(1184, 105, 372, 667, false, kSurface);
-        print(1207, 115, "LIVE-TV", fontBody, kFocus);
-        if (scaledDevice && !scaledRect.IsEmpty()) {
-            // Carve an actual transparent OSD hole above the scaled video.
-            // This must happen AFTER the background was painted.
-            osd->DrawRectangle(
-                scaledRect.X(), scaledRect.Y(),
-                scaledRect.X() + scaledRect.Width() - 1,
-                scaledRect.Y() + scaledRect.Height() - 1, clrTransparent);
-        } else {
-            panel(1197, 151, 338, 190, false, kCard);
-            suiteosd::TimelineChannel logoChannel;
-            logoChannel.name = data.live.channel;
-            drawChannelLogo(logoChannel, 1207, 175, 318, 86);
-            print(1217, 273, "Live-TV läuft weiter", fontBody, kText, 300);
-        }
-        print(1202, 365, data.live.channel.empty() ? "Live-TV" : data.live.channel,
-              fontBody, kText, 322);
-        print(1202, 403, data.live.title, fontSmall, kMuted, 322);
+        drawLivePreviewPanel();
         const Recording *selected = browserSelectedRecording();
         if (selected) {
             const RecordingMeta &meta = metaFor(*selected);
@@ -3261,7 +3242,7 @@ private:
         } else {
             searchActive = false;
             if(nav.section>=3&&!homeLogin)loadHomeRail(nav.section);
-            nav.KeepVisible(7,count(nav.section));
+            nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards,count(nav.section));
             detailCastNav = searchOriginCast;
             detailScroll = searchOriginScroll;
         }
@@ -3416,7 +3397,7 @@ private:
                         closeSearch();homeLogin=false;homeRails.clear();
                         recommendedGenreId.clear();recommendedGenreTitle.clear();
                         loadHomeRail(nav.section,true);
-                        nav.KeepVisible(7,count(nav.section));
+                        nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards,count(nav.section));
                         if(!homeCollections.empty())loadHomeCollection(homeCollections.back());
                     }else{homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();fetchSearch();}
                 }
@@ -3567,17 +3548,17 @@ private:
     }
     void drawCoreCards(const HomeRail &rail,int first,int selected,int y,bool focus,bool moreCard=false) {
         if(!rail.status.ok){
-            homeCard(157,y+40,1390,112,focus);
+            homeCard(157,y+40,990,112,focus);
             print(180,y+58,rail.status.http==401?"OK: Bei VDR-Suite anmelden":
-                rail.attempted?"OK: Erneut laden":"OK: Daten laden",fontBody,kText,1310);
-            if(rail.attempted&&rail.status.http!=401)print(180,y+93,rail.status.message,fontSmall,kMuted,1310);
+                rail.attempted?"OK: Erneut laden":"OK: Daten laden",fontBody,kText,940);
+            if(rail.attempted&&rail.status.http!=401)print(180,y+93,rail.status.message,fontSmall,kMuted,940);
             return;
         }
         if(rail.page.cards.empty()&&!(moreCard&&rail.page.hasMore)){
             print(175,y+65,"Keine Einträge vorhanden",fontBody,kMuted);return;
         }
         const int size=int(rail.page.cards.size());
-        for(int col=0;col<7&&first+col<size+(moreCard&&rail.page.hasMore?1:0);++col){
+        for(int col=0;col<suiteosd::Navigation::kHomeVisibleCards&&first+col<size+(moreCard&&rail.page.hasMore?1:0);++col){
             int index=first+col,x=157+col*200,top=y+40;
             if(index==size){
                 homeCard(x,top,188,306,focus&&index==selected);
@@ -3606,6 +3587,18 @@ private:
                 print(x+12,top+76,card.subtitle,fontSmall,kMuted,164);
             }
         }
+    }
+    int homeRailHeight(int section) const {
+        if(section==1||section==2)return 366;
+        auto it=homeRails.find(section);
+        if(section==suiteosd::Navigation::kNew &&
+           (it==homeRails.end()||!it->second.status.ok))return 366;
+        if(it==homeRails.end()||!it->second.status.ok||it->second.page.cards.empty())return 186;
+        const auto &cards=it->second.page.cards;
+        if(!it->second.page.hasMore && std::none_of(cards.begin(),cards.end(),[](const auto &c){
+            return c.kind==suiteosd::CoreHomeCard::Kind::Recording;
+        }))return 206;
+        return 366;
     }
     void drawHomeRail(int section,int y) {
         if(section==1){drawPrograms(1,y,"Was läuft jetzt",data.now);return;}
@@ -3681,10 +3674,10 @@ private:
     void drawHomeCollection(){
         const auto &c=homeCollections.back();
         fill(0,0,1599,899,kBackground);drawHeader();
-        print(155,96,c.title,fontTitle,kText,1390);
+        print(155,96,c.title,fontTitle,kText,985);
         drawCoreCards(c.rail,c.first,c.selected,190,true);
-        print(155,600,"Links/Rechts: Auswahl · OK: Öffnen · Zurück",fontBody,kFocus,1400);
-        print(155,650,"Gelb: Vorherige Seite · Blau: Nächste Seite",fontBody,kText,1400);
+        print(155,600,"Links/Rechts: Auswahl · OK: Öffnen · Zurück",fontBody,kFocus,985);
+        print(155,650,"Gelb: Vorherige Seite · Blau: Nächste Seite",fontBody,kText,985);
         if(!notice.empty())print(155,725,notice,fontSmall,kFocus,1390);
         drawSidebar();
     }
@@ -3703,7 +3696,7 @@ private:
         }else if(key==kLeft||key==kRight){
             c.selected=std::clamp(c.selected+(key==kLeft?-1:1),0,std::max(0,int(c.rail.page.cards.size())-1));
             if(c.selected<c.first)c.first=c.selected;
-            if(c.selected>=c.first+7)c.first=c.selected-6;
+            if(c.selected>=c.first+suiteosd::Navigation::kHomeVisibleCards)c.first=c.selected-suiteosd::Navigation::kHomeVisibleCards+1;
         }
         draw();return osContinue;
     }
@@ -3754,10 +3747,9 @@ private:
             return;
         }
         const bool home = !photosActive && !settingsActive && !recordingsActive && !timelineActive;
-        if (home && homeCollections.empty() && !recordingDetails && !homeProgrammeDetails && nav.section <= 1)
-            startLivePreview(true);
-        else if (recordingsActive && !browserDetails && !browserDeleteConfirm)
-            startLivePreview(false);
+        if ((home && !recordingDetails && !homeProgrammeDetails) ||
+            (recordingsActive && !browserDetails && !browserDeleteConfirm))
+            startLivePreview();
         else
             restoreLivePreview();
         if (photosActive) {
@@ -3783,13 +3775,17 @@ private:
         fill(0, 0, 1599, 899, kBackground);
         drawHeader();
         if(!homeCollections.empty()){
-            drawHomeCollection();drawRecordingDetails();osd->Flush();return;
+            drawHomeCollection();
+            if(!recordingDetails)drawLivePreviewPanel();
+            drawRecordingDetails();osd->Flush();return;
         }
         if(nav.section<=1){
             drawHero(0);drawHomeRail(1,390);
         }else{
-            drawHomeRail(nav.section-1,83);drawHomeRail(nav.section,449);
+            drawHomeRail(nav.section-1,83);
+            drawHomeRail(nav.section,83+homeRailHeight(nav.section-1));
         }
+        drawLivePreviewPanel();
         drawFooter();
         drawSidebar();
         drawRecordingDetails();
@@ -3992,7 +3988,7 @@ public:
             recordingDetailImages.clear();
             homeArtwork.clear();
             homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();loadHomeRail(nav.section);
-            nav.KeepVisible(7, count(nav.section));
+            nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
             draw();
             return osContinue;
@@ -4004,7 +4000,7 @@ public:
         case kLeft: direction = suiteosd::Direction::Left; break;
         case kRight: direction = suiteosd::Direction::Right; break;
         case kOk: direction = suiteosd::Direction::Select; break;
-        case kBack: return nav.Move(suiteosd::Direction::Back, count(nav.section), 7) ==
+        case kBack: return nav.Move(suiteosd::Direction::Back, count(nav.section), suiteosd::Navigation::kHomeVisibleCards) ==
                            suiteosd::Activation::Close ? osEnd : (draw(), osContinue);
         default: return osContinue;
         }
@@ -4020,7 +4016,7 @@ public:
             nav.sideIndex == 0)
             target = 0;
         if(target>=3)loadHomeRail(target);
-        const eOSState result = action(nav.Move(direction, count(target), 7));
+        const eOSState result = action(nav.Move(direction, count(target), suiteosd::Navigation::kHomeVisibleCards));
         if (result != osContinue)
             return result;
         draw();

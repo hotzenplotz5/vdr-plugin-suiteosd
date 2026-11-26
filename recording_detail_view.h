@@ -107,7 +107,7 @@ inline void DrawRecordingHero(cOsd *osd, int width, int height,
             " / " + std::to_string(lines.size()),smallFont,muted,800);
 
     rect(0,581,1600,239,dark);
-    text(48,590,"Schauspieler & Mitwirkende",bodyFont,white,1250);
+    text(48,590,nav ? (nav->active ? "Schauspieler & Mitwirkende  ·  OK: Person suchen" : "Schauspieler & Mitwirkende  ·  ↓ auswählen") : "Schauspieler & Mitwirkende",bodyFont,white,1250);
     if (detail.people.empty()) {
         text(48,650,"Keine Mitwirkenden verfügbar",bodyFont,muted,1450);
         return;

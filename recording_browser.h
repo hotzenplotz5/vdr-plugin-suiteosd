@@ -35,7 +35,7 @@ struct RecordingBrowser {
     enum class View { Folders, Genres, All };
     enum class Sort { Newest, Name };
     static constexpr int kColumns = 4;
-    static constexpr int kVisibleRows = 3;
+    static constexpr int kVisibleRows = 2;
     static constexpr int kVisibleItems = kColumns * kVisibleRows;
 
     View view = View::Folders;

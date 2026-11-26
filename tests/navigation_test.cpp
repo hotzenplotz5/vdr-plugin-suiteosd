@@ -42,6 +42,11 @@ int main()
     assert(n.section == 0 && !n.sideFocused);
     assert(n.Move(Direction::Back, 1, 4) == Activation::Close);
 
+    Navigation posterRails;
+    posterRails.Move(Direction::Down, 12, Navigation::kHomeVisibleCards);
+    for(int i=0;i<5;++i)posterRails.Move(Direction::Right,12,Navigation::kHomeVisibleCards);
+    assert(posterRails.card[1]==5 && posterRails.firstCard[1]==1);
+
     Navigation direct;
     direct.Move(Direction::Left, 1, 4);
     direct.Move(Direction::Down, 1, 4);

@@ -135,3 +135,7 @@ Nutzerreferenz: sieben mobile Webfrontend-Screenshots (Home, Jetzt/Danach, Weite
 ### Standard-Hauptmenü ohne VDR-Patch
 
 VDR 2.8.3 verarbeitet `kMenu` vor Plugin-`ProcessKey`; `User0` bis `User9` werden dagegen über `KeyMacros` verarbeitet und `@suiteosd` öffnet `MainMenuAction`. Eine freie User-Taste in `keymacros.conf` auf `@suiteosd` legen und die physische Menu-Zuordnung in `remote.conf` auf genau diese User-Taste umbenennen. Keine bestehende fremde User-Taste überschreiben; Originaldateien vor dem Wechsel sichern. Der neue Sidebar-Eintrag **VDR-Menü** stellt den klassischen Einstieg über den unveränderten `kMenu` bereit. Zurück schließt Home; erneutes physisches Menu öffnet Home neu. Die Änderung ist eine Host-Konfiguration, keine automatische Paketmutation.
+
+## Hardware-Feedback 26.11.2026
+
+Die native Video-Geometrie des Aufnahmenbrowsers war auf dem TV erfolgreich. Home und Sammlungen nutzen nun dieselbe rechte Vorschaufläche und halten sie auch beim Wechsel der Reihen. Die linke Fläche zeigt fünf Karten; der Browser nutzt zwei statt drei Reihen mit höherem Posterbereich. Die Anmelde-/Genre-/Ordner-Reihen belegen weniger Höhe. Die interaktive Detailseite markiert den Einstieg in die Cast-Navigation explizit. Die passive VDR-Aufnahmeinfo kann weiterhin keine eigenen Tasten verarbeiten. Cover und manuelle Core-Metadatenzuordnungen sind noch nicht vollständig portiert. Keine Änderungen an Menü-Tastenbelegung, Ausgabeplugin oder Boot-Konfiguration. Hardwaretest ausstehend.

@@ -86,6 +86,7 @@ int main()
     many.tabsFocused = false;
     for (int i = 0; i < 4; ++i) many.Move(0, 1);
     assert(many.selected == 16);
-    assert(many.firstVisible >= 4 && many.selected < many.firstVisible + many.kVisibleItems);
+    assert(many.firstVisible == 12 && many.selected < many.firstVisible + many.kVisibleItems);
+    assert(many.kVisibleItems == 8);
     assert(many.Back() == false);
 }
