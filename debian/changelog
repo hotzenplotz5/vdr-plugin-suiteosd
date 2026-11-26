@@ -1,3 +1,10 @@
+vdr-plugin-suiteosd (0.9.13~dev) unstable; urgency=medium
+
+  * Preserve successful pairing on repeated status checks and setup reopening.
+  * Show a clear success status and remove obsolete approval instructions.
+
+ -- VDR-Suite contributors <noreply@github.com>  Thu, 26 Nov 2026 21:15:00 +0100
+
 vdr-plugin-suiteosd (0.9.12~dev) unstable; urgency=medium
 
   * Use TVScraper recording titles and episode metadata on Home cards.

@@ -310,7 +310,7 @@ int main() {
     len=sizeof(bindTo);
     assert(getsockname(pairFd,reinterpret_cast<sockaddr*>(&bindTo),&len)==0);
     std::thread pairMock([&]{
-        for(int i=0;i<5;++i){
+        for(int i=0;i<7;++i){
             const int fd=accept(pairFd,nullptr,nullptr);assert(fd>=0);
             const auto req=readRequest(fd);
             assert(!req.headers.count("cookie")&&!req.headers.count("x-csrf-token"));
@@ -356,6 +356,15 @@ int main() {
     const auto issuedCopy=credential;
     // Retry storage only, then the authenticated GET. No second POST.
     assert(pairingClient.completePairing(pairing,credential,vault).ok&&credential.secret.empty());
+    // Repeat status after completion and after reopening setup. Both must
+    // authenticate with the existing credential, never issue a second POST.
+    assert(pairing.requestId.empty()&&pairing.token.empty());
+    const auto checked=pairingClient.completePairing(pairing,credential,vault);
+    assert(checked.ok&&checked.message=="Erfolgreich gekoppelt");
+    suiteosd::CoreAdminClient reopened(issuedCopy.origin);
+    const auto restoredStatus=reopened.completePairing(pairing,credential,vault);
+    assert(restoredStatus.ok&&restoredStatus.message=="Erfolgreich gekoppelt");
+    assert(!reopened.completePairing(pairing,credential,vault+"/missing").ok);
     pairMock.join();
     assert(suiteosd::loadDeviceProfile(vault,issuedCopy.origin,credential)&&credential.secret==issuedCopy.secret);
     pairingClient.setOrigin("https://other.invalid");

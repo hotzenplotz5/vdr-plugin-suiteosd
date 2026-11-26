@@ -787,6 +787,15 @@ CoreStatus CoreAdminClient::issuePairing(DevicePairing &pairing,
 }
 CoreStatus CoreAdminClient::completePairing(DevicePairing &pairing,DeviceCredential &issued,
                                            const std::string &profilePath) {
+    // A consumed bootstrap request is not an unpaired device. Reuse the
+    // saved exact-origin credential for all subsequent status checks.
+    if(issued.secret.empty() && pairing.requestId.empty() && pairing.token.empty()){
+        DeviceCredential saved;
+        if(!loadDeviceProfile(profilePath,origin_,saved)||!setDeviceCredential(saved))
+            return {false,0,"Keine gespeicherte Kopplung für diesen Server"};
+        const auto verified=testDevice();
+        return verified.ok?CoreStatus{true,200,"Erfolgreich gekoppelt"}:verified;
+    }
     if(issued.secret.empty()){
         const auto result=readPairing(pairing);
         if(!result.ok){
@@ -808,7 +817,7 @@ CoreStatus CoreAdminClient::completePairing(DevicePairing &pairing,DeviceCredent
     setDeviceCredential(issued);
     issued={};
     const auto verified=testDevice();
-    return verified.ok?CoreStatus{true,201,"Gekoppelt und verbunden – Rechte im Webfrontend vergeben"}:
+    return verified.ok?CoreStatus{true,201,"Erfolgreich gekoppelt"}:
         CoreStatus{true,201,"Kopplung gespeichert – Verbindungstest: "+verified.message};
 }
 bool CoreAdminClient::setDeviceCredential(const DeviceCredential &credential) {

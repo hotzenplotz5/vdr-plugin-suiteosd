@@ -54,7 +54,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.12-dev";
+static const char *VERSION = "0.9.13-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -4453,15 +4453,18 @@ private:
     std::chrono::steady_clock::time_point nextPairingCheck{};
     std::string visiblePairingStatus;
 
+    bool pairingConnected() const { return visiblePairingStatus=="Erfolgreich gekoppelt"; }
     std::string pairingCodeText() const
     {
+        if(pairingConnected())return "Verbunden";
         return pairing.userCode.empty()?"Kein offener Kopplungscode":suiteosd::kPairingCodePrefix+pairing.userCode;
     }
     void setStatus(const std::string &message)
     {
-        const std::string code=pairingCodeText();
-        if(visiblePairingStatus==message&&code==codeItem->Text())return;
+        const bool changed=visiblePairingStatus!=message;
         visiblePairingStatus=message;
+        const std::string code=pairingCodeText();
+        if(!changed&&code==codeItem->Text())return;
         stateItem->SetText(message.c_str());
         codeItem->SetText(code.c_str());
         if(!HasSubMenu()){
@@ -4486,7 +4489,7 @@ private:
         }
         if(manual||action!=PairAction::Complete)
             setStatus(action==PairAction::Start?"Kopplungsanfrage wird erstellt ...":
-                      action==PairAction::Test?"Geräteverbindung wird geprüft ...":"Freigabe wird geprüft ...");
+                      action==PairAction::Test||pairing.requestId.empty()?"Geräteverbindung wird geprüft ...":"Freigabe wird geprüft ...");
         try {
             pairingJob=std::async(std::launch::async,[origin,name,path,action,p=pairing,c=issued]() mutable {
                 PairResult out{origin,{},std::move(p),std::move(c)};
@@ -4504,7 +4507,7 @@ private:
                         out.message="Keine gespeicherte Kopplung für diesen Server";
                     else {
                         status=client.testDevice();
-                        out.message=status.ok?"Verbunden – Geräteanmeldung bestätigt":status.message;
+                        out.message=status.ok?"Erfolgreich gekoppelt":status.message;
                     }
                 }
                 return out;
@@ -4540,7 +4543,14 @@ private:
     }
     class PairingDialog final : public cOsdMenu {
         cMenuSuiteOsdSetup &owner;
-        cOsdItem *code=nullptr,*status=nullptr,*check=nullptr,*test=nullptr,*back=nullptr;
+        cOsdItem *code=nullptr,*status=nullptr,*help1=nullptr,*help2=nullptr,*check=nullptr,*back=nullptr;
+        void UpdateLabels()
+        {
+            const bool pending=!owner.pairing.userCode.empty();
+            help1->SetText(pending?"Im Webfrontend: Einstellungen > Wartende Geräte":"");
+            help2->SetText(pending?"Dieses Gerät genehmigen. Der Abschluss erfolgt automatisch.":"");
+            check->SetText(pending?"Status prüfen":"Verbindung prüfen");
+        }
     public:
         explicit PairingDialog(cMenuSuiteOsdSetup &parent)
             :cOsdMenu(suiteosd::kPairingDialogTitle),owner(parent)
@@ -4548,11 +4558,11 @@ private:
             SetMenuCategory(mcPluginSetup);
             Add(code=new cOsdItem(owner.pairingCodeText().c_str(),osUnknown,false));
             Add(status=new cOsdItem(owner.visiblePairingStatus.c_str(),osUnknown,false));
-            Add(new cOsdItem("Im Webfrontend: Einstellungen > Wartende Geräte",osUnknown,false));
-            Add(new cOsdItem("Dieses Gerät genehmigen. Der Abschluss erfolgt automatisch.",osUnknown,false));
-            Add(check=new cOsdItem("Status prüfen / Kopplung abschließen"),true);
-            Add(test=new cOsdItem("Verbindung testen"));
+            Add(help1=new cOsdItem("",osUnknown,false));
+            Add(help2=new cOsdItem("",osUnknown,false));
+            Add(check=new cOsdItem("Status prüfen"),true);
             Add(back=new cOsdItem("Zurück zu den Einstellungen"));
+            UpdateLabels();
         }
         void Refresh()
         {
@@ -4560,6 +4570,7 @@ private:
             if(nextCode==code->Text()&&owner.visiblePairingStatus==status->Text())return;
             code->SetText(nextCode.c_str());
             status->SetText(owner.visiblePairingStatus.c_str());
+            UpdateLabels();
             Display();
         }
         eOSState ProcessKey(eKeys key) override
@@ -4569,8 +4580,7 @@ private:
             if(item==back)return osBack;
             if(owner.pairingJob.valid())owner.setStatus("Gerätevorgang läuft ...");
             else if(item==check)owner.runPairing(PairAction::Complete);
-            else if(item==test)owner.runPairing(PairAction::Test);
-            Refresh();
+             Refresh();
             return osContinue;
         }
     };
@@ -4605,7 +4615,7 @@ public:
         Add(codeItem = new cOsdItem("Kein offener Kopplungscode",osUnknown,false));
         Add(new cOsdItem("Für entfernte Server HTTPS verwenden",osUnknown,false));
         Add(startItem = new cOsdItem("Gerät koppeln"));
-        Add(finishItem = new cOsdItem("Status prüfen / Kopplung abschließen"));
+        Add(finishItem = new cOsdItem("Status prüfen"));
         Add(testItem = new cOsdItem("Verbindung testen"));
         Add(forgetItem = new cOsdItem("Lokale Kopplung aufheben"));
         Add(new cOsdItem("Einstellungen speichern"));
