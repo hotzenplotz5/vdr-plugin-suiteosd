@@ -39,11 +39,11 @@ struct CoreEncoding {
 // server's ordering, counts, identities and match reasons; no second index.
 struct CoreSearchRecording {
     std::string id, backendId, nativeId, title, subtitle, startTime;
-    std::string person, role, character, matchReason, artworkUrl;
+    std::string person, role, character, matchReason, artworkUrl, personKey;
 };
 struct CoreSearchEvent {
     std::string eventId, backendId, channelId, channelName, title, subtitle;
-    std::string description, startTime, endTime, person, role, matchReason, artworkUrl;
+    std::string description, startTime, endTime, person, role, matchReason, artworkUrl, personKey;
 };
 struct CoreSearchPerson {
     std::string name, role, imageUrl;
@@ -62,6 +62,7 @@ struct CoreGlobalSearch {
     std::int64_t recordingTotal = 0, epgTotal = 0;
     int limit = 0, offset = 0;
     bool recordingHasMore = false, epgHasMore = false;
+    bool personProjection = false;
 };
 
 enum class HomeKind { Continue, Recent, New, Genres, Genre, Folders, Root, Movies };
@@ -152,6 +153,8 @@ public:
                             int limit, int offset, CoreGlobalSearch &results);
     CoreStatus publicSearch(const std::string &backendId, const std::string &query,
                             bool epg, int limit, int offset, CoreGlobalSearch &results);
+    CoreStatus publicPeopleSearch(const std::string &backendId, const std::string &query,
+                                  int limit, int offset, CoreGlobalSearch &results);
     CoreStatus publicRecordingDetail(const CoreSearchRecording &row, CoreSearchEvent &detail);
     CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,
                         int limit, int offset, int year, CoreHomePage &page);

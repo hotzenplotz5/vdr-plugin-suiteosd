@@ -486,7 +486,7 @@ private:
         std::string origin, profile, query;
         suiteosd::CoreSearchRecording recording;
         int offset=0, selected=0;
-        bool epg=false, detail=false;
+        bool epg=false, detail=false, people=false;
         unsigned long generation=0;
     };
     struct SearchReadback {
@@ -3565,6 +3565,9 @@ private:
                     result.status={false,0,"Keine Geräteanmeldung – Kopplung in den Plugin-Einstellungen prüfen"};
                 }else if(request.detail){
                     result.status=client.publicRecordingDetail(request.recording,result.detail);
+                }else if(request.people){
+                    result.status=client.publicPeopleSearch("default",request.query,
+                        suiteosd::SearchNavigation::pageSize,request.offset,result.results);
                 }else{
                     result.status=client.publicSearch("default",request.query,request.epg,
                         suiteosd::SearchNavigation::pageSize,request.offset,result.results);
@@ -3603,6 +3606,7 @@ private:
                         searchNav.page=suiteosd::SearchPage::PublicRecording;
                     }else{
                         globalSearch=std::move(result.results);
+                        searchNotice=result.status.message;
                     }
                 }else{
                     // Preserve the server reason code rather than guessing missing grants.
@@ -3629,14 +3633,11 @@ private:
         searchNav.page=suiteosd::SearchPage::Results;
         personSearch={};
         globalSearch={};
-        if(searchNav.tab==suiteosd::SearchTab::People){
-            searchNotice="Personenliste nicht über Public API v1 verfügbar – Aufnahmen und EPG nutzen";
-            return;
-        }
         SearchRead request;
         request.query=searchNav.query;
         request.offset=searchNav.offset;
         request.epg=searchNav.tab==suiteosd::SearchTab::Epg;
+        request.people=searchNav.tab==suiteosd::SearchTab::People;
         queueSearchRead(std::move(request));
     }
 
@@ -3786,7 +3787,8 @@ private:
                 } else {
                     const auto &row = globalSearch.people[i];
                     title = row.name;
-                    info = row.role + " · " + std::to_string(row.recordingCount) + " Aufnahmen auf dieser Suche";
+                    info = row.role + " · " + std::to_string(row.recordingCount) + " Aufnahmen · " +
+                        std::to_string(row.epgCount) + " EPG (diese Seite)";
                 }
                 print(180, y+7, title, fontBody, kText, 1320);
                 print(180, y+38, info, fontSmall, kMuted, 1320);

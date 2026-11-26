@@ -9,6 +9,7 @@
 #include <strings.h>
 #include <memory>
 #include <mutex>
+#include <map>
 #include <utility>
 #include <cerrno>
 #include <fcntl.h>
@@ -218,6 +219,7 @@ CoreSearchRecording readSearchRecording(json_object *entry) {
     row.person = stringOf(entry, "matchedPerson");
     row.role = stringOf(entry, "matchedRole");
     row.matchReason = stringOf(entry, "matchReason");
+    row.personKey = stringOf(entry, "personKey");
     row.artworkUrl = searchImage(entry, "artwork");
     auto *metadata = field(entry, "metadata");
     auto *presentation = field(metadata, "presentation");
@@ -289,6 +291,7 @@ bool parseGlobalSearch(const std::string &body, CoreGlobalSearch &output) {
         row.person = stringOf(entry, "matchedPerson");
         row.role = stringOf(entry, "matchedRole");
         row.matchReason = stringOf(entry, "matchReason");
+    row.personKey = stringOf(entry, "personKey");
         row.artworkUrl = searchImage(entry, "artwork");
         next.epg.push_back(std::move(row));
     }
@@ -959,6 +962,7 @@ CoreStatus CoreAdminClient::publicSearch(const std::string &backendId,const std:
         return invalid();
     CoreGlobalSearch next;
     next.query=query;next.backendId=backendId;next.status="ready";
+    next.personProjection=integerOf(root.get(),"personProjectionVersion",0)==1;
     const auto total=integerOf(page,"totalCount");
     next.limit=int(integerOf(page,"limit"));next.offset=int(integerOf(page,"offset"));
     if(total<0||next.limit!=limit||next.offset!=offset||
@@ -974,6 +978,12 @@ CoreStatus CoreAdminClient::publicSearch(const std::string &backendId,const std:
             row.channelId=stringOf(item,"channelId");row.title=stringOf(item,"title");
             row.subtitle=stringOf(item,"subtitle");row.startTime=stringOf(item,"startTime");
             row.endTime=stringOf(item,"endTime");
+            row.channelName=stringOf(item,"channelName");
+            row.description=stringOf(item,"description");
+            row.person=stringOf(item,"matchedPerson");
+            row.role=stringOf(item,"matchedRole");
+            row.matchReason=stringOf(item,"matchReason");
+            row.personKey=stringOf(item,"personKey");
             if(row.eventId.empty()||row.channelId.empty()||row.title.empty()||
                row.startTime.empty()||row.endTime.empty())return invalid();
             next.epg.push_back(std::move(row));
@@ -987,6 +997,46 @@ CoreStatus CoreAdminClient::publicSearch(const std::string &backendId,const std:
     if(epg){next.epgTotal=total;next.epgHasMore=boolOf(page,"hasMore");}
     else{next.recordingTotal=total;next.recordingHasMore=boolOf(page,"hasMore");}
     results=std::move(next);return last_;
+}
+CoreStatus CoreAdminClient::publicPeopleSearch(const std::string &backendId,const std::string &query,
+        int limit,int offset,CoreGlobalSearch &results) {
+    CoreGlobalSearch recordings,epg;
+    const auto recStatus=publicSearch(backendId,query,false,limit,offset,recordings);
+    const auto epgStatus=publicSearch(backendId,query,true,limit,offset,epg);
+    const bool recOk=recStatus.ok&&recordings.personProjection;
+    const bool epgOk=epgStatus.ok&&epg.personProjection;
+    if(!recOk&&!epgOk){
+        if(recStatus.ok||epgStatus.ok)
+            return (last_={false,0,"Personenprojektion im Core nicht verfügbar"});
+        return (last_=recStatus);
+    }
+    CoreGlobalSearch next;
+    next.query=query;next.backendId=backendId;next.limit=limit;next.offset=offset;
+    next.status=recOk&&epgOk?"ready":"partial";next.personProjection=true;
+    std::map<std::string,CoreSearchPerson> people;
+    auto add=[&](const auto &row,bool recording){
+        if(row.personKey.empty()||row.person.empty())return;
+        auto &person=people[row.personKey];
+        person.name=row.person;person.role=row.role;
+        if(recording)++person.recordingCount;else ++person.epgCount;
+    };
+    if(recOk){
+        for(const auto &row:recordings.recordings)add(row,true);
+        next.recordingTotal=recordings.recordingTotal;
+        next.recordingHasMore=recordings.recordingHasMore;
+        next.recordings=std::move(recordings.recordings);
+    }
+    if(epgOk){
+        for(const auto &row:epg.epg)add(row,false);
+        next.epgTotal=epg.epgTotal;next.epgHasMore=epg.epgHasMore;
+        next.epg=std::move(epg.epg);
+    }
+    for(auto &entry:people)next.people.push_back(std::move(entry.second));
+    results=std::move(next);
+    if(recOk&&epgOk)return (last_={true,200,""});
+    const auto &missing=recOk?epgStatus:recStatus;
+    return (last_={true,200,std::string(recOk?"EPG":"Aufnahmen")+" nicht vollständig: "+
+        (missing.ok?"Personenprojektion fehlt":"HTTP "+std::to_string(missing.http)+" · "+missing.message)});
 }
 CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row,CoreSearchEvent &detail) {
     if(!safeId(row.id)||row.id.compare(0,4,"rec_")!=0||row.backendId.empty())

@@ -310,7 +310,7 @@ int main() {
     len=sizeof(bindTo);
     assert(getsockname(pairFd,reinterpret_cast<sockaddr*>(&bindTo),&len)==0);
     std::thread pairMock([&]{
-        for(int i=0;i<12;++i){
+        for(int i=0;i<16;++i){
             const int fd=accept(pairFd,nullptr,nullptr);assert(fd>=0);
             const auto req=readRequest(fd);
             assert(!req.headers.count("cookie")&&!req.headers.count("x-csrf-token"));
@@ -348,6 +348,13 @@ int main() {
                 }else if(i==10){
                     assert(req.path=="/api/v1/search/recordings?backendId=default&query=Ewan%20McGregor&limit=20&offset=0");
                     answer(fd,R"({"code":"permission_denied"})","",403);
+                }else if(i==11||i==13){
+                    assert(req.path=="/api/v1/search/recordings?backendId=default&query=Will%20Smith&limit=20&offset=0");
+                    answer(fd,R"({"personProjectionVersion":1,"items":[{"kind":"recording","backendId":"default","recordingId":"rec_0123456789abcdef0123456789abcdef","title":"I, Robot","matchedPerson":"Will Smith","matchedRole":"actor","personKey":"will smith\nactor"}],"page":{"offset":0,"limit":20,"totalCount":1,"hasMore":false}})");
+                }else if(i==12||i==14){
+                    assert(req.path=="/api/v1/search/epg?backendId=default&query=Will%20Smith&limit=20&offset=0");
+                    if(i==14)answer(fd,R"({"code":"permission_denied"})","",403);
+                    else answer(fd,R"({"personProjectionVersion":1,"items":[{"kind":"epg","backendId":"default","eventId":"evt-a","channelId":"channel-a","title":"Film","startTime":"2026-11-26T20:00:00Z","endTime":"2026-11-26T20:30:00Z","matchedPerson":"Will Smith","matchedRole":"actor","personKey":"will smith\nactor"}],"page":{"offset":0,"limit":20,"totalCount":1,"hasMore":false}})");
                 }else{
                     assert(req.path=="/api/v1/events?backendId=default&domain=recordings");
                     assert(req.headers.at("accept")=="text/event-stream");
@@ -396,6 +403,12 @@ int main() {
     assert(publicResults.epgTotal==21&&publicResults.epg[0].subtitle=="Hobbit");
     const auto denied=reopened.publicSearch("default","Ewan McGregor",false,20,0,publicResults);
     assert(!denied.ok&&denied.http==403&&denied.message=="permission_denied");
+    assert(reopened.publicPeopleSearch("default","Will Smith",20,0,publicResults).ok);
+    assert(publicResults.people.size()==1&&publicResults.people[0].name=="Will Smith");
+    assert(publicResults.people[0].recordingCount==1&&publicResults.people[0].epgCount==1);
+    const auto partial=reopened.publicPeopleSearch("default","Will Smith",20,0,publicResults);
+    assert(partial.ok&&partial.message.find("permission_denied")!=std::string::npos);
+    assert(publicResults.status=="partial"&&publicResults.people.size()==1&&publicResults.people[0].epgCount==0);
     std::atomic<bool> stop{false},changed{false};
     reopened.recordingEvents("default",stop,changed);
     assert(changed.load());
