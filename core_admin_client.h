@@ -1,6 +1,7 @@
 #ifndef SUITEOSD_CORE_ADMIN_CLIENT_H
 #define SUITEOSD_CORE_ADMIN_CLIENT_H
 #include <cstdint>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -139,6 +140,9 @@ public:
                                const std::string &profilePath);
     bool setDeviceCredential(const DeviceCredential &credential);
     CoreStatus testDevice();
+    // One authorized SSE subscription. Only publish invalidation hints, never data.
+    void recordingEvents(const std::string &backend, const std::atomic<bool> &stop,
+                         std::atomic<bool> &changed);
     void forgetDevice() { device_ = {}; }
     bool hasDeviceCredential() const { return !device_.credentialId.empty(); }
 

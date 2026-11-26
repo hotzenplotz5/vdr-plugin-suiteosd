@@ -310,7 +310,7 @@ int main() {
     len=sizeof(bindTo);
     assert(getsockname(pairFd,reinterpret_cast<sockaddr*>(&bindTo),&len)==0);
     std::thread pairMock([&]{
-        for(int i=0;i<10;++i){
+        for(int i=0;i<11;++i){
             const int fd=accept(pairFd,nullptr,nullptr);assert(fd>=0);
             const auto req=readRequest(fd);
             assert(!req.headers.count("cookie")&&!req.headers.count("x-csrf-token"));
@@ -342,9 +342,15 @@ int main() {
                 }else if(i==8){
                     assert(req.path=="/api/v1/recordings/rec_0123456789abcdef0123456789abcdef?backendId=default");
                     answer(fd,R"({"recordingId":"rec_0123456789abcdef0123456789abcdef","backendId":"default","description":"Film"})");
-                }else{
+                }else if(i==9){
                     assert(req.path=="/api/v1/search/epg?backendId=default&query=Hobbit&limit=20&offset=20");
                     answer(fd,R"({"items":[{"kind":"epg","backendId":"default","eventId":"evt-a","channelId":"channel-a","title":"Young Sheldon","subtitle":"Hobbit","startTime":"2026-11-26T20:00:00Z","endTime":"2026-11-26T20:30:00Z"}],"page":{"offset":20,"limit":20,"totalCount":21,"hasMore":false}})");
+                }else{
+                    assert(req.path=="/api/v1/events?backendId=default&domain=recordings");
+                    assert(req.headers.at("accept")=="text/event-stream");
+                    const std::string body="event: hello\ndata: {\"backendId\":\"default\",\"authorizedDomains\":[\"recordings\"]}\n\n";
+                    const std::string response="HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"+body;
+                    assert(send(fd,response.data(),response.size(),MSG_NOSIGNAL)==ssize_t(response.size()));
                 }
             }
             close(fd);
@@ -384,6 +390,9 @@ int main() {
     assert(reopened.publicRecordingDetail(publicResults.recordings[0],detail).ok&&detail.description=="Film");
     assert(reopened.publicSearch("default","Hobbit",true,20,20,publicResults).ok);
     assert(publicResults.epgTotal==21&&publicResults.epg[0].subtitle=="Hobbit");
+    std::atomic<bool> stop{false},changed{false};
+    reopened.recordingEvents("default",stop,changed);
+    assert(changed.load());
     pairMock.join();
     assert(suiteosd::loadDeviceProfile(vault,issuedCopy.origin,credential)&&credential.secret==issuedCopy.secret);
     pairingClient.setOrigin("https://other.invalid");

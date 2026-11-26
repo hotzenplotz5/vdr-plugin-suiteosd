@@ -46,6 +46,7 @@
 #include <cmath>
 #include <chrono>
 #include <future>
+#include <thread>
 #include <ctime>
 #include <cstring>
 #include <map>
@@ -54,7 +55,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.15-dev";
+static const char *VERSION = "0.9.16-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -491,6 +492,11 @@ private:
         bool attempted = false;
     };
     std::map<int,HomeRail> homeRails;
+    std::atomic<bool> homeEventStop{false},homeEventChanged{false};
+    std::future<void> homeEventJob;
+    bool movieScanRequested=false,movieScanReady=false;
+    size_t movieScanOffset=0;
+    std::vector<std::pair<std::string,suiteosd::CoreHomeCard>> movieCandidates;
     std::string recommendedGenreId,recommendedGenreTitle;
     struct HomeCollection {
         suiteosd::HomeKind kind;
@@ -3813,6 +3819,65 @@ private:
     int currentYear() const {
         const auto now=time(nullptr);tm t{};return localtime_r(&now,&t)?1900+t.tm_year:2026;
     }
+    // Local TVScraper fallback, not the shared Core movie query. Work in
+    // small batches on the VDR owner thread; no artwork decoding/full UI scan.
+    void advanceMovieScan(){
+        if(!movieScanRequested||movieScanReady)return;
+        auto *scraper=cPluginManager::GetPlugin("tvscraper");
+        const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(12);
+        for(int n=0;scraper&&movieScanOffset<data.recordings.size()&&n<4&&
+            std::chrono::steady_clock::now()<until;++n){
+            const auto &rec=data.recordings[movieScanOffset++];
+            std::string title,release;
+            {
+                LOCK_RECORDINGS_READ;
+                const auto *r=Recordings?Recordings->GetByName(rec.fileName.c_str()):nullptr;
+                if(!r)continue;
+                cGetScraperVideo req(nullptr,r);
+                if(!scraper->Service("GetScraperVideo",&req)||!req.m_scraperVideo||
+                   req.m_scraperVideo->getVideoType()!=tMovie)continue;
+                req.m_scraperVideo->getOverview(&title,nullptr,&release,nullptr,nullptr,nullptr,nullptr);
+            }
+            if(release.size()<4||!std::all_of(release.begin(),release.begin()+4,[](char c){return c>='0'&&c<='9';}))continue;
+            const int year=std::stoi(release.substr(0,4)),now=currentYear();
+            if(year<now-4||year>now)continue;
+            suiteosd::CoreHomeCard card;
+            card.key=rec.fileName;card.title=title.empty()?rec.baseName:title;
+            card.recording.backendId="default";card.recording.nativeId=rec.fileName;
+            card.subtitle=release.substr(0,4);
+            movieCandidates.emplace_back(release,std::move(card));
+        }
+        if(scraper&&movieScanOffset<data.recordings.size())return;
+        movieScanReady=true;
+        std::stable_sort(movieCandidates.begin(),movieCandidates.end(),[](const auto &a,const auto &b){return a.first>b.first;});
+        auto it=homeRails.find(suiteosd::Navigation::kMovies);
+        if(it!=homeRails.end()&&!it->second.status.ok){
+            if(scraper&&nativeHomePage(suiteosd::HomeKind::Movies,"",0,it->second.page))
+                it->second.status={true,0,"Lokaler VDR / TVScraper"};
+            else it->second.status={false,0,"Filmmetadaten nicht verfügbar"};
+            const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
+            redrawHomeRail(suiteosd::Navigation::kMovies,first,true);
+            drawHomeFocusPanel();osd->Flush();
+        }
+    }
+    void startHomeEvents(){
+        const std::string origin=gCoreUrl,path=deviceProfilePath();
+        suiteosd::DeviceCredential saved;
+        if(!suiteosd::loadDeviceProfile(path,origin,saved))return;
+        try {
+            homeEventJob=std::async(std::launch::async,[this,origin,path]{
+                while(!homeEventStop.load()){
+                    suiteosd::DeviceCredential credential;
+                    suiteosd::CoreAdminClient client(origin);
+                    if(!suiteosd::loadDeviceProfile(path,origin,credential)||!client.setDeviceCredential(credential))break;
+                    client.recordingEvents("default",homeEventStop,homeEventChanged);
+                    // Reconnect transport only; no repeated snapshot/status GET.
+                    for(int i=0;i<30&&!homeEventStop.load();++i)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+            });
+        }catch(const std::exception &){}
+    }
     bool nativeHomePage(suiteosd::HomeKind kind,const std::string &key,int offset,
                         suiteosd::CoreHomePage &page) {
         using suiteosd::HomeKind;
@@ -3840,6 +3905,9 @@ private:
             }
         }else if(kind==HomeKind::New){
             for(const auto &rec:data.recordings)cards.push_back(recordingCard(rec));
+        }else if(kind==HomeKind::Movies){
+            if(!movieScanReady)return false;
+            for(const auto &movie:movieCandidates)cards.push_back(movie.second);
         }else if(kind==HomeKind::Folders||kind==HomeKind::Root||
                  kind==HomeKind::Genres||kind==HomeKind::Genre){
             suiteosd::RecordingBrowser browser;
@@ -3898,6 +3966,11 @@ private:
         rail.status=searchClient.homePage("default",homeRailKind(section),key,12,0,currentYear(),rail.page);
         if(!rail.status.ok&&nativeHomePage(homeRailKind(section),key,0,rail.page))
             rail.status={true,0,"Lokaler VDR"};
+        else if(!rail.status.ok&&section==suiteosd::Navigation::kMovies){
+            movieScanRequested=true;
+            rail.status.message=movieScanReady?"Filmmetadaten nicht verfügbar":"Filmmetadaten werden geladen …";
+        }else if(!rail.status.ok&&section==suiteosd::Navigation::kRecent)
+            rail.status.message="Verlauf: Public-v1-Lesevertrag fehlt";
     }
     void loadHomeCollection(HomeCollection &collection) {
         collection.rail.attempted=true;collection.rail.page={};
@@ -3916,8 +3989,8 @@ private:
     }
     void drawCoreCards(const HomeRail &rail,int first,int selected,int y,bool focus,bool moreCard=false) {
         if(!rail.status.ok){
-            print(homeLeft(),y+58,rail.status.http==401?"Gemeinsame Core-Daten noch nicht lokal verfügbar":
-                rail.attempted?"OK: Erneut laden":"OK: Daten laden",fontSmall,kMuted,940);
+            print(homeLeft(),y+58,!rail.attempted?"Wird geladen …":
+                rail.status.message.empty()?"Daten vorübergehend nicht verfügbar":rail.status.message,fontSmall,kMuted,940);
             return;
         }
         if(rail.page.cards.empty()&&!(moreCard&&rail.page.hasMore)){
@@ -3960,6 +4033,8 @@ private:
             drawRecordings(y);return;
         }
         cinematicHeading(y,homeRailTitle(section));
+        if(section==suiteosd::Navigation::kMovies&&it!=homeRails.end()&&it->second.status.ok&&it->second.status.http==0)
+            print(homeLeft()+520,y+4,"Lokaler VDR / TVScraper",fontCinemaMeta,kMuted,440);
         static const HomeRail empty;
         drawCoreCards(it==homeRails.end()?empty:it->second,nav.firstCard[section],nav.card[section],y,
             !nav.sideFocused&&nav.section==section,true);
@@ -4257,7 +4332,8 @@ private:
 public:
     ~cSuiteHome() override
     {
-
+        homeEventStop.store(true);
+        if(homeEventJob.valid())homeEventJob.wait();
         restoreLivePreview();
         delete osd;
         delete fontTitle;
@@ -4290,6 +4366,7 @@ public:
         fontCinemaCard = cFont::CreateFont("Sans:Bold",std::max(12,Y(18)));
         fontCinemaMeta = cFont::CreateFont("Sans",std::max(11,Y(16)));
         nav.section=1;
+        startHomeEvents();
         if (!gReplayPersonSearch.empty()) {
             searchFromReplay=true;
             const std::string name=std::exchange(gReplayPersonSearch,"");
@@ -4357,6 +4434,29 @@ public:
             draw();return osContinue;
         }
         if(base==kNone){
+            if(osd&&homeCollections.empty()){
+                if(homeEventChanged.exchange(false)){
+                    data=readVdrSnapshot();
+                    // Invalidate once on hello/change; keep visible last data until refreshed.
+                    for(auto &entry:homeRails)entry.second.attempted=false;
+                    movieScanReady=false;movieScanOffset=0;movieCandidates.clear();
+                    recordingGenres.clear();
+                }
+                const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
+                for(int row=first;row<first+HL::rows;++row){
+                    if(row>=3&&(homeRails.find(row)==homeRails.end()||!homeRails.at(row).attempted)){
+                        const auto prior=homeRails[row];
+                        loadHomeRail(row);
+                        auto &current=homeRails[row];
+                        if(!current.status.ok&&prior.status.ok&&current.status.http!=401&&current.status.http!=403)
+                            {current.page=prior.page;current.status=prior.status;}
+                        if(row==nav.section)nav.KeepVisible(HL::columns,count(row));
+                        redrawHomeRail(row,first,true);drawHomeFocusPanel();osd->Flush();
+                        break;
+                    }
+                }
+                advanceMovieScan();
+            }
             if(osd&&focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
                 drawHomeFocusPanel();osd->Flush();
             }
@@ -4397,7 +4497,8 @@ public:
             recordingDetailImages.clear();
             focusPreviews.clear();focusKey.clear();focusPending=false;
             cinematicComposites.clear();cinematicLogos.clear();homeArtwork.clear();homeRecordingTitles.clear();
-            homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();loadHomeRail(nav.section);
+            homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();
+            movieScanReady=false;movieScanOffset=0;movieCandidates.clear();loadHomeRail(nav.section);
             nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
             draw();

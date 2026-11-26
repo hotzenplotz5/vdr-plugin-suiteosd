@@ -23,6 +23,7 @@ namespace suiteosd {
 namespace {
 
 using Document = std::unique_ptr<json_object, decltype(&json_object_put)>;
+void initializeCurl() { static std::once_flag once; std::call_once(once, []{curl_global_init(CURL_GLOBAL_DEFAULT);}); }
 
 Document parse(const std::string &data) {
     if (data.empty()) return Document(nullptr, &json_object_put);
@@ -514,8 +515,7 @@ CoreAdminClient::Reply CoreAdminClient::request(
         reply.error = "Ungültige Core-URL";
         return reply;
     }
-    static std::once_flag curlOnce;
-    std::call_once(curlOnce, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
+    initializeCurl();
     CURL *curl = curl_easy_init();
     if (!curl) { reply.error = "HTTP-Client nicht verfügbar"; return reply; }
     struct curl_slist *headers = nullptr;
@@ -837,6 +837,83 @@ CoreStatus CoreAdminClient::testDevice() {
     if (!boolOf(field(root.get(),"authentication"),"authenticated"))
         return (last_ = {false,r.http,"Geräteanmeldung nicht bestätigt"});
     return last_;
+}
+
+void CoreAdminClient::recordingEvents(const std::string &backend,const std::atomic<bool> &stop,
+                                      std::atomic<bool> &changed) {
+    if(stop.load()||device_.credentialId.empty()||!localSocket_.empty())return;
+    initializeCurl();
+    CURL *curl=curl_easy_init();if(!curl)return;
+    struct Stream {
+        const std::string &backend;
+        const std::atomic<bool> &stop;
+        std::atomic<bool> &changed;
+        std::string buffer,event,data;
+        bool admitted=false;
+        void frame(){
+            if(event=="resync"&&admitted)changed.store(true);
+            else if(event=="hello"||event=="update"){
+                const auto root=parse(data);
+                if(stringOf(root.get(),"backendId")==backend){
+                    const bool hello=event=="hello";
+                    auto *domains=field(root.get(),hello?"authorizedDomains":"changedDomains");
+                    if(json_object_is_type(domains,json_type_array))
+                        for(size_t i=0;i<json_object_array_length(domains);++i){
+                            auto *d=json_object_array_get_idx(domains,i);
+                            if(json_object_is_type(d,json_type_string)&&
+                               std::string(json_object_get_string(d))=="recordings"){
+                                if(hello)admitted=true;
+                                if(admitted)changed.store(true);
+                            }
+                        }
+                }
+            }
+            event.clear();data.clear();
+        }
+        size_t feed(const char *bytes,size_t count){
+            if(stop.load()||count>65536||buffer.size()+count>65536)return 0;
+            buffer.append(bytes,count);
+            size_t pos;
+            while((pos=buffer.find('\n'))!=std::string::npos){
+                auto line=buffer.substr(0,pos);buffer.erase(0,pos+1);
+                if(!line.empty()&&line.back()=='\r')line.pop_back();
+                if(line.empty())frame();
+                else if(line.compare(0,6,"event:")==0)event=headerTrim(line.substr(6));
+                else if(line.compare(0,5,"data:")==0){
+                    if(data.size()+line.size()>65536)return 0;
+                    if(!data.empty())data+='\n';
+                    data+=headerTrim(line.substr(5));
+                }
+            }
+            return count;
+        }
+    } stream{backend,stop,changed,{},{},{},false};
+    const auto url=origin_+"/api/v1/events?backendId="+queryEncode(backend)+"&domain=recordings";
+    const auto auth="Authorization: VDR-Suite-Device "+device_.credentialId+"."+device_.secret;
+    curl_slist *headers=nullptr;
+    headers=curl_slist_append(headers,"Accept: text/event-stream");
+    headers=curl_slist_append(headers,auth.c_str());
+    curl_easy_setopt(curl,CURLOPT_URL,url.c_str());
+    curl_easy_setopt(curl,CURLOPT_HTTPHEADER,headers);
+    curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,+[](char *p,size_t n,size_t s,void *u)->size_t{
+        return static_cast<Stream*>(u)->feed(p,n*s);
+    });
+    curl_easy_setopt(curl,CURLOPT_WRITEDATA,&stream);
+    curl_easy_setopt(curl,CURLOPT_XFERINFOFUNCTION,+[](void *u,curl_off_t,curl_off_t,curl_off_t,curl_off_t)->int{
+        return static_cast<Stream*>(u)->stop.load()?1:0;
+    });
+    curl_easy_setopt(curl,CURLOPT_XFERINFODATA,&stream);
+    curl_easy_setopt(curl,CURLOPT_NOPROGRESS,0L);
+    curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT_MS,1200L);
+    curl_easy_setopt(curl,CURLOPT_LOW_SPEED_LIMIT,1L);
+    curl_easy_setopt(curl,CURLOPT_LOW_SPEED_TIME,35L);
+    curl_easy_setopt(curl,CURLOPT_TIMEOUT_MS,150000L);
+    curl_easy_setopt(curl,CURLOPT_FAILONERROR,1L);
+    curl_easy_setopt(curl,CURLOPT_FOLLOWLOCATION,0L);
+    curl_easy_setopt(curl,CURLOPT_NOSIGNAL,1L);
+    curl_easy_setopt(curl,CURLOPT_PROTOCOLS,long(CURLPROTO_HTTP|CURLPROTO_HTTPS));
+    (void)curl_easy_perform(curl);
+    curl_slist_free_all(headers);curl_easy_cleanup(curl);
 }
 
 CoreStatus CoreAdminClient::recordingPersons(const std::string &backendId,
