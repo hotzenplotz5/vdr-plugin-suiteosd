@@ -370,11 +370,11 @@ bool parseHomePage(const std::string &body,const std::string &backend,HomeKind k
             if(kind==HomeKind::Folders&&key.empty()){
                 // The Web root rail groups direct recordings and embedded leaves.
                 // Count duplicate leaves only once within the returned page.
-                size_t additional=leaves.size();
-                for(size_t i=0;i<n;++i){
-                    auto rec=homeRecording(json_object_array_get_idx(records,i));
-                    if(std::any_of(leaves.begin(),leaves.end(),[&](const CoreHomeCard &c){return c.key==rec.key;}))--additional;
-                }
+                const auto additional=std::count_if(leaves.begin(),leaves.end(),[&](const CoreHomeCard &leaf){
+                    for(size_t i=0;i<n;++i)
+                        if(homeRecording(json_object_array_get_idx(records,i)).key==leaf.key)return false;
+                    return true;
+                });
                 if(total+additional>0){
                     CoreHomeCard card;card.kind=CoreHomeCard::Kind::Root;card.key="root";
                     card.title="Hauptverzeichnis";card.count=total+additional;

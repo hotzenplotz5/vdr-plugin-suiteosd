@@ -150,7 +150,7 @@ Programme fromEvent(const cChannel *ch, const cEvent *event)
     Programme p;
     p.channelNumber = ch->Number();
     p.channel = ch->Name() ? ch->Name() : "";
-    p.title = event ? event->Title() : "Keine Programminformation";
+    p.title = event && event->Title() ? event->Title() : "Keine Programminformation";
     p.time = eventTime(event);
     if (event) { p.eventId=event->EventID(); p.start=event->StartTime(); p.end=event->EndTime();
         p.subtitle=event->ShortText()?event->ShortText():""; }
@@ -474,6 +474,7 @@ private:
         bool attempted = false;
     };
     std::map<int,HomeRail> homeRails;
+    std::string recommendedGenreId,recommendedGenreTitle;
     struct HomeCollection {
         suiteosd::HomeKind kind;
         std::string key,title;
@@ -591,7 +592,8 @@ private:
             break;
         }
         auto it=homeRails.find(section);
-        return it==homeRails.end()?1:std::max(1,int(it->second.page.cards.size()));
+        return it==homeRails.end()?1:std::max(1,int(it->second.page.cards.size())+
+            (it->second.page.hasMore?1:0));
     }
 
     const suiteosd::Artwork &channelLogo(const suiteosd::TimelineChannel &channel,int w,int h)
@@ -3258,6 +3260,8 @@ private:
             searchNotice = std::move(frame.notice);
         } else {
             searchActive = false;
+            if(nav.section>=3&&!homeLogin)loadHomeRail(nav.section);
+            nav.KeepVisible(7,count(nav.section));
             detailCastNav = searchOriginCast;
             detailScroll = searchOriginScroll;
         }
@@ -3409,10 +3413,12 @@ private:
                 searchLogin.clearPassword();
                 if (result.ok) {
                     if(homeLogin){
-                        homeLogin=false;closeSearch();homeRails.clear();
+                        closeSearch();homeLogin=false;homeRails.clear();
+                        recommendedGenreId.clear();recommendedGenreTitle.clear();
                         loadHomeRail(nav.section,true);
+                        nav.KeepVisible(7,count(nav.section));
                         if(!homeCollections.empty())loadHomeCollection(homeCollections.back());
-                    }else{homeRails.clear();fetchSearch();}
+                    }else{homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();fetchSearch();}
                 }
                 else searchNotice = result.message.empty() ? "Anmeldung fehlgeschlagen" : result.message;
             } else if (base == kGreen) searchLogin.passwordField = !searchLogin.passwordField;
@@ -3495,12 +3501,13 @@ private:
         return osContinue;
     }
 
-    static const char *homeRailTitle(int section) {
+    std::string homeRailTitle(int section) const {
         switch(section){
         case suiteosd::Navigation::kContinue:return "Weiterschauen";
         case suiteosd::Navigation::kNew:return "Neu aufgenommen";
         case suiteosd::Navigation::kGenres:return "Genres";
         case suiteosd::Navigation::kFolders:return "Aufnahmeordner";
+        case suiteosd::Navigation::kRecommendation:return recommendedGenreTitle.empty()?"Genre-Empfehlungen":recommendedGenreTitle;
         case suiteosd::Navigation::kMovies:return "Filme der letzten 5 Jahre";
         case suiteosd::Navigation::kRecent:return "Zuletzt angesehen";
         default:return "";
@@ -3512,6 +3519,7 @@ private:
         case suiteosd::Navigation::kContinue:return HomeKind::Continue;
         case suiteosd::Navigation::kGenres:return HomeKind::Genres;
         case suiteosd::Navigation::kFolders:return HomeKind::Folders;
+        case suiteosd::Navigation::kRecommendation:return HomeKind::Genre;
         case suiteosd::Navigation::kMovies:return HomeKind::Movies;
         case suiteosd::Navigation::kRecent:return HomeKind::Recent;
         default:return HomeKind::New;
@@ -3525,7 +3533,19 @@ private:
         auto &rail=homeRails[section];
         if(rail.attempted&&!force)return;
         rail.attempted=true;rail.page={};
-        rail.status=searchClient.homePage("default",homeRailKind(section),"",12,0,currentYear(),rail.page);
+        std::string key;
+        if(section==suiteosd::Navigation::kRecommendation){
+            loadHomeRail(suiteosd::Navigation::kGenres,force);
+            const auto &genres=homeRails[suiteosd::Navigation::kGenres];
+            if(!genres.status.ok){rail.status=genres.status;return;}
+            if(genres.page.cards.empty()){rail.status=genres.status;return;}
+            if(recommendedGenreId.empty()){
+                const auto &genre=genres.page.cards[size_t(std::rand())%genres.page.cards.size()];
+                recommendedGenreId=genre.key;recommendedGenreTitle=genre.title;
+            }
+            key=recommendedGenreId;
+        }
+        rail.status=searchClient.homePage("default",homeRailKind(section),key,12,0,currentYear(),rail.page);
     }
     void loadHomeCollection(HomeCollection &collection) {
         collection.rail.attempted=true;collection.rail.page={};
@@ -3545,7 +3565,7 @@ private:
           static_cast<long long>(seconds/3600),static_cast<long long>((seconds/60)%60),static_cast<long long>(seconds%60));
         return buf;
     }
-    void drawCoreCards(const HomeRail &rail,int first,int selected,int y,bool focus) {
+    void drawCoreCards(const HomeRail &rail,int first,int selected,int y,bool focus,bool moreCard=false) {
         if(!rail.status.ok){
             homeCard(157,y+40,1390,112,focus);
             print(180,y+58,rail.status.http==401?"OK: Bei VDR-Suite anmelden":
@@ -3553,23 +3573,30 @@ private:
             if(rail.attempted&&rail.status.http!=401)print(180,y+93,rail.status.message,fontSmall,kMuted,1310);
             return;
         }
-        if(rail.page.cards.empty()){
+        if(rail.page.cards.empty()&&!(moreCard&&rail.page.hasMore)){
             print(175,y+65,"Keine Einträge vorhanden",fontBody,kMuted);return;
         }
-        for(int col=0;col<7&&first+col<int(rail.page.cards.size());++col){
+        const int size=int(rail.page.cards.size());
+        for(int col=0;col<7&&first+col<size+(moreCard&&rail.page.hasMore?1:0);++col){
             int index=first+col,x=157+col*200,top=y+40;
+            if(index==size){
+                homeCard(x,top,188,306,focus&&index==selected);
+                print(x+14,top+90,"Weitere",fontLarge,kText,165);
+                print(x+14,top+130,"Aufnahmen",fontBody,kText,165);
+                print(x+14,top+220,"OK: Öffnen",fontSmall,kFocus,165);
+                continue;
+            }
             const auto &card=rail.page.cards[index];
             bool record=card.kind==suiteosd::CoreHomeCard::Kind::Recording;
             homeCard(x,top,188,record?306:138,focus&&index==selected);
             if(record){
                 const auto *local=findRecording(card.recording.nativeId);
                 if(local&&card.recording.backendId=="default")
-                    homePicture(recordingPoster(*local),x+2,top+2,184,220);
-                print(x+9,top+223,card.title,fontBody,kText,172);
-                const std::string subtitle=card.position>=0?playbackClock(card.position)+
-                    (card.duration>0?" / "+playbackClock(card.duration):""):
-                    card.completed?"Angesehen":card.subtitle;
-                print(x+9,top+256,subtitle,fontSmall,kMuted,172);
+                    homePicture(recordingPoster(*local),x+2,top+2,184,240);
+                print(x+9,top+244,card.title,fontBody,kText,172);
+                const std::string subtitle=card.completed?"Angesehen":card.position>=0?playbackClock(card.position)+
+                    (card.duration>0?" / "+playbackClock(card.duration):""):card.subtitle;
+                print(x+9,top+270,subtitle,fontSmall,kMuted,172);
                 if(card.duration>0&&card.position>=0){
                     fill(x+9,top+291,x+179,top+297,kLine);
                     fill(x+9,top+291,x+9+int(170*std::clamp(double(card.position)/card.duration,0.0,1.0)),top+297,suiteosd::webProgress);
@@ -3590,7 +3617,7 @@ private:
         print(155,y,homeRailTitle(section),fontLarge);
         static const HomeRail empty;
         drawCoreCards(it==homeRails.end()?empty:it->second,nav.firstCard[section],nav.card[section],y,
-            !nav.sideFocused&&nav.section==section);
+            !nav.sideFocused&&nav.section==section,true);
     }
     bool openHomeRecording(const suiteosd::CoreHomeCard &card,bool resume) {
         if(!resolveSearchRecording(card.recording,homeDetailRecording)){
@@ -3643,6 +3670,11 @@ private:
         }else if(nav.card[s]<int(rail.page.cards.size())){
             const auto card=rail.page.cards[nav.card[s]];
             openHomeCard(card,s==suiteosd::Navigation::kContinue);
+        }else if(rail.page.hasMore){
+            HomeCollection c;
+            c.kind=homeRailKind(s);c.title=homeRailTitle(s);
+            if(s==suiteosd::Navigation::kRecommendation)c.key=recommendedGenreId;
+            loadHomeCollection(c);homeCollections.push_back(std::move(c));
         }
         return osContinue;
     }
@@ -3959,7 +3991,7 @@ public:
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
             recordingDetailImages.clear();
             homeArtwork.clear();
-            homeRails.clear();loadHomeRail(nav.section);
+            homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();loadHomeRail(nav.section);
             nav.KeepVisible(7, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
             draw();

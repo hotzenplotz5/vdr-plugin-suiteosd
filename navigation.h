@@ -12,8 +12,8 @@ enum class Direction { Up, Down, Left, Right, Select, Back };
 enum class Activation { None, Close, Hero, ChannelNow, ChannelNext, Recording, Module, HomeCard };
 
 struct Navigation {
-    static constexpr int kSections = 9; // hero, now, next, continue, new, genres, folders, movies, recent
-    static constexpr int kContinue = 3, kNew = 4, kGenres = 5, kFolders = 6, kMovies = 7, kRecent = 8;
+    static constexpr int kSections = 10; // hero, now, next, continue, new, genres, folders, recommendation, movies, recent
+    static constexpr int kContinue = 3, kNew = 4, kGenres = 5, kFolders = 6, kRecommendation=7, kMovies = 8, kRecent = 9;
     static constexpr int kSidebarItems = 13;
     static constexpr int kClassicMenuItem = 12;
     static constexpr int kSearchItem = 11;
