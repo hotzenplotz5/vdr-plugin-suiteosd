@@ -51,7 +51,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.8-dev";
+static const char *VERSION = "0.9.9-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -462,12 +462,10 @@ private:
     suiteosd::CoreAdminNavigation coreNav;
     // Search reuses the Human session contract; admin login/logout is unchanged.
     suiteosd::CoreAdminClient searchClient{gCoreUrl};
-    suiteosd::CoreAdminNavigation searchLogin;
     suiteosd::SearchNavigation searchNav;
     suiteosd::CorePersonSearch personSearch;
     suiteosd::CoreGlobalSearch globalSearch;
     bool searchActive = false;
-    bool homeLogin = false;
     struct HomeRail {
         suiteosd::CoreHomePage page;
         suiteosd::CoreStatus status;
@@ -3196,8 +3194,7 @@ private:
             result = searchClient.globalSearch("default", searchNav.query,
                          suiteosd::SearchNavigation::pageSize, searchNav.offset, globalSearch);
         if (result.http == 401) {
-            searchLogin.openLogin(suiteosd::CorePage::None);
-            searchNav.page = suiteosd::SearchPage::Login;
+            searchNotice = "Gemeinsame Core-Suche: lokale Anbindung fehlt";
         } else if (!result.ok) {
             searchNotice = result.message.empty() ? "Suche fehlgeschlagen" : result.message;
         } else if (!globalSearch.status.empty() && globalSearch.status != "ready" &&
@@ -3228,7 +3225,6 @@ private:
 
     void closeSearch()
     {
-        searchLogin.clearPassword();
         if (!searchHistory.empty()) {
             auto frame = std::move(searchHistory.back());
             searchHistory.pop_back();
@@ -3242,7 +3238,7 @@ private:
             searchNotice = std::move(frame.notice);
         } else {
             searchActive = false;
-            if(nav.section>=3&&!homeLogin)loadHomeRail(nav.section);
+            if(nav.section>=3)loadHomeRail(nav.section);
             nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards,count(nav.section));
             detailCastNav = searchOriginCast;
             detailScroll = searchOriginScroll;
@@ -3288,38 +3284,19 @@ private:
         fill(0, 0, 1599, 76, kSurface);
         print(34, 23, "VDR Suite", fontLarge, kText, 226);
         print(284, 22, searchNav.person ? "Aufnahmen & EPG zur Person" : "Suche", fontLarge);
-        if (searchNav.page == SearchPage::Query || searchNav.page == SearchPage::Login) {
-            const bool login = searchNav.page == SearchPage::Login;
-            print(154, 110, login ? "VDR-Suite-Anmeldung" : "Aufnahmen, EPG und Personen",
-                  fontTitle, kText, 1400);
-            if (login) {
-                panel(158, 189, 680, 63, !searchLogin.passwordField, kCard);
-                panel(855, 189, 680, 63, searchLogin.passwordField, kCard);
-                print(180, 205, "Benutzer: " + searchLogin.username, fontBody, kText, 630);
-                print(877, 205, "Passwort: " + std::string(std::min(size_t(50), searchLogin.password.size()), '*'),
-                      fontBody, kText, 630);
-            } else {
-                panel(158, 189, 1377, 63, true, kCard);
-                print(180, 205, searchNav.query.empty() ? "Suchbegriff eingeben" : searchNav.query,
-                      fontBody, kText, 1300);
+        if (searchNav.page == SearchPage::Query) {
+            print(154,110,"Aufnahmen, EPG und Personen",fontTitle,kText,1400);
+            panel(158,189,1377,63,true,kCard);
+            print(180,205,searchNav.query.empty()?"Suchbegriff eingeben":searchNav.query,fontBody,kText,1300);
+            for(int i=0;i<int(suiteosd::SearchNavigation::Keys().size());++i){
+                int x=158+(i%10)*138,y=286+(i/10)*84;
+                panel(x,y,118,70,i==searchNav.key,kCardAlt);
+                const auto value=searchNav.KeyLabel(i);
+                print(x+40,y+18,value==" "?"␣":value,fontLarge,kText,76);
             }
-            const int keys = login ? int(suiteosd::CoreAdminNavigation::keys().size()) :
-                                     int(suiteosd::SearchNavigation::Keys().size());
-            for (int i = 0; i < keys; ++i) {
-                int x = 158 + (i % 10) * 138, y = 286 + (i / 10) * 84;
-                panel(x, y, 118, 70, i == (login ? searchLogin.keyIndex : searchNav.key), kCardAlt);
-                std::string value;
-                if (login) {
-                    char c = suiteosd::CoreAdminNavigation::keys()[i];
-                    if (searchLogin.uppercase && c >= 'a' && c <= 'z') c = char(c - 'a' + 'A');
-                    value = std::string(1, c);
-                } else value = searchNav.KeyLabel(i);
-                print(x+40, y+18, value == " " ? "␣" : value, fontLarge, kText, 76);
-            }
-            print(158, 744, login ? "Rot: Anmelden · Grün: Benutzer/Passwort" :
-                                   "Rot: Suchen · Grün: Leeren", fontBody, kFocus, 1360);
-            print(158, 787, "OK: Zeichen · Gelb: Löschen · Blau: Groß/Klein · Zurück: Abbrechen",
-                  fontSmall, kText, 1360);
+            print(158,744,"Rot: Suchen · Grün: Leeren",fontBody,kFocus,1360);
+            print(158,787,"OK: Zeichen · Gelb: Löschen · Blau: Groß/Klein · Zurück: Abbrechen",
+                  fontSmall,kText,1360);
         } else if (searchNav.page == SearchPage::Event) {
             print(90, 120, searchEvent.title, fontTitle, kText, 1410);
             print(90, 198, searchEvent.channelName + " · " + searchEvent.subtitle, fontBody, kMuted, 1410);
@@ -3388,31 +3365,7 @@ private:
     {
         using suiteosd::SearchPage;
         using suiteosd::SearchTab;
-        if (searchNav.page == SearchPage::Login) {
-            if (base == kBack) {homeLogin=false;closeSearch();}
-            else if (base == kRed) {
-                const auto result = searchClient.login(searchLogin.username, searchLogin.password);
-                searchLogin.clearPassword();
-                if (result.ok) {
-                    if(homeLogin){
-                        closeSearch();homeLogin=false;homeRails.clear();
-                        recommendedGenreId.clear();recommendedGenreTitle.clear();
-                        loadHomeRail(nav.section,true);
-                        nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards,count(nav.section));
-                        if(!homeCollections.empty())loadHomeCollection(homeCollections.back());
-                    }else{homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();fetchSearch();}
-                }
-                else searchNotice = result.message.empty() ? "Anmeldung fehlgeschlagen" : result.message;
-            } else if (base == kGreen) searchLogin.passwordField = !searchLogin.passwordField;
-            else if (base == kYellow) searchLogin.backspace();
-            else if (base == kBlue) searchLogin.uppercase = !searchLogin.uppercase;
-            else if (base == kOk) searchLogin.typeKey();
-            else if (base == kUp) searchLogin.moveKey(0,-1);
-            else if (base == kDown) searchLogin.moveKey(0,1);
-            else if (base == kLeft) searchLogin.moveKey(-1,0);
-            else if (base == kRight) searchLogin.moveKey(1,0);
-            else if (base >= k0 && base <= k9) searchLogin.digit(char('0' + int(base-k0)));
-        } else if (searchNav.page == SearchPage::Query) {
+        if (searchNav.page == SearchPage::Query) {
             if (base == kBack) closeSearch();
             else if (base == kRed) {
                 searchNav.offset = searchNav.selected = 0;
@@ -3510,6 +3463,71 @@ private:
     int currentYear() const {
         const auto now=time(nullptr);tm t{};return localtime_r(&now,&t)?1900+t.tm_year:2026;
     }
+    bool nativeHomePage(suiteosd::HomeKind kind,const std::string &key,int offset,
+                        suiteosd::CoreHomePage &page) {
+        using suiteosd::HomeKind;
+        using Card=suiteosd::CoreHomeCard;
+        std::vector<Card> cards;
+        auto recordingCard=[](const Recording &rec){
+            Card card;
+            card.key=rec.fileName;card.title=rec.baseName;
+            card.recording.backendId="default";card.recording.nativeId=rec.fileName;
+            card.subtitle=recordingDate(rec.start);return card;
+        };
+        if(kind==HomeKind::Continue){
+            LOCK_RECORDINGS_READ;
+            if(Recordings)for(const auto &rec:data.recordings){
+                const auto *r=Recordings->GetByName(rec.fileName.c_str());
+                if(!r)continue;
+                const int resume=r->GetResume();const double fps=r->FramesPerSecond();
+                if(resume<=0||fps<=0)continue;
+                const int duration=r->LengthInSeconds();
+                const auto position=static_cast<std::int64_t>(resume/fps);
+                if(position<=0||(duration>0&&position>=duration))continue;
+                auto card=recordingCard(rec);
+                card.position=position;card.duration=duration>0?duration:-1;
+                cards.push_back(std::move(card));
+            }
+        }else if(kind==HomeKind::New){
+            for(const auto &rec:data.recordings)cards.push_back(recordingCard(rec));
+        }else if(kind==HomeKind::Folders||kind==HomeKind::Root||
+                 kind==HomeKind::Genres||kind==HomeKind::Genre){
+            suiteosd::RecordingBrowser browser;
+            const bool genre=kind==HomeKind::Genres||kind==HomeKind::Genre;
+            browser.view=genre?suiteosd::RecordingBrowser::View::Genres:
+                               suiteosd::RecordingBrowser::View::Folders;
+            if(genre)browser.genre=key;else browser.folder=key;
+            for(const auto &rec:data.recordings){
+                suiteosd::BrowserRecording row;
+                row.fileName=rec.fileName;row.name=rec.title;row.title=rec.baseName;row.start=rec.start;
+                if(genre)row.genres=genresFor(rec);
+                browser.source.push_back(std::move(row));
+            }
+            browser.Refresh();
+            int direct=0;
+            for(const auto &entry:browser.entries){
+                if(entry.kind==suiteosd::BrowserEntry::Kind::Recording){
+                    if(kind==HomeKind::Folders&&key.empty()){++direct;continue;}
+                    if(const auto *rec=findRecording(entry.fileName))cards.push_back(recordingCard(*rec));
+                }else if(kind!=HomeKind::Root){
+                    Card card;
+                    card.kind=entry.kind==suiteosd::BrowserEntry::Kind::Genre?Card::Kind::Genre:Card::Kind::Folder;
+                    card.key=entry.path;card.title=entry.title;card.count=entry.count;
+                    card.subtitle=std::to_string(entry.count)+" Aufnahmen";cards.push_back(std::move(card));
+                }
+            }
+            if(direct){
+                Card card;card.kind=Card::Kind::Root;card.key="root";
+                card.title="Hauptverzeichnis";card.count=direct;
+                card.subtitle=std::to_string(direct)+" Aufnahmen";cards.insert(cards.begin(),std::move(card));
+            }
+        }else return false;
+        page={};page.total=cards.size();
+        const int first=std::clamp(offset,0,int(cards.size()));
+        const int end=(kind==HomeKind::Genres||(kind==HomeKind::Folders&&key.empty()))?int(cards.size()):std::min(first+12,int(cards.size()));
+        for(int i=first;i<end;++i)page.cards.push_back(std::move(cards[i]));
+        page.nextOffset=end;page.hasMore=end<int(cards.size());return true;
+    }
     void loadHomeRail(int section,bool force=false) {
         if(section<3)return;
         auto &rail=homeRails[section];
@@ -3528,18 +3546,17 @@ private:
             key=recommendedGenreId;
         }
         rail.status=searchClient.homePage("default",homeRailKind(section),key,12,0,currentYear(),rail.page);
+        if(!rail.status.ok&&nativeHomePage(homeRailKind(section),key,0,rail.page))
+            rail.status={true,0,"Lokaler VDR"};
     }
     void loadHomeCollection(HomeCollection &collection) {
         collection.rail.attempted=true;collection.rail.page={};
         collection.rail.status=searchClient.homePage("default",collection.kind,collection.key,
             12,collection.offset,currentYear(),collection.rail.page);
+        if(!collection.rail.status.ok&&nativeHomePage(collection.kind,collection.key,
+            collection.offset,collection.rail.page))
+            collection.rail.status={true,0,"Lokaler VDR"};
         collection.selected=collection.first=0;
-    }
-    void openHomeLogin() {
-        openSearch();
-        homeLogin=true;
-        searchLogin.openLogin(suiteosd::CorePage::None);
-        searchNav.page=suiteosd::SearchPage::Login;
     }
     static std::string playbackClock(std::int64_t seconds) {
         if(seconds<0)return "";
@@ -3549,10 +3566,8 @@ private:
     }
     void drawCoreCards(const HomeRail &rail,int first,int selected,int y,bool focus,bool moreCard=false) {
         if(!rail.status.ok){
-            homeCard(157,y+40,990,112,focus);
-            print(180,y+58,rail.status.http==401?"OK: Bei VDR-Suite anmelden":
-                rail.attempted?"OK: Erneut laden":"OK: Daten laden",fontBody,kText,940);
-            if(rail.attempted&&rail.status.http!=401)print(180,y+93,rail.status.message,fontSmall,kMuted,940);
+            print(180,y+58,rail.status.http==401?"Gemeinsame Core-Daten noch nicht lokal verfügbar":
+                rail.attempted?"OK: Erneut laden":"OK: Daten laden",fontSmall,kMuted,940);
             return;
         }
         if(rail.page.cards.empty()&&!(moreCard&&rail.page.hasMore)){
@@ -3659,11 +3674,11 @@ private:
         loadHomeRail(s);
         auto &rail=homeRails[s];
         if(!rail.status.ok){
-            if(rail.status.http==401)openHomeLogin();
-            else loadHomeRail(s,true);
+            loadHomeRail(s,true);
         }else if(nav.card[s]<int(rail.page.cards.size())){
             const auto card=rail.page.cards[nav.card[s]];
             openHomeCard(card,s==suiteosd::Navigation::kContinue);
+            if(rail.status.http==0&&s==suiteosd::Navigation::kContinue)homeResumeSeconds=-1;
         }else if(rail.page.hasMore){
             HomeCollection c;
             c.kind=homeRailKind(s);c.title=homeRailTitle(s);
@@ -3686,7 +3701,7 @@ private:
         auto &c=homeCollections.back();notice.clear();
         if(key==kBack)homeCollections.pop_back();
         else if(key==kOk||key==kInfo){
-            if(!c.rail.status.ok){if(c.rail.status.http==401)openHomeLogin();else loadHomeCollection(c);}
+            if(!c.rail.status.ok){loadHomeCollection(c);}
             else if(c.selected<int(c.rail.page.cards.size())){
                 const auto card=c.rail.page.cards[c.selected];openHomeCard(card);
             }
@@ -3879,7 +3894,6 @@ public:
     {
         coreAdmin.logout();
         coreNav.clearPassword();
-        searchLogin.clearPassword();
         restoreLivePreview();
         delete osd;
         delete fontTitle;

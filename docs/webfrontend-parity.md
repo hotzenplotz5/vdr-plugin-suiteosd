@@ -68,3 +68,8 @@ Aus `home-continue-watching.js`, `home-recently-watched.js`, `home-recording-dis
 Eine Genre-Empfehlungsreihe wählt pro Home-Generation eine vorhandene Core-Genre-ID und behält sie beim Scrollen bei. Die Filme-/Neuaufnahme-/Empfehlungsreihe bietet bei weiteren Treffern einen navigierbaren Einstieg in die paginierte Sammlung. Keine erfundenen Empfehlungen oder Trefferzahlen. Der native Player übernimmt die explizit gewählte Position; Rückschreiben in den Core bleibt separat offen.
 
 TV-Feedback 26.11.2026: OK auf einer Aufnahme im Suite-Browser führt nun in die interaktive Detailansicht, Rot/Play startet weiterhin direkt. Runter oder Blau aktiviert die sichtbare Cast-Leiste, Links/Rechts navigiert, OK öffnet die Personensuche. Die passive Standard-VDR-Info kann die Tasten nicht selbst übernehmen und ist weiterhin ein separater Einstieg. Keine Änderung von MainMenuHooks, Keymacros oder remote.conf.
+
+
+## Nutzerfeedback: kein Browser-Login in der nativen Oberfläche
+
+Home und Suche verlangen keine interaktive Human-Browsersitzung mehr. Weiterschauen verwendet bei nicht erreichbaren Core-Daten VDR-Resume, neue Aufnahmen sowie Genres und Ordner die bereits vorhandene native Browserprojektion. Keine neue Suchdatenbank, keine Änderung der HTTP-Authentifizierung. Native Ersatzdaten können vom Webfrontend abweichen; gemeinsame Suche, Core-Historie, zentrale Metadaten und Cover benötigen weiterhin eine transparente lokale Core-Anbindung. Nicht vorhandene gemeinsame Daten werden ausdrücklich benannt. Administrative Einstellungen bleiben getrennt.

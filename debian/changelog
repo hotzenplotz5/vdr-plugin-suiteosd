@@ -1,3 +1,10 @@
+vdr-plugin-suiteosd (0.9.9~dev) unstable; urgency=medium
+
+  * Remove browser login from normal native TV navigation.
+  * Reuse native VDR resume and recording browser data.
+
+ -- VDR-Suite contributors <noreply@github.com>  Thu, 26 Nov 2026 16:40:00 +0100
+
 vdr-plugin-suiteosd (0.9.8~dev) unstable; urgency=medium
 
   * Keep native video preview fixed across Home rails.
