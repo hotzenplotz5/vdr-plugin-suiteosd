@@ -12,7 +12,7 @@
 int main()
 {
     using suiteosd::HomeLayout;
-    const auto bg=suiteosd::CinematicBackground(800,450,136);
+    const auto bg=suiteosd::CinematicBackground(800,450,272);
     assert(bg.valid()&&bg.argb[0]!=bg.argb[400]);
     for(auto px:bg.argb)assert((px>>24)==255);
     const int cx=HomeLayout::cardX(0,true)/2,cy=(HomeLayout::top+HomeLayout::titleHeight)/2;
@@ -27,6 +27,11 @@ int main()
     suiteosd::CinematicArtwork(focused,fixture,cx+1,cy+1,cx,cy,66,99,8,2);
     assert(focused.image.argb[size_t(cy+30-focused.y)*focused.image.width+cx+30-focused.x]==0xFFFF0000u);
     for(auto px:focused.image.argb)assert((px>>24)==255);
+    const auto glyph=suiteosd::CinematicSidebarGlyph(0,30);
+    assert(glyph.valid()&&std::any_of(glyph.argb.begin(),glyph.argb.end(),[](uint32_t p){return (p>>24)>0&&(p>>24)<255;}));
+    const auto glyphPatch=suiteosd::CinematicGlyphPatch(bg,nullptr,20,60,30,0);
+    assert(glyphPatch.image.valid());
+    for(auto px:glyphPatch.image.argb)assert((px>>24)==255);
     const std::string pngPath = "suiteosd-artwork-test.png";
     const std::string jpegPath = "suiteosd-artwork-test.jpg";
     const std::string invalidPath = "suiteosd-artwork-broken.png";

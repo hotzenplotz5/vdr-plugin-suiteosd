@@ -32,19 +32,26 @@ inline Artwork CinematicBackground(int w,int h,int sideRight) {
         uint32_t c=0xFF031020u;
         c=CinemaMix(c,0xFF082C54u,.55*CinemaGaussian(u-670,530)*CinemaGaussian(v-90,320));
         c=CinemaMix(c,0xFF003D7Cu,.48*CinemaGaussian(u-90,380)*CinemaGaussian(v-710,340));
-        // Header ribbon: a broad, curved blue light with a fine cyan edge.
-        const double top=-45+.00045*(u-420)*(u-420);
-        const double topFade=CinemaGaussian(u-650,290);
-        c=CinemaMix(c,0xFF007BCEu,.6*topFade*CinemaGaussian(v-top,35));
-        c=CinemaMix(c,0xFF00DBFFu,.7*topFade*CinemaGaussian(v-top-6,3.5));
+        // Wide blue illumination and a concentrated cyan curve in the
+        // header only. Do not run a bright diagonal through the posters.
+        if(v<71) {
+            const double top=-35+.28*(u-590)+.00014*(u-590)*(u-590);
+            const double fade=CinemaGaussian(u-690,215);
+            c=CinemaMix(c,0xFF0068C8u,.85*fade*CinemaGaussian(v-top,37));
+            c=CinemaMix(c,0xFF00B8EFu,.83*CinemaGaussian(u-650,155)*CinemaGaussian(v+9,26));
+            c=CinemaMix(c,0xFF30F0FFu,.85*fade*CinemaGaussian(v-top,4));
+        }
         if(v>=71&&u<sideRight) {
             c=CinemaMix(c,0xFF031225u,.55);
             // Lower ribbon stays in the sidebar, like the approved reference.
-            const double d=v-(675-.24*u+.00022*u*u);
-            const double wave= v-(700-.58*u+.0012*u*u);
-            c=CinemaMix(c,0xFF0065BDu,.78*CinemaGaussian(d,38));
-            c=CinemaMix(c,0xFF00D9FFu,.86*CinemaGaussian(d,5));
-            c=CinemaMix(c,0xFF003F94u,.68*CinemaGaussian(wave,19));
+            const double d=v-(696-.34*u+.00022*u*u);
+            const double lower=v-(692-.48*u+.00155*u*u);
+            c=CinemaMix(c,0xFF005ABAu,.84*CinemaGaussian(d,64));
+            c=CinemaMix(c,0xFF008AF2u,.82*CinemaGaussian(d,23));
+            c=CinemaMix(c,0xFF00F0FFu,.97*CinemaGaussian(d,5)*CinemaGaussian(u-95,155));
+            const double foreground=std::clamp((lower+1.5)/3.0,0.0,1.0);
+            c=CinemaMix(c,CinemaMix(0xFF063D78u,0xFF031328u,std::clamp(lower/140,0.0,1.0)),
+                foreground*.95);
         }
         if(v>=71&&u>=sideRight)c=CinemaMix(c,0xFF000B19u,.20);
         if(v>=71&&u>1154)c=CinemaMix(c,0xFF020D1Bu,.32);
@@ -69,12 +76,12 @@ struct CinemaPatch { int x=0,y=0; Artwork image; };
 // Frame shadow and halo are continuous signed-distance fields, rather
 // than concentric opaque rectangles. The output is cached by geometry.
 inline CinemaPatch CinematicFrame(const Artwork &bg,int x,int y,int w,int h,
-                                 double radius,CinemaStyle style,double scale) {
+                                 double radius,CinemaStyle style,double scale,int marginLogical=9) {
     if(!bg.valid()||w<=0||h<=0)return {};
     const bool focus=style==CinemaStyle::Focus;
     const bool sidebar=style==CinemaStyle::Sidebar;
     const bool pill=style==CinemaStyle::Pill;
-    const int margin=std::max(2,int(std::ceil(9*scale)));
+    const int margin=std::max(2,int(std::ceil(marginLogical*scale)));
     CinemaPatch out;
     out.x=std::max(0,x-margin);out.y=std::max(0,y-margin);
     const int pw=std::min(bg.width,x+w+margin)-out.x;
@@ -88,8 +95,11 @@ inline CinemaPatch CinematicFrame(const Artwork &bg,int x,int y,int w,int h,
         const double d=CinemaRoundDistance(lx,ly,w,h,radius);
         const double sh=CinemaRoundDistance(lx,ly-3*scale,w,h,radius);
         uint32_t c=bg.argb[size_t(gy)*bg.width+gx];
-        c=CinemaMix(c,0xFF00040Bu,.68*CinemaGaussian(std::max(0.0,sh),4*scale));
-        if(focus||sidebar)c=CinemaMix(c,0xFF00C9FFu,(focus?.83:.45)*CinemaGaussian(std::max(0.0,d),3.7*scale));
+        // Fade to the exact background at the patch boundary. Adjacent
+        // opaque patches therefore never leave a hard rectangular edge.
+        const double edge=std::clamp(double(std::min({i,j,pw-1-i,ph-1-j}))/std::max(1.0,2.5*scale),0.0,1.0);
+        c=CinemaMix(c,0xFF00040Bu,edge*.58*CinemaGaussian(std::max(0.0,sh),3.6*scale));
+        if(focus||sidebar)c=CinemaMix(c,0xFF00C9FFu,edge*(focus?.85:.45)*CinemaGaussian(std::max(0.0,d),3.4*scale));
         const double t=std::clamp(ly/h,0.0,1.0);
         const uint32_t rim=focus?0xFF20ECFFu:sidebar?0xFF00BDEAu:
             CinemaMix(0xFF859BB0u,0xFF36536Eu,t);
@@ -126,6 +136,66 @@ inline void CinematicLogo(Artwork &poster,const Artwork &logo,int pad) {
         const double a=(src>>24)/255.0;
         dst=CinemaMix(CinemaMix(dst,0xFF031120u,a*.28),src,a);
     }
+}
+
+// Antialiased native line glyphs in the existing sidebar's exact order.
+inline Artwork CinematicSidebarGlyph(int id,int size) {
+    struct Segment {double x,y,X,Y;};
+    struct Ring {double x,y,r;};
+    std::vector<Segment> lines;
+    std::vector<Ring> rings;
+    auto line=[&](double x,double y,double X,double Y){lines.push_back({x,y,X,Y});};
+    auto rect=[&](double x,double y,double X,double Y){line(x,y,X,y);line(X,y,X,Y);line(X,Y,x,Y);line(x,Y,x,y);};
+    auto circle=[&](double x,double y,double r){rings.push_back({x,y,r});};
+    auto list=[&](){for(int y:{5,12,19}){line(3,y,4,y);line(8,y,21,y);}};
+    switch(id) {
+    case 0: line(2,11,12,2);line(12,2,22,11);line(5,9,5,21);line(19,9,19,21);line(5,21,19,21);rect(10,14,14,21);break;
+    case 1: rect(2,3,22,17);line(12,17,12,22);line(7,22,17,22);break;
+    case 2: list();break;
+    case 3: circle(12,12,10);circle(12,12,3);break;
+    case 4: circle(12,12,9);line(12,6,12,12);line(12,12,17,15);break;
+    case 5: circle(9,9,6);line(13,13,21,21);line(6,9,12,9);line(9,6,9,12);break;
+    case 6: rect(2,5,22,19);line(8,8,8,16);line(16,8,16,16);line(8,12,16,12);break;
+    case 7: rect(3,3,21,21);line(6,7,18,7);line(6,12,18,12);line(6,17,15,17);break;
+    case 8: rect(2,3,22,21);circle(7,8,2);line(3,18,10,11);line(10,11,14,16);line(14,16,18,12);line(18,12,22,17);break;
+    case 9: rect(2,3,22,21);line(7,3,7,21);line(17,3,17,21);for(int y:{7,12,17}){line(2,y,7,y);line(17,y,22,y);}break;
+    case 10: circle(12,12,7.5);circle(12,12,3);
+        for(int i=0;i<8;++i){double a=i*3.141592653589793/4;line(12+8*std::cos(a),12+8*std::sin(a),12+10.5*std::cos(a),12+10.5*std::sin(a));}break;
+    case 11: circle(9,9,7);line(14,14,22,22);break;
+    default: list();break;
+    }
+    if(size<=0)return {};
+    Artwork icon{size,size,std::vector<uint32_t>(size_t(size)*size)};
+    for(int y=0;y<size;++y)for(int x=0;x<size;++x){
+        const double u=(x+.5)*24/size,v=(y+.5)*24/size;
+        double d=100;
+        for(const auto &l:lines){
+            const double dx=l.X-l.x,dy=l.Y-l.y;
+            const double len=dx*dx+dy*dy;
+            const double t=len?std::clamp(((u-l.x)*dx+(v-l.y)*dy)/len,0.0,1.0):0;
+            d=std::min(d,std::hypot(u-l.x-t*dx,v-l.y-t*dy));
+        }
+        for(const auto &r:rings)d=std::min(d,std::abs(std::hypot(u-r.x,v-r.y)-r.r));
+        const unsigned a=unsigned(255*std::clamp(.5+(.78-d)*size/24,0.0,1.0)+.5);
+        icon.argb[size_t(y)*size+x]=(a<<24)|0x00F3FAFFu;
+    }
+    return icon;
+}
+inline CinemaPatch CinematicGlyphPatch(const Artwork &bg,const CinemaPatch *parent,
+                                      int x,int y,int size,int id) {
+    if(!bg.valid()||size<=0||x<0||y<0||x+size>bg.width||y+size>bg.height)return {};
+    auto icon=CinematicSidebarGlyph(id,size);
+    CinemaPatch out{x,y,std::move(icon)};
+    for(int j=0;j<size;++j)for(int i=0;i<size;++i){
+        const int gx=x+i,gy=y+j;
+        uint32_t under=bg.argb[size_t(gy)*bg.width+gx];
+        if(parent&&parent->image.valid()&&gx>=parent->x&&gy>=parent->y&&
+           gx-parent->x<parent->image.width&&gy-parent->y<parent->image.height)
+            under=parent->image.argb[size_t(gy-parent->y)*parent->image.width+gx-parent->x];
+        auto &src=out.image.argb[size_t(j)*size+i];
+        src=CinemaMix(under,src,(src>>24)/255.0);
+    }
+    return out;
 }
 }
 #endif

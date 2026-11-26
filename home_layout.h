@@ -10,9 +10,9 @@ struct HomeLayout {
     static constexpr int radius=16;
     static constexpr int posterW=cardWidth-2, posterH=cardHeight-2;
     static constexpr int right=1156, rightWidth=426;
-    static constexpr int liveY=94, liveH=211;
-    static constexpr int videoX=1193, videoY=96, videoW=352, videoH=198;
-    static constexpr int detailY=323, detailBottom=850;
+    static constexpr int liveY=94, liveH=217;
+    static constexpr int videoX=1185, videoY=96, videoW=368, videoH=207;
+    static constexpr int detailY=327, detailBottom=850;
     static constexpr int cardX(int column,bool expanded=false){return (expanded?282:left)+column*(cardWidth+(expanded?14:gap));}
     static constexpr int headingY(int row){return top+row*rowStep;}
     static constexpr int firstRow(int section,int sections){

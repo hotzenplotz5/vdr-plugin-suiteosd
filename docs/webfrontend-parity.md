@@ -91,3 +91,8 @@ Home und Suche nutzen ausschließlich den lokalen Unix-HTTP-Socket (`/run/vdr-su
 | Abnahme | VDR 2.8.3/2.8.4 Build und Headless-Tests; reale Fanart-/Video-Komposition, Schriftlesbarkeit und Navigation auf yaVDR noch offen. |
 
 Kodi/Plex bleiben UX-Referenzen für Poster-Navigation und Detailvorschau; eine aktuelle Produktgegenüberstellung ist nicht verifiziert. Maßgeblich ist das ausdrücklich bestätigte SuiteOSD-Mockup, nicht ein neues Fremdprodukt-Design.
+
+
+## Cinematic-Renderer 0.9.11 – optische Korrektur
+
+Die native Home-Oberfläche verwendet jetzt den produktiven C++-ARGB-Rasterpfad in `cinematic_home.h` für die Hintergrundbeleuchtung, weich auslaufende Rahmen, Posterkomposition und antialiaste Sidebar-Glyphen. Die fertigen Rasterflächen werden begrenzt gecacht. Die sechs 2:3-Karten in drei Reihen passen auch bei ausgeklappter Sidebar, ohne deren Navigation zu ändern. Der bisherige feste Footer entfällt; die Tastenfunktionen bleiben erhalten. Die Video-Geometrie des Aufnahmenbrowsers bleibt unverändert; Home nutzt die separate native Videoebene und die darunterliegende Fokus-Fanart. Alle bisherigen Sidebar-Aktionen bleiben sichtbar und erreichbar; die sieben beispielhaften Einträge im Mockup sind kein Auftrag, andere Funktionen zu entfernen. Raster-/Buildnachweise ersetzen nicht die echte VDR-/TV-Abnahme.

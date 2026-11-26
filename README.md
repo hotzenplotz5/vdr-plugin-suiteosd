@@ -13,9 +13,10 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.9.10-dev)
+## Aktueller Implementierungsstand (0.9.11-dev)
 
-- **Freigegebene Cinematic-Home-Oberfläche:** sechs gleich große 2:3-Portraitkarten pro Reihe, drei sichtbare Reihen (Jetzt, Als nächstes, Neu aufgenommen), weitere Reihen scrollbar. Abgerundete Rahmen, dezente Schatten, Cyan-Fokus ohne Vergrößerung und proportional beschnittene Poster mit opakem Textverlauf. Aufnahmekarten haben keine Senderlogos.
+- **Cinematic-Home nach der freigegebenen Vorlage:** Native ARGB-Rastergrafiken mit geschwungenem Licht, weich auslaufenden Schatten, kantengeglätteten Rahmen und Icons, gecachten fertigen Posterkompositionen sowie neuer Kopf-/Sidebar-Gestaltung ohne permanente Fußleiste. Die visuelle Gesamt- und Hardwareabnahme ist ausdrücklich noch offen.
+- **Layout:** sechs gleich große 2:3-Portraitkarten pro Reihe, drei sichtbare Reihen (Jetzt, Als nächstes, Neu aufgenommen), weitere Reihen scrollbar. Abgerundete Rahmen, dezente Schatten, Cyan-Fokus ohne Vergrößerung und proportional beschnittene Poster mit opakem Textverlauf. Aufnahmekarten haben keine Senderlogos.
 - **Getrennte Vorschauen:** native Live-TV-Videoebene oben rechts, darunter die Fanart und Kurzinfo der fokussierten Sendung/Aufnahme. Nach kurzem Verweilen werden TVScraper-Daten geladen; VDR liefert reale Sendezeiten, Gesamtdauer, Restzeit und Aufnahmeinformationen. Keine zusätzliche Videoquelle, kein Netzwerkpolling. Das bisherige native Menü, die einklappbare Sidebar und bestehende Aktionen bleiben erhalten.
 - **Abnahme:** aktuelle Quellcode-/Buildtests und der [Designvertrag](docs/approved-tv-home-design.md) sind getrennt von der noch ausstehenden visuellen Hardwareabnahme. Die folgenden älteren Abschnitte sind historische Implementierungsstände.
 

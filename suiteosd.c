@@ -561,6 +561,9 @@ private:
     using HL = suiteosd::HomeLayout;
     std::array<suiteosd::Artwork,2> cinematicBackgrounds;
     std::map<std::array<int,7>,suiteosd::CinemaPatch> cinematicFrames;
+    std::map<std::pair<std::array<int,7>,std::uintptr_t>,suiteosd::CinemaPatch> cinematicComposites;
+    std::map<std::array<int,4>,suiteosd::CinemaPatch> cinematicGlyphs;
+    cFont *fontCinemaBrand=nullptr,*fontCinemaCard=nullptr,*fontCinemaMeta=nullptr;
     std::map<std::string,suiteosd::Artwork> cinematicLogos;
     struct FocusPreview {
         suiteosd::DetailMetadata metadata;
@@ -1330,7 +1333,7 @@ private:
 
     void drawHeader()
     {
-        print(104, 15, "VDR Suite", fontLarge, kText, 200);
+        print(104, 15, "VDR Suite", fontCinemaBrand, kText, 200);
         fill(303,20,304,51,0xFF59738Du);
         print(338, 24, "TV · Aufnahmen · Mediathek", fontBody, kText, 650);
         const auto now=time(nullptr);
@@ -1396,7 +1399,7 @@ private:
         const std::string key="epg:"+std::to_string(item.channelNumber)+":"+std::to_string(item.eventId)+":"+std::to_string(item.start);
         auto it=homeArtwork.find(key);
         if(it!=homeArtwork.end()) return it->second;
-        if(homeArtwork.size()>=48) homeArtwork.clear();
+        if(homeArtwork.size()>=48){cinematicComposites.clear();homeArtwork.clear();}
         std::string path;
         if (item.start && item.eventId) if (auto *scraper=cPluginManager::GetPlugin("tvscraper")) {
             LOCK_CHANNELS_READ;
@@ -1445,7 +1448,7 @@ private:
     {
         auto &bg=cinematicBackgrounds[nav.sideFocused?1:0];
         if(!bg.valid()||bg.width!=width||bg.height!=height){
-            cinematicFrames.clear();
+            cinematicFrames.clear();cinematicComposites.clear();cinematicGlyphs.clear();
             bg=suiteosd::CinematicBackground(width,height,cinematicSidebarWidth());
         }
         return bg;
@@ -1468,7 +1471,8 @@ private:
         if(it!=cinematicFrames.end())return it->second;
         if(cinematicFrames.size()>=160)cinematicFrames.clear();
         return cinematicFrames.emplace(key,suiteosd::CinematicFrame(bg,X(x),Y(y),X(w),Y(h),
-            std::max(1,X(radius)),style,std::max(.5,double(width)/1600))).first->second;
+            std::max(1,X(radius)),style,std::max(.5,double(width)/1600),
+            nav.sideFocused&&(style==suiteosd::CinemaStyle::Poster||style==suiteosd::CinemaStyle::Focus)?7:9)).first->second;
     }
     void cinemaPanel(int x,int y,int w,int h,int radius,suiteosd::CinemaStyle style)
     {
@@ -1480,23 +1484,30 @@ private:
         const int w=HL::cardWidth,h=HL::cardHeight,r=HL::radius;
         const auto &frame=cinemaFrame(x,y,w,h,r,focused?suiteosd::CinemaStyle::Focus:suiteosd::CinemaStyle::Poster);
         if(!art||!art->valid()){drawCinemaImage(frame.image,frame.x,frame.y);return;}
-        // Copy only the cheap raster overlay; the glow/shadow/background
-        // remain cached even while the selection moves across the rails.
-        auto patch=frame;
-        suiteosd::CinematicArtwork(patch,*art,X(x)+(X(w)-art->width)/2,
-            Y(y)+(Y(h)-art->height)/2,X(x),Y(y),X(w),Y(h),X(r),
-            std::max(1.0,(focused?3.5:1.2)*width/1600.0));
-        drawCinemaImage(patch.image,patch.x,patch.y);
+        const std::array<int,7> geom{{x,y,w,h,r,int(focused),int(nav.sideFocused)}};
+        const auto key=std::make_pair(geom,reinterpret_cast<std::uintptr_t>(art));
+        auto it=cinematicComposites.find(key);
+        if(it==cinematicComposites.end()){
+            if(cinematicComposites.size()>=80)cinematicComposites.clear();
+            auto patch=frame;
+            suiteosd::CinematicArtwork(patch,*art,X(x)+(X(w)-art->width)/2,
+                Y(y)+(Y(h)-art->height)/2,X(x),Y(y),X(w),Y(h),X(r),
+                std::max(1.0,(focused?3.5:1.2)*width/1600.0));
+            it=cinematicComposites.emplace(key,std::move(patch)).first;
+        }
+        drawCinemaImage(it->second.image,it->second.x,it->second.y);
     }
     void portraitTitle(int x,int top,const std::string &title,const std::string &subtitle) {
-        const auto lines=suiteosd::HeroLines(title,fontSmall,X(HL::cardWidth-16));
+        const auto *f=fontCinemaCard?fontCinemaCard:fontSmall;
+        const auto lines=suiteosd::HeroLines(title,f,X(HL::cardWidth-16));
         for(int i=0;i<2&&i<int(lines.size());++i)
-            print(x+8,top+HL::cardHeight-65+i*18,lines[i],fontSmall,kText,HL::cardWidth-16);
-        print(x+8,top+HL::cardHeight-28,subtitle,fontSmall,0xFFD8E4F2u,HL::cardWidth-16);
+            print(x+8,top+HL::cardHeight-65+i*18,lines[i],f,kText,HL::cardWidth-16);
+        print(x+8,top+HL::cardHeight-28,subtitle,fontCinemaMeta?fontCinemaMeta:fontSmall,0xFFD8E4F2u,HL::cardWidth-16);
     }
     void cinematicHeading(int y,const std::string &heading)
     {
         print(homeLeft(),y,heading,fontLarge,kText,800);
+        if(!fontLarge)return;
         const int x=homeLeft()+fontLarge->Width(heading.c_str())*1600/std::max(1,width)+15;
         for(int j=0;j<8;++j){fill(x+j,y+8+j,x+j+1,y+9+j,kText);
             fill(x+7-j,y+16+j,x+8-j,y+17+j,kText);}
@@ -1713,7 +1724,7 @@ private:
     {
         const std::string key="rec:"+rec.fileName+":"+std::to_string(w)+":"+std::to_string(h);
         auto it=homeArtwork.find(key);if(it!=homeArtwork.end())return it->second;
-        if(homeArtwork.size()>=48)homeArtwork.clear();
+        if(homeArtwork.size()>=48){cinematicComposites.clear();homeArtwork.clear();}
         std::string path;
         if(auto *scraper=cPluginManager::GetPlugin("tvscraper")){
             LOCK_RECORDINGS_READ;
@@ -2040,7 +2051,7 @@ private:
             if((it==homeRails.end()||!it->second.status.ok)&&i>=0&&i<int(data.recordings.size()))
                 rec=&data.recordings[i];
         }
-        std::string key,title,description,facts;
+        std::string key,title,description,facts,genre;
         if(p){
             key="event:"+std::to_string(p->channelNumber)+":"+std::to_string(p->eventId)+":"+std::to_string(p->start);
             title=p->title;description=p->description;facts=p->channel;
@@ -2105,7 +2116,7 @@ private:
                 const int minutes=v.duration>0?(v.duration+59)/60:v.metadata.runtime;
                 if(minutes>0)facts+=(facts.empty()?"":" · ")+std::to_string(minutes)+" Min.";
             }
-            if(!v.metadata.genres.empty())facts+=(facts.empty()?"":" · ")+v.metadata.genres.front();
+            if(!v.metadata.genres.empty())genre=v.metadata.genres.front();
         }
         const int tx=HL::right+20,tw=HL::rightWidth-40;
         const auto titleLines=suiteosd::HeroLines(title.empty()?"Sendung oder Aufnahme auswählen":title,fontLarge,X(tw));
@@ -2120,7 +2131,9 @@ private:
             std::string timing=p->time+" · "+std::to_string((p->end-p->start+59)/60)+" Min.";
             print(tx,y,timing,fontSmall,kText,tw);y+=23;
             if(left>=0){print(tx,y,"Noch "+std::to_string(left)+" Min.",fontSmall,0xFF16DDF2u,tw);y+=23;}
+            else if(p->start>time(nullptr)){print(tx,y,"Beginn: "+formatTime(p->start),fontSmall,kFocus,tw);y+=23;}
         }else if(rec){print(tx,y,recordingDate(rec->start),fontSmall,kMuted,tw);y+=23;}
+        if(!genre.empty()){print(tx,y,genre,fontCinemaMeta?fontCinemaMeta:fontSmall,0xFF70DBF5u,tw);y+=20;}
         y+=8;
         std::string director,cast;
         if(cached!=focusPreviews.end()){
@@ -3952,11 +3965,18 @@ private:
         for(int i=0;i<int(kSidebar.size());++i){
             const int y=112+i*55;
             const bool selected=nav.sideFocused&&nav.sideIndex==i;
-            if(selected||(!nav.sideFocused&&i==0))
-                cinemaPanel(19,y,right-38,48,13,suiteosd::CinemaStyle::Sidebar);
-            suiteosd::DrawSidebarIcon(i,[&](int px,int py){
-                fill(43+px,y+12+py,44+px,y+13+py,kText);
-            });
+            const bool active=selected||(!nav.sideFocused&&i==0);
+            const suiteosd::CinemaPatch *frame=nullptr;
+            if(active){
+                frame=&cinemaFrame(19,y,right-38,48,13,suiteosd::CinemaStyle::Sidebar);
+                drawCinemaImage(frame->image,frame->x,frame->y);
+            }
+            const std::array<int,4> key{{i,int(nav.sideFocused),int(active),width}};
+            auto glyph=cinematicGlyphs.find(key);
+            if(glyph==cinematicGlyphs.end())
+                glyph=cinematicGlyphs.emplace(key,suiteosd::CinematicGlyphPatch(
+                    cinematicBackground(),frame,X(43),Y(y+9),std::max(1,X(30)),i)).first;
+            drawCinemaImage(glyph->second.image,glyph->second.x,glyph->second.y);
             if(nav.sideFocused)print(96,y+11,kSidebar[i],fontBody,kText,right-104);
         }
     }
@@ -4113,6 +4133,9 @@ public:
         delete fontLarge;
         delete fontBody;
         delete fontSmall;
+        delete fontCinemaBrand;
+        delete fontCinemaCard;
+        delete fontCinemaMeta;
     }
 
     void Show() override
@@ -4132,6 +4155,9 @@ public:
         fontLarge = cFont::CreateFont("Sans:Bold", std::max(16, Y(29)));
         fontBody = cFont::CreateFont("Sans", std::max(14, Y(23)));
         fontSmall = cFont::CreateFont("Sans", std::max(12, Y(19)));
+        fontCinemaBrand = cFont::CreateFont("Sans:Bold",std::max(20,Y(34)));
+        fontCinemaCard = cFont::CreateFont("Sans:Bold",std::max(12,Y(18)));
+        fontCinemaMeta = cFont::CreateFont("Sans",std::max(11,Y(16)));
         nav.section=1;
         if (!gReplayPersonSearch.empty()) {
             searchFromReplay=true;
@@ -4223,7 +4249,7 @@ public:
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
             recordingDetailImages.clear();
             focusPreviews.clear();focusKey.clear();focusPending=false;
-            homeArtwork.clear();
+            cinematicComposites.clear();cinematicLogos.clear();homeArtwork.clear();
             homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();loadHomeRail(nav.section);
             nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
