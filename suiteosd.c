@@ -73,6 +73,19 @@ int gLivePreviewEnabled = 1;
 // Persisted through suiteosd.PhotoView: 0 = grid, 1 = carousel.
 int gPhotoViewMode = 1;
 char gCoreUrl[256] = "http://127.0.0.1:18080";
+char gDeviceName[129] = "VDR Suite OSD";
+
+std::string deviceProfilePath()
+{
+    const char *dir = cPlugin::ConfigDirectory("suiteosd");
+    return dir && *dir ? std::string(dir) + "/device-profiles.json" : "";
+}
+bool restoreDevice(suiteosd::CoreAdminClient &client)
+{
+    suiteosd::DeviceCredential credential;
+    return suiteosd::loadDeviceProfile(deviceProfilePath(),client.origin(),credential) &&
+           client.setDeviceCredential(credential);
+}
 std::string gReplayPersonSearch;
 
 struct Programme {
@@ -4048,6 +4061,34 @@ private:
     int livePreview;
     int photoView;
     char coreUrl[256] = {};
+    char deviceName[129] = {};
+    suiteosd::CoreAdminClient pairingClient{gCoreUrl};
+    suiteosd::DevicePairing pairing;
+    // Issued credential is retained only in memory until the private vault
+    // confirms storage. A storage failure must not repeat issuance.
+    suiteosd::DeviceCredential issued;
+    cOsdItem *stateItem = nullptr;
+    cOsdItem *codeItem = nullptr;
+    cOsdItem *startItem = nullptr;
+    cOsdItem *finishItem = nullptr;
+    cOsdItem *testItem = nullptr;
+    cOsdItem *forgetItem = nullptr;
+
+    void setStatus(const std::string &message)
+    {
+        stateItem->SetText(message.c_str());
+        const std::string code = pairing.userCode.empty() ? "" :
+            "Kopplungscode: " + pairing.userCode;
+        codeItem->SetText(code.empty() ? "Im Webfrontend bestätigen" : code.c_str());
+        Display();
+    }
+    void selectServer()
+    {
+        if (pairingClient.origin() != coreUrl) {
+            pairing = {};
+            pairingClient.setOrigin(coreUrl);
+        }
+    }
 protected:
     void Store(void) override
     {
@@ -4057,18 +4098,84 @@ protected:
         SetupStore("PhotoView", gPhotoViewMode);
         std::snprintf(gCoreUrl, sizeof(gCoreUrl), "%s", coreUrl);
         SetupStore("CoreURL", gCoreUrl);
+        std::snprintf(gDeviceName, sizeof(gDeviceName), "%s", deviceName);
+        SetupStore("DeviceName", gDeviceName);
     }
 public:
     cMenuSuiteOsdSetup(void)
         : livePreview(gLivePreviewEnabled), photoView(gPhotoViewMode)
     {
         std::snprintf(coreUrl, sizeof(coreUrl), "%s", gCoreUrl);
+        std::snprintf(deviceName, sizeof(deviceName), "%s", gDeviceName);
         SetSection("VDR Suite-OSD");
         Add(new cMenuEditBoolItem("Live-TV-Vorschau in Home und Aufnahmen", &livePreview));
         static const char * const views[] = {"Raster", "Karussell"};
         Add(new cMenuEditStraItem("Bildergalerie - Anzeigeart",
                                   &photoView, 2, views));
         Add(new cMenuEditStrItem("VDR-Suite Core URL", coreUrl, sizeof(coreUrl)));
+        Add(new cMenuEditStrItem("Gerätename", deviceName, sizeof(deviceName)));
+        Add(stateItem = new cOsdItem(
+            restoreDevice(pairingClient) ? "Geräteberechtigung gespeichert" : "Nicht gekoppelt",
+            osUnknown, false));
+        Add(codeItem = new cOsdItem("Im Webfrontend bestätigen",osUnknown,false));
+        Add(startItem = new cOsdItem("Gerät koppeln"));
+        Add(finishItem = new cOsdItem("Bestätigung prüfen / Kopplung abschließen"));
+        Add(testItem = new cOsdItem("Verbindung testen"));
+        Add(forgetItem = new cOsdItem("Lokale Kopplung aufheben"));
+    }
+    eOSState ProcessKey(eKeys Key) override
+    {
+        if (Key != kOk) return cMenuSetupPage::ProcessKey(Key);
+        cOsdItem *item = Get(Current());
+        if (item != startItem && item != finishItem &&
+            item != testItem && item != forgetItem)
+            return cMenuSetupPage::ProcessKey(Key);
+        selectServer();
+        if (item == startItem) {
+            if (!issued.secret.empty()) {
+                setStatus("Zuerst ausgestellte Berechtigung speichern");
+                return osContinue;
+            }
+            const auto r = pairingClient.beginPairing(deviceName,VERSION,pairing);
+            setStatus(r.ok ? "Im Webfrontend unter Wartende Geräte bestätigen" : r.message);
+        } else if (item == finishItem) {
+            if (issued.secret.empty()) {
+                const auto r = pairingClient.readPairing(pairing);
+                if (!r.ok) { setStatus(r.message); return osContinue; }
+                if (pairing.state != "approved") {
+                    setStatus(pairing.state == "rejected" ?
+                        "Kopplung abgelehnt" : "Warte auf Bestätigung im Webfrontend");
+                    return osContinue;
+                }
+                const auto result = pairingClient.issuePairing(pairing,issued);
+                if (!result.ok) { setStatus(result.message); return osContinue; }
+            }
+            if (!suiteosd::saveDeviceProfile(deviceProfilePath(),issued)) {
+                setStatus("Speichern fehlgeschlagen – erneut Abschließen wählen");
+                return osContinue;
+            }
+            if (issued.origin == pairingClient.origin())
+                pairingClient.setDeviceCredential(issued);
+            issued = {};
+            setStatus("Gekoppelt – Rechte im Webfrontend vergeben");
+        } else if (item == testItem) {
+            if (!restoreDevice(pairingClient)) {
+                setStatus("Keine gespeicherte Kopplung für diesen Server");
+                return osContinue;
+            }
+            const auto r = pairingClient.testDevice();
+            setStatus(r.ok ? "Verbunden – Geräteanmeldung bestätigt" : r.message);
+        } else {
+            if (!suiteosd::removeDeviceProfile(deviceProfilePath(),pairingClient.origin())) {
+                setStatus("Lokale Kopplung konnte nicht entfernt werden");
+                return osContinue;
+            }
+            pairingClient.forgetDevice();
+            pairing = {};
+            if (issued.origin == pairingClient.origin()) issued = {};
+            setStatus("Lokal entkoppelt – Servergerät im Webfrontend widerrufen");
+        }
+        return osContinue;
     }
 };
 
@@ -4092,6 +4199,10 @@ public:
         }
         if (std::strcmp(Name, "CoreURL") == 0) {
             std::snprintf(gCoreUrl, sizeof(gCoreUrl), "%s", Value);
+            return true;
+        }
+        if (std::strcmp(Name, "DeviceName") == 0) {
+            std::snprintf(gDeviceName, sizeof(gDeviceName), "%s", Value);
             return true;
         }
         return false;

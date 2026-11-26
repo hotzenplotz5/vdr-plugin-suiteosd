@@ -10,6 +10,11 @@
 #include <memory>
 #include <mutex>
 #include <utility>
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cstdio>
 
 namespace suiteosd {
 namespace {
@@ -534,7 +539,10 @@ CoreAdminClient::Reply CoreAdminClient::request(
         if (!username.empty()) {
             // Login is a bodyless POST authenticated by Human Basic.
         } else {
-            headers = curl_slist_append(headers, "Content-Type: application/json");
+            if (!anonymous || !body.empty())
+                headers = curl_slist_append(headers, "Content-Type: application/json");
+            else
+                headers = curl_slist_append(headers, "Content-Type:");
             if (!anonymous && !csrf_.empty()) {
                 const std::string csrf = "X-CSRF-Token: " + csrf_;
                 headers = curl_slist_append(headers, csrf.c_str());
@@ -623,6 +631,92 @@ bool wireSecret(const std::string &value) {
         });
 }
 }
+namespace {
+constexpr size_t kProfileFileLimit = 256U * 1024U;
+Document readProfiles(const std::string &path) {
+    if (path.empty()) return Document(nullptr,&json_object_put);
+    int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+        if (errno == ENOENT)
+            return Document(json_object_new_object(),&json_object_put);
+        return Document(nullptr,&json_object_put);
+    }
+    struct stat st{};
+    if (fstat(fd,&st) != 0 || !S_ISREG(st.st_mode) ||
+        st.st_uid != geteuid() || (st.st_mode & 077) != 0 ||
+        st.st_size < 0 || size_t(st.st_size) > kProfileFileLimit) {
+        close(fd);
+        return Document(nullptr,&json_object_put);
+    }
+    std::string bytes;
+    char buffer[4096];
+    bool ok = true;
+    for (;;) {
+        const auto n = read(fd,buffer,sizeof(buffer));
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 || (n > 0 && bytes.size()+size_t(n)>kProfileFileLimit)) {
+            ok = false; break;
+        }
+        if (!n) break;
+        bytes.append(buffer,size_t(n));
+    }
+    close(fd);
+    return ok ? parse(bytes) : Document(nullptr,&json_object_put);
+}
+bool writeProfiles(const std::string &path,json_object *root) {
+    const std::string bytes = jsonText(root);
+    if (bytes.size() > kProfileFileLimit) return false;
+    std::string temp = path + ".XXXXXX";
+    const int fd = mkstemp(&temp[0]); // mode 0600; same directory for atomic rename
+    if (fd < 0) return false;
+    size_t offset = 0;
+    while (offset < bytes.size()) {
+        const auto n = write(fd,bytes.data()+offset,bytes.size()-offset);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) break;
+        offset += size_t(n);
+    }
+    bool ok = offset == bytes.size() && fsync(fd) == 0;
+    if (close(fd) != 0) ok = false;
+    if (ok) ok = rename(temp.c_str(),path.c_str()) == 0;
+    if (!ok) unlink(temp.c_str());
+    return ok;
+}
+bool validDevice(const DeviceCredential &c) {
+    return safeOrigin(c.origin) && safeId(c.deviceId) &&
+           safeId(c.credentialId) && wireSecret(c.secret);
+}
+}
+bool loadDeviceProfile(const std::string &path,const std::string &origin,
+                       DeviceCredential &credential) {
+    auto root = readProfiles(path);
+    auto *item = field(root.get(),origin.c_str());
+    DeviceCredential next{origin,stringOf(item,"deviceId"),
+        stringOf(item,"credentialId"),stringOf(item,"secret")};
+    if (!validDevice(next)) return false;
+    credential = std::move(next);
+    return true;
+}
+bool saveDeviceProfile(const std::string &path,const DeviceCredential &credential) {
+    if (!validDevice(credential)) return false;
+    auto root = readProfiles(path);
+    if (!root) return false;
+    auto *item = json_object_new_object();
+    if (!item) return false;
+    json_object_object_add(item,"deviceId",json_object_new_string(credential.deviceId.c_str()));
+    json_object_object_add(item,"credentialId",json_object_new_string(credential.credentialId.c_str()));
+    json_object_object_add(item,"secret",json_object_new_string(credential.secret.c_str()));
+    json_object_object_add(root.get(),credential.origin.c_str(),item);
+    return writeProfiles(path,root.get());
+}
+bool removeDeviceProfile(const std::string &path,const std::string &origin) {
+    auto root = readProfiles(path);
+    if (!root) return false;
+    if (!field(root.get(),origin.c_str())) return true;
+    json_object_object_del(root.get(),origin.c_str());
+    return writeProfiles(path,root.get());
+}
+
 CoreStatus CoreAdminClient::beginPairing(const std::string &name,
         const std::string &version, DevicePairing &pairing) {
     const auto r = request("POST", "/api/v1/device-pairings",

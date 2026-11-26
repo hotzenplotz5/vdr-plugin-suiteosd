@@ -6,6 +6,7 @@
 #include <sys/un.h>
 #include <cstdlib>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -352,6 +353,23 @@ int main() {
     pairingClient.setOrigin("https://other.invalid");
     assert(!pairingClient.setDeviceCredential(credential));
     assert(!pairingClient.testDevice().ok);
+
+    char vaultDir[]="/tmp/suiteosd-profile-XXXXXX";
+    assert(mkdtemp(vaultDir));
+    const auto vault=std::string(vaultDir)+"/devices.json";
+    suiteosd::DeviceCredential other{"https://other.invalid","device-b","cred-b","secret-b"};
+    assert(suiteosd::saveDeviceProfile(vault,credential));
+    assert(suiteosd::saveDeviceProfile(vault,other));
+    struct stat vaultStat{};
+    assert(stat(vault.c_str(),&vaultStat)==0&&(vaultStat.st_mode&0777)==0600);
+    suiteosd::DeviceCredential restored;
+    assert(suiteosd::loadDeviceProfile(vault,credential.origin,restored));
+    assert(restored.secret==credential.secret&&restored.deviceId==credential.deviceId);
+    assert(suiteosd::loadDeviceProfile(vault,other.origin,restored)&&restored.secret=="secret-b");
+    assert(suiteosd::removeDeviceProfile(vault,credential.origin));
+    assert(!suiteosd::loadDeviceProfile(vault,credential.origin,restored));
+    assert(suiteosd::loadDeviceProfile(vault,other.origin,restored)&&restored.secret=="secret-b");
+    unlink(vault.c_str());rmdir(vaultDir);
 
     suiteosd::CoreAdminClient operatorConfigured("http://192.0.2.1:18080");
     assert(operatorConfigured.configured());

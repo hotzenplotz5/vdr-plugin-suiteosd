@@ -84,6 +84,13 @@ struct DevicePairing {
 struct DeviceCredential {
     std::string origin, deviceId, credentialId, secret;
 };
+// Local, private credential vault keyed by the exact configured server URL.
+// Pairing bootstrap tokens and Human credentials are never persisted here.
+bool loadDeviceProfile(const std::string &path, const std::string &origin,
+                       DeviceCredential &credential);
+bool saveDeviceProfile(const std::string &path, const DeviceCredential &credential);
+bool removeDeviceProfile(const std::string &path, const std::string &origin);
+
 class CoreAdminClient {
     std::string origin_;
     std::string localSocket_;
@@ -127,6 +134,7 @@ public:
     bool setDeviceCredential(const DeviceCredential &credential);
     CoreStatus testDevice();
     void forgetDevice() { device_ = {}; }
+    bool hasDeviceCredential() const { return !device_.credentialId.empty(); }
 
     CoreStatus recordingPersons(const std::string &backendId, const std::string &name,
                                 int limit, int offset, CorePersonSearch &results);
