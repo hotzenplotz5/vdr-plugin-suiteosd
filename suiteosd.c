@@ -1942,6 +1942,8 @@ private:
             &it->second.page.cards[index]:nullptr;
     }
     void drawHomeSidePanel() {
+        const bool liveFocused=homeCollections.empty()&&nav.section==0&&!nav.sideFocused;
+        if(liveFocused)roundedHomeRect(HL::right-2,78,HL::rightWidth+4,264,14,0xFF16E0F8);
         roundedHomeRect(HL::right,80,HL::rightWidth,260,12,0xFF142C43);
         if(scaledDevice&&!scaledRect.IsEmpty()){
             osd->DrawRectangle(scaledRect.X(),scaledRect.Y(),
@@ -2014,6 +2016,7 @@ private:
         if(cached!=focusPreviews.end()){
             const auto &v=cached->second;
             homePicture(v.fanart,HL::right+12,HL::detailY+8,348,196);
+            if(!v.fanart.valid())print(HL::right+12,HL::detailY+92,"Keine Fanart verfügbar",fontSmall,kMuted,348);
             if(!v.metadata.title.empty())title=v.metadata.title;
             if(!v.metadata.episode.empty()&&v.metadata.episode!=title)title+=" – "+v.metadata.episode;
             if(description.empty())description=v.metadata.overview;
@@ -2023,20 +2026,18 @@ private:
                 if(minutes>0)facts+=(facts.empty()?"":" · ")+std::to_string(minutes)+" Min.";
             }
         }
-        if(p&&p->end>p->start) {
-            facts+=" · "+p->time+" · "+std::to_string((p->end-p->start+59)/60)+" Min.";
-        }
         const int tx=HL::right+12;
-        print(tx,565,title.empty()?"Sendung oder Aufnahme auswählen":title,fontBody,kText,348);
-        for(const auto &line:suiteosd::HeroLines(facts,fontSmall,X(348))){
-            if(!facts.empty()){print(tx,600,line,fontSmall,kMuted,348);break;}
-        }
-        if(p){
+        const auto titleLines=suiteosd::HeroLines(title.empty()?"Sendung oder Aufnahme auswählen":title,fontBody,X(348));
+        for(int i=0;i<2&&i<int(titleLines.size());++i)
+            print(tx,558+i*25,titleLines[i],fontBody,kText,348);
+        if(!facts.empty())print(tx,612,facts,fontSmall,kMuted,348);
+        if(p&&p->end>p->start){
+            print(tx,635,p->time+" · "+std::to_string((p->end-p->start+59)/60)+" Min.",fontSmall,kMuted,348);
             const int left=HL::remainingMinutes(p->start,p->end,time(nullptr));
-            if(left>=0)print(tx,626,"Läuft noch "+std::to_string(left)+" Min.",fontSmall,0xFF16DDF2,348);
-            else if(p->start>time(nullptr))print(tx,626,"Beginn: "+formatTime(p->start),fontSmall,kFocus,348);
-        }else if(rec)print(tx,626,recordingDate(rec->start),fontSmall,kMuted,348);
-        int y=654;
+            if(left>=0)print(tx,658,"Läuft noch "+std::to_string(left)+" Min.",fontSmall,0xFF16DDF2,348);
+            else if(p->start>time(nullptr))print(tx,658,"Beginn: "+formatTime(p->start),fontSmall,kFocus,348);
+        }else if(rec)print(tx,635,recordingDate(rec->start),fontSmall,kMuted,348);
+        int y=p?684:658;
         for(const auto &line:suiteosd::HeroLines(description,fontSmall,X(348))){
             if(y>796)break;
             if(!title.empty())print(tx,y,line,fontSmall,kText,348);

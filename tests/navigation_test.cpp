@@ -21,7 +21,7 @@ int main()
     assert(n.section == 2);
     assert(n.firstCard[1] == 4);
     n.Move(Direction::Down, 6, 4);
-    assert(n.section == Navigation::kNew && n.firstVisibleSection == 2);
+    assert(n.section == Navigation::kNew && n.firstVisibleSection == 1);
     assert(n.Move(Direction::Select, 6, 4) == Activation::Recording);
     n.Move(Direction::Down,6,4);
     assert(n.section==Navigation::kContinue && n.Move(Direction::Select,6,4)==Activation::HomeCard);
@@ -49,6 +49,8 @@ int main()
     static_assert(HomeLayout::cardWidth*3==HomeLayout::cardHeight*2);
     assert(HomeLayout::firstRow(0,10)==1);
     assert(HomeLayout::firstRow(2,10)==1);
+    assert(HomeLayout::firstRow(3,10)==1);
+    assert(HomeLayout::firstRow(4,10)==2);
     assert(HomeLayout::firstRow(9,10)==7);
     assert(HomeLayout::remainingMinutes(100,5500,2800)==45);
     assert(HomeLayout::remainingMinutes(100,5500,5500)==-1);

@@ -14,7 +14,7 @@ struct HomeLayout {
     static constexpr int cardX(int column){return left+column*(cardWidth+gap);}
     static constexpr int headingY(int row){return top+row*rowStep;}
     static constexpr int firstRow(int section,int sections){
-        return std::clamp(section-1,1,std::max(1,sections-rows));
+        return std::clamp(section-rows+1,1,std::max(1,sections-rows));
     }
     static constexpr int remainingMinutes(std::int64_t start,std::int64_t end,std::int64_t now){
         return start<=now&&now<end?int((end-now+59)/60):-1;

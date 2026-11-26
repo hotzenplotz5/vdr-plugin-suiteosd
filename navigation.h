@@ -85,8 +85,8 @@ struct Navigation {
             }
         }
         KeepVisible(visibleCards, sectionCount);
-        // The hero occupies a full section and stays in the viewport until
-        // moving to lower rails. No visible scroll bar is rendered.
+        // The first three rails stay visible together; subsequent rails scroll
+        // vertically. Section zero focuses the separate live panel.
         firstVisibleSection = HomeLayout::firstRow(section,kSections);
         return Activation::None;
     }
