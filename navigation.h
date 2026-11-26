@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include "home_layout.h"
 
 namespace suiteosd {
 
@@ -12,9 +13,9 @@ enum class Direction { Up, Down, Left, Right, Select, Back };
 enum class Activation { None, Close, Hero, ChannelNow, ChannelNext, Recording, Module, HomeCard };
 
 struct Navigation {
-    static constexpr int kHomeVisibleCards = 5;
-    static constexpr int kSections = 10; // hero, now, next, continue, new, genres, folders, recommendation, movies, recent
-    static constexpr int kContinue = 3, kNew = 4, kGenres = 5, kFolders = 6, kRecommendation=7, kMovies = 8, kRecent = 9;
+    static constexpr int kHomeVisibleCards = HomeLayout::columns;
+    static constexpr int kSections = 10; // hero, now, next, new, continue, genres, folders, recommendation, movies, recent
+    static constexpr int kContinue = 4, kNew = 3, kGenres = 5, kFolders = 6, kRecommendation=7, kMovies = 8, kRecent = 9;
     static constexpr int kSidebarItems = 13;
     static constexpr int kClassicMenuItem = 12;
     static constexpr int kSearchItem = 11;
@@ -59,7 +60,7 @@ struct Navigation {
                 default: return Activation::Module; // VDR menus or installed plugins
                 }
                 KeepVisible(visibleCards, sectionCount);
-                firstVisibleSection = std::max(1,section-1);
+                firstVisibleSection = HomeLayout::firstRow(section,kSections);
             }
             return Activation::None;
         }
@@ -86,7 +87,7 @@ struct Navigation {
         KeepVisible(visibleCards, sectionCount);
         // The hero occupies a full section and stays in the viewport until
         // moving to lower rails. No visible scroll bar is rendered.
-        firstVisibleSection = std::max(1,section-1);
+        firstVisibleSection = HomeLayout::firstRow(section,kSections);
         return Activation::None;
     }
 };

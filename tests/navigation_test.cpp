@@ -21,10 +21,10 @@ int main()
     assert(n.section == 2);
     assert(n.firstCard[1] == 4);
     n.Move(Direction::Down, 6, 4);
-    assert(n.section == 3 && n.firstVisibleSection == 2);
-    assert(n.Move(Direction::Select, 6, 4) == Activation::HomeCard);
+    assert(n.section == Navigation::kNew && n.firstVisibleSection == 2);
+    assert(n.Move(Direction::Select, 6, 4) == Activation::Recording);
     n.Move(Direction::Down,6,4);
-    assert(n.section==Navigation::kNew && n.Move(Direction::Select,6,4)==Activation::Recording);
+    assert(n.section==Navigation::kContinue && n.Move(Direction::Select,6,4)==Activation::HomeCard);
     n.Move(Direction::Left, 6, 4);
     assert(n.sideFocused);
     n.Move(Direction::Up, 6, 4);
@@ -44,8 +44,15 @@ int main()
 
     Navigation posterRails;
     posterRails.Move(Direction::Down, 12, Navigation::kHomeVisibleCards);
-    for(int i=0;i<5;++i)posterRails.Move(Direction::Right,12,Navigation::kHomeVisibleCards);
-    assert(posterRails.card[1]==5 && posterRails.firstCard[1]==1);
+    for(int i=0;i<6;++i)posterRails.Move(Direction::Right,12,Navigation::kHomeVisibleCards);
+    assert(posterRails.card[1]==6 && posterRails.firstCard[1]==1);
+    static_assert(HomeLayout::cardWidth*3==HomeLayout::cardHeight*2);
+    assert(HomeLayout::firstRow(0,10)==1);
+    assert(HomeLayout::firstRow(2,10)==1);
+    assert(HomeLayout::firstRow(9,10)==7);
+    assert(HomeLayout::remainingMinutes(100,5500,2800)==45);
+    assert(HomeLayout::remainingMinutes(100,5500,5500)==-1);
+    assert(HomeLayout::remainingMinutes(100,5500,99)==-1);
 
     Navigation direct;
     direct.Move(Direction::Left, 1, 4);

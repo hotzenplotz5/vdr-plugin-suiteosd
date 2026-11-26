@@ -24,7 +24,7 @@ all: $(SOFILE)
 $(SOFILE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -o $@ $^ $(ARTWORK_LIBS) $(CORE_LIBS)
 
-suiteosd.o: suiteosd.c web_palette.h sidebar_icons.h navigation.h core_admin_client.h core_admin_navigation.h settings_navigation.h recording_browser.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h photo_gallery.h photo_carousel.h image-next-service-v1.h epg_timeline.h logo_locator.h artwork_decode.h scraper_detail.h detail_model.h recording_detail_view.h search_navigation.h vendor/tvscraper/services.h
+suiteosd.o: suiteosd.c home_layout.h web_palette.h sidebar_icons.h navigation.h core_admin_client.h core_admin_navigation.h settings_navigation.h recording_browser.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h photo_gallery.h photo_carousel.h image-next-service-v1.h epg_timeline.h logo_locator.h artwork_decode.h scraper_detail.h detail_model.h recording_detail_view.h search_navigation.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 suite_menu.o: suite_menu.c web_palette.h artwork_decode.h scraper_detail.h detail_model.h recording_detail_view.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h vendor/tvscraper/services.h
