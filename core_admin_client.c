@@ -1056,6 +1056,79 @@ CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row
     next.startTime=stringOf(root.get(),"recordedAt");
     detail=std::move(next);return last_;
 }
+CoreStatus CoreAdminClient::publicHomePage(const std::string &backend,HomeKind kind,
+    const std::string &key,int limit,int offset,int year,CoreHomePage &page) {
+    if(!hasDeviceCredential()||!safeId(backend)||limit<1||limit>30||offset<0)
+        return (last_={false,0,"Geräteanmeldung oder Home-Abfrage ungültig"});
+    const auto scope="?backendId="+queryEncode(backend);
+    const auto pagination="&limit="+std::to_string(limit)+"&offset="+std::to_string(offset);
+    const bool history=kind==HomeKind::Continue||kind==HomeKind::Recent;
+    std::string route;
+    switch(kind){
+    case HomeKind::Continue: route="/api/v1/recording-playback-sessions/continue-watching"+scope;break;
+    case HomeKind::Recent: route="/api/v1/recording-playback-sessions/recently-watched"+scope;break;
+    case HomeKind::Genres: route="/api/v1/genres"+scope+pagination+"&locale=de";break;
+    case HomeKind::Genre: route="/api/v1/genres/recordings"+scope+"&genreId="+queryEncode(key)+pagination+"&locale=de";break;
+    case HomeKind::Folders: case HomeKind::Root:
+        route="/api/v1/recordings"+scope+"&view=folders"+pagination;
+        if(!key.empty())route+="&folderId="+queryEncode(key);
+        break;
+    case HomeKind::New: route="/api/v1/recordings"+scope+"&view=new"+pagination;break;
+    case HomeKind::Movies: route="/api/v1/recordings"+scope+"&view=movies&movieReleaseYearFrom="+
+        std::to_string(year-4)+"&movieReleaseYearTo="+std::to_string(year)+pagination;break;
+    }
+    const auto r=request("GET",route);
+    if(!status(r).ok)return last_;
+    const auto root=parse(r.body);
+    auto *items=field(root.get(),"items"),*paging=field(root.get(),"page");
+    const auto invalid=[&](){return (last_={false,r.http,"Ungültige Public-v1-Home-Antwort"});};
+    if(!json_object_is_type(items,json_type_array))return invalid();
+    const auto n=json_object_array_length(items);
+    CoreHomePage next;
+    size_t begin=0,end=n;
+    if(history){
+        if(stringOf(root.get(),"backendId")!=backend||n>100)return invalid();
+        next.total=n;begin=std::min(n,size_t(offset));end=std::min(n,begin+size_t(limit));
+        next.nextOffset=int(end);next.hasMore=end<n;
+    }else{
+        next.total=integerOf(paging,"totalCount");
+        if(next.total<0||integerOf(paging,"offset")!=offset||integerOf(paging,"limit")!=limit||
+           n>size_t(limit)||!json_object_is_type(field(paging,"hasMore"),json_type_boolean))
+            return invalid();
+        next.nextOffset=offset+int(n);next.hasMore=boolOf(paging,"hasMore");
+    }
+    for(size_t i=begin;i<end;++i){
+        auto *item=json_object_array_get_idx(items,i);
+        CoreHomeCard card;
+        if(kind==HomeKind::Genres){
+            card.kind=CoreHomeCard::Kind::Genre;card.key=stringOf(item,"genreId");
+            card.title=stringOf(item,"label");card.count=integerOf(item,"count");
+            card.subtitle=std::to_string(card.count)+" Aufnahmen";
+            if(card.count<0)return invalid();
+        }else if((kind==HomeKind::Folders||kind==HomeKind::Root)&&stringOf(item,"kind")=="folder"){
+            card.kind=CoreHomeCard::Kind::Folder;card.key=stringOf(item,"folderId");
+            card.title=stringOf(item,"name");card.count=integerOf(item,"recordingCount");
+            card.subtitle=std::to_string(card.count)+" Aufnahmen";
+            if(card.count<0)return invalid();
+        }else{
+            if(!history&&stringOf(item,"backendId")!=backend)return invalid();
+            card.recording=readSearchRecording(item);
+            card.recording.backendId=backend;card.recording.nativeId.clear();
+            card.recording.startTime=stringOf(item,"recordedAt");
+            card.key=card.recording.id;card.title=card.recording.title;
+            card.subtitle=card.recording.subtitle;
+            card.position=integerOf(item,"positionSeconds");
+            card.duration=integerOf(item,"durationSeconds");
+            card.completed=boolOf(item,"completed");
+            if(card.key.rfind("rec_",0)!=0)return invalid();
+            if(card.title.empty())return (last_={false,r.http,"Core-Lesevertrag ohne Aufnahmetitel"});
+        }
+        if(!safeId(card.key)||card.title.empty())return invalid();
+        next.cards.push_back(std::move(card));
+    }
+    page=std::move(next);return last_;
+}
+
 CoreStatus CoreAdminClient::homePage(const std::string &backend,HomeKind kind,
     const std::string &key,int limit,int offset,int year,CoreHomePage &page) {
     std::string route,method="GET",body;

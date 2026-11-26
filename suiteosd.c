@@ -46,6 +46,7 @@
 #include <cmath>
 #include <chrono>
 #include <future>
+#include <deque>
 #include <thread>
 #include <ctime>
 #include <cstring>
@@ -477,10 +478,6 @@ private:
     std::string settingsNotice;
     suiteosd::CoreAdminClient coreAdmin{gCoreUrl};
     suiteosd::CoreAdminNavigation coreNav;
-    // Existing native local data transport stays independent of remote Device pairing.
-    suiteosd::CoreAdminClient searchClient{"http://localhost",
-        std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") && *std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") ?
-        std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") : "/run/vdr-suite/osd.sock"};
     // HTTP reads own their client on a worker, never the OSD/VDR objects.
     struct SearchRead {
         std::string origin, profile, query;
@@ -507,14 +504,22 @@ private:
         suiteosd::CoreHomePage page;
         suiteosd::CoreStatus status;
         bool attempted = false;
-        bool stale = false;
+        bool stale = false, loading = false;
+        unsigned long requestId=0;
     };
     std::map<int,HomeRail> homeRails;
     std::atomic<bool> homeEventStop{false},homeEventChanged{false};
     std::future<void> homeEventJob;
-    bool movieScanRequested=false,movieScanReady=false,movieScanAvailable=false;
-    size_t movieScanOffset=0;
-    std::vector<std::pair<std::string,suiteosd::CoreHomeCard>> movieCandidates;
+    struct HomeRead {
+        unsigned long id=0;
+        int section=-1, offset=0, year=0;
+        suiteosd::HomeKind kind=suiteosd::HomeKind::New;
+        std::string origin,profile,key;
+    };
+    struct HomeReadback { HomeRead request; suiteosd::CoreStatus status; suiteosd::CoreHomePage page; };
+    std::future<HomeReadback> homeReadJob;
+    std::deque<HomeRead> homeReadQueue;
+    unsigned long homeReadSerial=0;
     std::string recommendedGenreId,recommendedGenreTitle;
     struct HomeCollection {
         suiteosd::HomeKind kind;
@@ -3916,50 +3921,6 @@ private:
     int currentYear() const {
         const auto now=time(nullptr);tm t{};return localtime_r(&now,&t)?1900+t.tm_year:2026;
     }
-    // Local TVScraper fallback, not the shared Core movie query. Work in
-    // small batches on the VDR owner thread; no artwork decoding/full UI scan.
-    void advanceMovieScan(){
-        if(!movieScanRequested||movieScanReady)return;
-        auto *scraper=cPluginManager::GetPlugin("tvscraper");
-        const auto until=std::chrono::steady_clock::now()+std::chrono::milliseconds(12);
-        for(int n=0;scraper&&movieScanOffset<data.recordings.size()&&n<32&&
-            std::chrono::steady_clock::now()<until;++n){
-            const auto &rec=data.recordings[movieScanOffset++];
-            std::string title,release;
-            {
-                LOCK_RECORDINGS_READ;
-                const auto *r=Recordings?Recordings->GetByName(rec.fileName.c_str()):nullptr;
-                if(!r)continue;
-                cGetScraperVideo req(nullptr,r);
-                if(!scraper->Service("GetScraperVideo",&req)||!req.m_scraperVideo||
-                   req.m_scraperVideo->getVideoType()!=tMovie)continue;
-                req.m_scraperVideo->getOverview(&title,nullptr,&release,nullptr,nullptr,nullptr,nullptr);
-            }
-            if(release.size()<4||!std::all_of(release.begin(),release.begin()+4,[](char c){return c>='0'&&c<='9';}))continue;
-            const int year=std::stoi(release.substr(0,4)),now=currentYear();
-            if(year<now-4||year>now)continue;
-            suiteosd::CoreHomeCard card;
-            card.key=rec.fileName;card.title=title.empty()?rec.baseName:title;
-            card.recording.backendId="default";card.recording.nativeId=rec.fileName;
-            card.subtitle=release.substr(0,4);
-            movieCandidates.emplace_back(release,std::move(card));
-        }
-        if(scraper&&movieScanOffset<data.recordings.size())return;
-        movieScanReady=true;movieScanRequested=false;movieScanAvailable=scraper!=nullptr;
-        std::stable_sort(movieCandidates.begin(),movieCandidates.end(),[](const auto &a,const auto &b){return a.first>b.first;});
-        auto it=homeRails.find(suiteosd::Navigation::kMovies);
-        if(it!=homeRails.end()&&(!it->second.status.ok||it->second.status.http==0)){
-            if(scraper&&nativeHomePage(suiteosd::HomeKind::Movies,"",0,it->second.page)){
-                it->second.status={true,0,"Lokaler VDR / TVScraper"};it->second.stale=false;
-            }
-            else it->second.status={false,0,"Filmmetadaten nicht verfügbar"};
-            if(nav.section==suiteosd::Navigation::kMovies)
-                nav.KeepVisible(HL::columns,count(nav.section));
-            const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
-            redrawHomeRail(suiteosd::Navigation::kMovies,first,true);
-            drawHomeFocusPanel();osd->Flush();
-        }
-    }
     void startHomeEvents(){
         const std::string origin=gCoreUrl,path=deviceProfilePath();
         suiteosd::DeviceCredential saved;
@@ -4005,20 +3966,13 @@ private:
             }
         }else if(kind==HomeKind::New){
             for(const auto &rec:data.recordings)cards.push_back(recordingCard(rec));
-        }else if(kind==HomeKind::Movies){
-            if(!movieScanReady||!movieScanAvailable)return false;
-            for(const auto &movie:movieCandidates)cards.push_back(movie.second);
-        }else if(kind==HomeKind::Folders||kind==HomeKind::Root||
-                 kind==HomeKind::Genres||kind==HomeKind::Genre){
+        }else if(kind==HomeKind::Folders||kind==HomeKind::Root){
             suiteosd::RecordingBrowser browser;
-            const bool genre=kind==HomeKind::Genres||kind==HomeKind::Genre;
-            browser.view=genre?suiteosd::RecordingBrowser::View::Genres:
-                               suiteosd::RecordingBrowser::View::Folders;
-            if(genre)browser.genre=key;else browser.folder=key;
+            browser.view=suiteosd::RecordingBrowser::View::Folders;
+            browser.folder=key;
             for(const auto &rec:data.recordings){
                 suiteosd::BrowserRecording row;
                 row.fileName=rec.fileName;row.name=rec.title;row.title=rec.baseName;row.start=rec.start;
-                if(genre)row.genres=genresFor(rec);
                 browser.source.push_back(std::move(row));
             }
             browser.Refresh();
@@ -4046,44 +4000,97 @@ private:
         for(int i=first;i<end;++i)page.cards.push_back(std::move(cards[i]));
         page.nextOffset=end;page.hasMore=end<int(cards.size());return true;
     }
+    void launchHomeRead(){
+        if(homeReadJob.valid()||homeReadQueue.empty())return;
+        auto request=std::move(homeReadQueue.front());homeReadQueue.pop_front();
+        homeReadJob=std::async(std::launch::async,[request]{
+            HomeReadback result;result.request=request;
+            suiteosd::CoreAdminClient client(request.origin);
+            suiteosd::DeviceCredential saved;
+            if(!suiteosd::loadDeviceProfile(request.profile,client.origin(),saved)||!client.setDeviceCredential(saved)){
+                result.status={false,0,"Keine Geräteanmeldung"};
+                return result;
+            }
+            result.status=client.publicHomePage("default",request.kind,request.key,12,
+                request.offset,request.year,result.page);
+            return result;
+        });
+    }
+    void queueHomeRead(HomeRail &rail,int section,suiteosd::HomeKind kind,const std::string &key,int offset){
+        rail.attempted=true;rail.loading=true;rail.stale=rail.status.ok;
+        rail.requestId=++homeReadSerial;
+        HomeRead request;request.id=rail.requestId;request.section=section;
+        request.kind=kind;request.key=key;request.offset=offset;request.year=currentYear();
+        request.origin=gCoreUrl;request.profile=deviceProfilePath();
+        if(section>=0)homeReadQueue.erase(std::remove_if(homeReadQueue.begin(),homeReadQueue.end(),
+            [&](const auto &old){return old.section==section;}),homeReadQueue.end());
+        homeReadQueue.push_back(std::move(request));launchHomeRead();
+    }
     void loadHomeRail(int section,bool force=false) {
         if(section<3)return;
         auto &rail=homeRails[section];
-        if(rail.attempted&&!force)return;
-        const auto previous=rail;
-        rail.attempted=true;rail.stale=false;rail.page={};
+        if(rail.loading||(rail.attempted&&!force))return;
         std::string key;
         if(section==suiteosd::Navigation::kRecommendation){
-            loadHomeRail(suiteosd::Navigation::kGenres,force);
+            loadHomeRail(suiteosd::Navigation::kGenres);
             const auto &genres=homeRails[suiteosd::Navigation::kGenres];
-            if(!genres.status.ok){rail.status=genres.status;return;}
-            if(genres.page.cards.empty()){rail.status=genres.status;return;}
+            if(genres.loading)return;
+            if(!genres.status.ok||genres.page.cards.empty()){rail.attempted=true;rail.status=genres.status;return;}
             if(recommendedGenreId.empty()){
                 const auto &genre=genres.page.cards[size_t(std::rand())%genres.page.cards.size()];
                 recommendedGenreId=genre.key;recommendedGenreTitle=genre.title;
             }
             key=recommendedGenreId;
         }
-        rail.status=searchClient.homePage("default",homeRailKind(section),key,12,0,currentYear(),rail.page);
-        if(!rail.status.ok&&nativeHomePage(homeRailKind(section),key,0,rail.page))
-            rail.status={true,0,"Lokaler VDR"};
-        else if(!rail.status.ok&&section==suiteosd::Navigation::kMovies){
-            movieScanRequested=!movieScanReady;
-            rail.status.message=movieScanReady?"Filmmetadaten nicht verfügbar":"Filmmetadaten werden geladen …";
-        }else if(!rail.status.ok&&section==suiteosd::Navigation::kRecent)
-            rail.status.message="Verlauf: Public-v1-Lesevertrag fehlt";
-        if(!rail.status.ok&&previous.status.ok&&rail.status.http!=401&&rail.status.http!=403){
-            rail.page=previous.page;rail.status=previous.status;rail.stale=true;
-        }
+        queueHomeRead(rail,section,homeRailKind(section),key,0);
     }
     void loadHomeCollection(HomeCollection &collection) {
-        collection.rail.attempted=true;collection.rail.page={};
-        collection.rail.status=searchClient.homePage("default",collection.kind,collection.key,
-            12,collection.offset,currentYear(),collection.rail.page);
-        if(!collection.rail.status.ok&&nativeHomePage(collection.kind,collection.key,
-            collection.offset,collection.rail.page))
-            collection.rail.status={true,0,"Lokaler VDR"};
+        collection.rail.page={};collection.rail.status={};
         collection.selected=collection.first=0;
+        queueHomeRead(collection.rail,-1,collection.kind,collection.key,collection.offset);
+    }
+    bool finishHomeRead(){
+        if(!homeReadJob.valid()||homeReadJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return false;
+        auto result=homeReadJob.get();
+        HomeRail *rail=nullptr;int *selected=nullptr,*first=nullptr;
+        if(result.request.section>=0){
+            auto it=homeRails.find(result.request.section);
+            if(it!=homeRails.end()&&it->second.requestId==result.request.id){
+                rail=&it->second;selected=&nav.card[result.request.section];first=&nav.firstCard[result.request.section];
+            }
+        }else for(auto &collection:homeCollections)if(collection.rail.requestId==result.request.id){
+            rail=&collection.rail;selected=&collection.selected;first=&collection.first;break;
+        }
+        if(rail){
+            rail->loading=false;
+            if(!result.status.ok&&result.status.http==0&&result.status.message=="Keine Geräteanmeldung"&&
+                nativeHomePage(result.request.kind,result.request.key,result.request.offset,result.page))
+                result.status={true,0,"Lokaler VDR"};
+            if(result.status.ok){
+                auto preserve=[&](int index){
+                    return index>=0&&index<int(rail->page.cards.size())?rail->page.cards[index].key:std::string{};
+                };
+                const auto selection=preserve(*selected),scroll=preserve(*first);
+                rail->page=std::move(result.page);rail->status=result.status;rail->stale=false;
+                auto locate=[&](const std::string &key,int old){
+                    for(int i=0;i<int(rail->page.cards.size());++i)if(rail->page.cards[i].key==key)return i;
+                    return std::clamp(old,0,std::max(0,int(rail->page.cards.size())-1));
+                };
+                *selected=locate(selection,*selected);*first=locate(scroll,*first);
+                if(*selected<*first)*first=*selected;
+                if(*selected>=*first+HL::columns)*first=*selected-HL::columns+1;
+            }else if(rail->status.ok&&result.status.http!=401&&result.status.http!=403){
+                rail->stale=true;
+            }else{
+                rail->page={};rail->status=result.status;rail->stale=false;*selected=*first=0;
+            }
+            if(result.request.section==suiteosd::Navigation::kGenres){
+                auto it=homeRails.find(suiteosd::Navigation::kRecommendation);
+                if(it!=homeRails.end()&&!it->second.loading)it->second.attempted=false;
+            }
+        }
+        launchHomeRead();
+        return rail!=nullptr;
     }
     static std::string playbackClock(std::int64_t seconds) {
         if(seconds<0)return "";
@@ -4093,7 +4100,7 @@ private:
     }
     void drawCoreCards(const HomeRail &rail,int first,int selected,int y,bool focus,bool moreCard=false) {
         if(!rail.status.ok){
-            print(homeLeft(),y+58,!rail.attempted?"Wird geladen …":
+            print(homeLeft(),y+58,(!rail.attempted||rail.loading)?"Wird geladen …":
                 rail.status.message.empty()?"Daten vorübergehend nicht verfügbar":rail.status.message,fontSmall,kMuted,940);
             return;
         }
@@ -4139,15 +4146,13 @@ private:
         cinematicHeading(y,homeRailTitle(section));
         if(it!=homeRails.end()&&it->second.stale)
             print(homeLeft()+520,y+4,"Wird aktualisiert …",fontCinemaMeta,kMuted,440);
-        else if(section==suiteosd::Navigation::kMovies&&it!=homeRails.end()&&it->second.status.ok&&it->second.status.http==0)
-            print(homeLeft()+520,y+4,"Lokaler VDR / TVScraper",fontCinemaMeta,kMuted,440);
         static const HomeRail empty;
         drawCoreCards(it==homeRails.end()?empty:it->second,nav.firstCard[section],nav.card[section],y,
             !nav.sideFocused&&nav.section==section,true);
     }
     bool openHomeRecording(const suiteosd::CoreHomeCard &card,bool resume) {
         if(!resolveSearchRecording(card.recording,homeDetailRecording)){
-            notice="Aufnahme nicht mehr im lokalen VDR vorhanden";return false;
+            notice="Öffentliche Aufnahme-ID noch nicht nativ zugeordnet";return false;
         }
         detailCastNav.Close();detailScroll=0;recordingDetails=true;
         homeResumeDetail=resume;homeResumeSeconds=resume?card.position:-1;
@@ -4191,7 +4196,7 @@ private:
         loadHomeRail(s);
         auto &rail=homeRails[s];
         if(!rail.status.ok){
-            loadHomeRail(s,true);
+            return osContinue;
         }else if(nav.card[s]<int(rail.page.cards.size())){
             const auto card=rail.page.cards[nav.card[s]];
             openHomeCard(card,s==suiteosd::Navigation::kContinue);
@@ -4217,7 +4222,7 @@ private:
         auto &c=homeCollections.back();notice.clear();
         if(key==kBack)homeCollections.pop_back();
         else if(key==kOk||key==kInfo){
-            if(!c.rail.status.ok){loadHomeCollection(c);}
+            if(!c.rail.status.ok){return osContinue;}
             else if(c.selected<int(c.rail.page.cards.size())){
                 const auto card=c.rail.page.cards[c.selected];openHomeCard(card);
             }
@@ -4498,6 +4503,7 @@ public:
                 }
             }
         }
+        const bool homeChanged=finishHomeRead();
         const bool searchChanged=finishSearchRead();
         if (searchActive) {
             if(base==kNone){if(searchChanged)draw();return osContinue;}
@@ -4544,12 +4550,12 @@ public:
             draw();return osContinue;
         }
         if(base==kNone){
+            if(homeChanged&&osd){draw();return osContinue;}
             if(osd&&homeCollections.empty()){
                 if(homeEventChanged.exchange(false)){
                     data=readVdrSnapshot();
                     // Invalidate once on hello/change; keep visible last data until refreshed.
-                    for(auto &entry:homeRails)entry.second.attempted=false;
-                    movieScanReady=false;movieScanOffset=0;movieCandidates.clear();
+                    for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
                     recordingGenres.clear();
                 }
                 const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
@@ -4561,8 +4567,6 @@ public:
                         break;
                     }
                 }
-                if(suiteosd::Navigation::kMovies>=first&&suiteosd::Navigation::kMovies<first+HL::rows)
-                    advanceMovieScan();
             }
             if(osd&&focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
                 drawHomeFocusPanel();osd->Flush();
@@ -4605,7 +4609,7 @@ public:
             focusPreviews.clear();focusKey.clear();focusPending=false;
             cinematicComposites.clear();cinematicLogos.clear();homeArtwork.clear();homeRecordingTitles.clear();
             homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();
-            movieScanReady=false;movieScanOffset=0;movieCandidates.clear();loadHomeRail(nav.section);
+            homeReadQueue.clear();loadHomeRail(nav.section);
             nav.KeepVisible(suiteosd::Navigation::kHomeVisibleCards, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
             draw();
