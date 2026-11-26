@@ -481,7 +481,24 @@ private:
     suiteosd::CoreAdminClient searchClient{"http://localhost",
         std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") && *std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") ?
         std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") : "/run/vdr-suite/osd.sock"};
-    suiteosd::CoreAdminClient publicSearchClient{gCoreUrl};
+    // HTTP reads own their client on a worker, never the OSD/VDR objects.
+    struct SearchRead {
+        std::string origin, profile, query;
+        suiteosd::CoreSearchRecording recording;
+        int offset=0, selected=0;
+        bool epg=false, detail=false;
+        unsigned long generation=0;
+    };
+    struct SearchReadback {
+        SearchRead request;
+        suiteosd::CoreStatus status;
+        suiteosd::CoreGlobalSearch results;
+        suiteosd::CoreSearchEvent detail;
+    };
+    std::future<SearchReadback> searchJob;
+    SearchRead pendingSearch;
+    bool searchQueued=false;
+    unsigned long searchGeneration=0;
     suiteosd::SearchNavigation searchNav;
     suiteosd::CorePersonSearch personSearch;
     suiteosd::CoreGlobalSearch globalSearch;
@@ -3527,28 +3544,100 @@ private:
         return !out.fileName.empty();
     }
 
+    void invalidateSearchRead()
+    {
+        ++searchGeneration;
+        searchQueued=false;
+    }
+    void launchSearchRead()
+    {
+        if(searchJob.valid()||!searchQueued)return;
+        auto request=std::move(pendingSearch);
+        searchQueued=false;
+        try {
+            searchJob=std::async(std::launch::async,[request=std::move(request)]{
+                SearchReadback result;
+                result.request=request;
+                suiteosd::CoreAdminClient client(request.origin);
+                suiteosd::DeviceCredential credential;
+                if(!suiteosd::loadDeviceProfile(request.profile,client.origin(),credential)||
+                   !client.setDeviceCredential(credential)){
+                    result.status={false,0,"Keine Geräteanmeldung – Kopplung in den Plugin-Einstellungen prüfen"};
+                }else if(request.detail){
+                    result.status=client.publicRecordingDetail(request.recording,result.detail);
+                }else{
+                    result.status=client.publicSearch("default",request.query,request.epg,
+                        suiteosd::SearchNavigation::pageSize,request.offset,result.results);
+                }
+                return result;
+            });
+        }catch(const std::exception &){
+            searchNotice="Suchauftrag konnte nicht gestartet werden";
+        }
+    }
+    void queueSearchRead(SearchRead request)
+    {
+        request.origin=gCoreUrl;
+        request.profile=deviceProfilePath();
+        request.generation=++searchGeneration;
+        pendingSearch=std::move(request);
+        searchQueued=true;
+        searchNotice=pendingSearch.detail?"Aufnahmedetails werden geladen …":"Suche läuft …";
+        launchSearchRead();
+    }
+    bool finishSearchRead()
+    {
+        if(!searchJob.valid()||searchJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)
+            return false;
+        bool redraw=false;
+        try {
+            auto result=searchJob.get();
+            if(searchActive&&result.request.generation==searchGeneration&&
+               searchNav.page==suiteosd::SearchPage::Results){
+                if(result.request.detail&&result.request.selected!=searchNav.selected){
+                    searchNotice.clear();
+                }else if(result.status.ok){
+                    searchNotice.clear();
+                    if(result.request.detail){
+                        searchEvent=std::move(result.detail);
+                        searchNav.page=suiteosd::SearchPage::PublicRecording;
+                    }else{
+                        globalSearch=std::move(result.results);
+                    }
+                }else{
+                    // Preserve the server reason code rather than guessing missing grants.
+                    searchNotice=result.status.http>0?
+                        "HTTP "+std::to_string(result.status.http)+" · "+result.status.message:
+                        result.status.message;
+                    if(searchNotice.empty())searchNotice="Suche fehlgeschlagen";
+                }
+                redraw=true;
+            }
+        }catch(const std::exception &){
+            if(searchActive&&!searchQueued&&searchNav.page==suiteosd::SearchPage::Results){
+                searchNotice="Suchantwort konnte nicht verarbeitet werden";
+                redraw=true;
+            }
+        }
+        launchSearchRead();
+        return redraw;
+    }
     void fetchSearch()
     {
+        invalidateSearchRead();
         searchNotice.clear();
-        searchNav.page = suiteosd::SearchPage::Results;
-        personSearch = {};
-        globalSearch = {};
-        publicSearchClient.setOrigin(gCoreUrl);
-        publicSearchClient.forgetDevice();
-        if(!restoreDevice(publicSearchClient)){
-            searchNotice="Keine Geräteanmeldung – Kopplung in den Plugin-Einstellungen prüfen";
-            return;
-        }
+        searchNav.page=suiteosd::SearchPage::Results;
+        personSearch={};
+        globalSearch={};
         if(searchNav.tab==suiteosd::SearchTab::People){
             searchNotice="Personenliste nicht über Public API v1 verfügbar – Aufnahmen und EPG nutzen";
             return;
         }
-        const auto result=publicSearchClient.publicSearch("default",searchNav.query,
-            searchNav.tab==suiteosd::SearchTab::Epg,suiteosd::SearchNavigation::pageSize,
-            searchNav.offset,globalSearch);
-        if(result.http==401)searchNotice="Geräteanmeldung vom Core nicht akzeptiert";
-        else if(result.http==403)searchNotice="Suchberechtigung im Webfrontend prüfen";
-        else if(!result.ok)searchNotice=result.message.empty()?"Suche fehlgeschlagen":result.message;
+        SearchRead request;
+        request.query=searchNav.query;
+        request.offset=searchNav.offset;
+        request.epg=searchNav.tab==suiteosd::SearchTab::Epg;
+        queueSearchRead(std::move(request));
     }
 
     void openSearch(const std::string &person = "")
@@ -3561,6 +3650,7 @@ private:
             searchHistory.push_back({searchNav, personSearch, globalSearch,
                  searchRecording, searchEvent, detailCastNav, detailScroll, searchNotice});
         }
+        invalidateSearchRead();
         searchActive = true;
         detailCastNav.Close();
         searchNav.Open(person);
@@ -3572,6 +3662,7 @@ private:
 
     void closeSearch()
     {
+        invalidateSearchRead();
         if (!searchHistory.empty()) {
             auto frame = std::move(searchHistory.back());
             searchHistory.pop_back();
@@ -3757,6 +3848,7 @@ private:
         } else {
             if (base == kBack) closeSearch();
             else if (base == kRed) {
+                invalidateSearchRead();
                 searchNav.Open();
                 searchNotice.clear();
             } else if (base == kGreen) {
@@ -3776,9 +3868,11 @@ private:
                     if (resolveSearchRecording(searchRecordings()[i], searchRecording)) {
                         detailCastNav.Close(); detailScroll=0; searchNav.page = SearchPage::Recording;
                     } else {
-                        const auto result=publicSearchClient.publicRecordingDetail(searchRecordings()[i],searchEvent);
-                        if(result.ok)searchNav.page=SearchPage::PublicRecording;
-                        else searchNotice=result.message.empty()?"Aufnahmedetails nicht verfügbar":result.message;
+                        SearchRead request;
+                        request.detail=true;
+                        request.recording=searchRecordings()[i];
+                        request.selected=i;
+                        queueSearchRead(std::move(request));
                     }
                 } else if (searchNav.tab == SearchTab::Epg) {
                     searchEvent = globalSearch.epg[i]; searchNav.page = SearchPage::Event;
@@ -4402,7 +4496,11 @@ public:
                 }
             }
         }
-        if (searchActive) return searchKey(base);
+        const bool searchChanged=finishSearchRead();
+        if (searchActive) {
+            if(base==kNone){if(searchChanged)draw();return osContinue;}
+            return searchKey(base);
+        }
         if (base == kSetup) {
             openSettings();
             draw();

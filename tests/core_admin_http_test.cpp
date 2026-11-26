@@ -310,7 +310,7 @@ int main() {
     len=sizeof(bindTo);
     assert(getsockname(pairFd,reinterpret_cast<sockaddr*>(&bindTo),&len)==0);
     std::thread pairMock([&]{
-        for(int i=0;i<11;++i){
+        for(int i=0;i<12;++i){
             const int fd=accept(pairFd,nullptr,nullptr);assert(fd>=0);
             const auto req=readRequest(fd);
             assert(!req.headers.count("cookie")&&!req.headers.count("x-csrf-token"));
@@ -345,6 +345,9 @@ int main() {
                 }else if(i==9){
                     assert(req.path=="/api/v1/search/epg?backendId=default&query=Hobbit&limit=20&offset=20");
                     answer(fd,R"({"items":[{"kind":"epg","backendId":"default","eventId":"evt-a","channelId":"channel-a","title":"Young Sheldon","subtitle":"Hobbit","startTime":"2026-11-26T20:00:00Z","endTime":"2026-11-26T20:30:00Z"}],"page":{"offset":20,"limit":20,"totalCount":21,"hasMore":false}})");
+                }else if(i==10){
+                    assert(req.path=="/api/v1/search/recordings?backendId=default&query=Ewan%20McGregor&limit=20&offset=0");
+                    answer(fd,R"({"code":"permission_denied"})","",403);
                 }else{
                     assert(req.path=="/api/v1/events?backendId=default&domain=recordings");
                     assert(req.headers.at("accept")=="text/event-stream");
@@ -391,6 +394,8 @@ int main() {
     assert(reopened.publicRecordingDetail(publicResults.recordings[0],detail).ok&&detail.description=="Film");
     assert(reopened.publicSearch("default","Hobbit",true,20,20,publicResults).ok);
     assert(publicResults.epgTotal==21&&publicResults.epg[0].subtitle=="Hobbit");
+    const auto denied=reopened.publicSearch("default","Ewan McGregor",false,20,0,publicResults);
+    assert(!denied.ok&&denied.http==403&&denied.message=="permission_denied");
     std::atomic<bool> stop{false},changed{false};
     reopened.recordingEvents("default",stop,changed);
     assert(changed.load());
