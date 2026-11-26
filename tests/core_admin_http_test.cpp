@@ -300,6 +300,59 @@ int main() {
     unlink(socketPath.c_str());rmdir(directory);
     assert(!native.globalSearch("default","Will Smith",20,0,nativeResult).ok);
 
+    // Pairing uses the public bootstrap token, then only the Device header.
+    const int pairFd=socket(AF_INET, SOCK_STREAM, 0);
+    assert(pairFd>=0);
+    bindTo.sin_port=0;
+    assert(bind(pairFd,reinterpret_cast<sockaddr*>(&bindTo),sizeof(bindTo))==0);
+    assert(listen(pairFd,2)==0);
+    len=sizeof(bindTo);
+    assert(getsockname(pairFd,reinterpret_cast<sockaddr*>(&bindTo),&len)==0);
+    std::thread pairMock([&]{
+        for(int i=0;i<4;++i){
+            const int fd=accept(pairFd,nullptr,nullptr);assert(fd>=0);
+            const auto req=readRequest(fd);
+            assert(!req.headers.count("cookie")&&!req.headers.count("x-csrf-token"));
+            if(i==0){
+                assert(req.method=="POST"&&req.path=="/api/v1/device-pairings");
+                assert(req.body.find("suiteosd")!=std::string::npos);
+                assert(!req.headers.count("authorization"));
+                answer(fd,R"({"pairingRequestId":"pair-a","userCode":"ABCD","pairingToken":"token-a","status":"pending"})","",201);
+            }else if(i==1||i==2){
+                assert(req.headers.at("x-vdr-suite-pairing-token")=="token-a");
+                assert(!req.headers.count("authorization"));
+                if(i==1){
+                    assert(req.method=="GET"&&req.path=="/api/v1/device-pairings/pair-a");
+                    answer(fd,R"({"status":"approved"})");
+                }else{
+                    assert(req.method=="POST"&&req.path=="/api/v1/device-pairings/pair-a/credential"&&req.body.empty());
+                    answer(fd,R"({"deviceId":"device-a","credentialId":"cred-a","credentialSecret":"secret-a"})","",201);
+                }
+            }else{
+                assert(req.method=="GET"&&req.path=="/api/v1");
+                assert(req.headers.at("authorization")=="VDR-Suite-Device cred-a.secret-a");
+                assert(!req.headers.count("x-vdr-suite-pairing-token"));
+                answer(fd,R"({"authentication":{"authenticated":true}})");
+            }
+            close(fd);
+        }
+        close(pairFd);
+    });
+    suiteosd::CoreAdminClient pairingClient("http://127.0.0.1:"+std::to_string(ntohs(bindTo.sin_port)));
+    suiteosd::DevicePairing pairing;
+    suiteosd::DeviceCredential credential;
+    assert(pairingClient.beginPairing("OSD","test",pairing).ok&&pairing.userCode=="ABCD");
+    assert(!pairingClient.issuePairing(pairing,credential).ok);
+    assert(pairingClient.readPairing(pairing).ok&&pairing.state=="approved");
+    assert(pairingClient.issuePairing(pairing,credential).ok&&pairing.token.empty());
+    assert(!pairingClient.issuePairing(pairing,credential).ok);
+    assert(pairingClient.setDeviceCredential(credential));
+    assert(pairingClient.testDevice().ok);
+    pairMock.join();
+    pairingClient.setOrigin("https://other.invalid");
+    assert(!pairingClient.setDeviceCredential(credential));
+    assert(!pairingClient.testDevice().ok);
+
     suiteosd::CoreAdminClient operatorConfigured("http://192.0.2.1:18080");
     assert(operatorConfigured.configured());
     suiteosd::CoreAdminClient allowed("https://suite.example.invalid");

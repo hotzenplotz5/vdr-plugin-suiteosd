@@ -471,7 +471,7 @@ void CoreAdminClient::setOrigin(const std::string &value) {
         origin_ = "http://localhost";
         return;
     }
-    if (origin_ != value) logout();
+    if (origin_ != value) { logout(); forgetDevice(); }
     origin_ = safeOrigin(value) ? value : "";
     if (origin_.empty()) {
         last_.ok = false;
@@ -481,7 +481,8 @@ void CoreAdminClient::setOrigin(const std::string &value) {
 
 CoreAdminClient::Reply CoreAdminClient::request(
     const std::string &verb, const std::string &path, const std::string &body,
-    const std::string &etag, const std::string &username, const std::string &password)
+    const std::string &etag, const std::string &username, const std::string &password,
+    const std::string &pairingToken, bool anonymous)
 {
     Reply reply;
     if (!localSocket_.empty() && (!username.empty() || !sessionCookie_.empty())) {
@@ -508,6 +509,16 @@ CoreAdminClient::Reply CoreAdminClient::request(
         // client-supplied identity header or the browser's credentials.
         curl_easy_setopt(curl, CURLOPT_UNIX_SOCKET_PATH, localSocket_.c_str());
         curl_easy_setopt(curl, CURLOPT_PROXY, "");
+    } else if (anonymous) {
+        if (!pairingToken.empty()) {
+            const std::string header = "X-VDR-Suite-Pairing-Token: " + pairingToken;
+            headers = curl_slist_append(headers, header.c_str());
+        }
+    } else if (!device_.credentialId.empty() &&
+               (path == "/api/v1" || path.compare(0, 8, "/api/v1/") == 0)) {
+        const std::string header = "Authorization: VDR-Suite-Device " +
+            device_.credentialId + "." + device_.secret;
+        headers = curl_slist_append(headers, header.c_str());
     } else if (!username.empty()) {
         curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
         curl_easy_setopt(curl, CURLOPT_USERNAME, username.c_str());
@@ -524,7 +535,7 @@ CoreAdminClient::Reply CoreAdminClient::request(
             // Login is a bodyless POST authenticated by Human Basic.
         } else {
             headers = curl_slist_append(headers, "Content-Type: application/json");
-            if (!csrf_.empty()) {
+            if (!anonymous && !csrf_.empty()) {
                 const std::string csrf = "X-CSRF-Token: " + csrf_;
                 headers = curl_slist_append(headers, csrf.c_str());
             }
@@ -572,6 +583,7 @@ std::string CoreAdminClient::idPath(const std::string &id) {
 
 CoreStatus CoreAdminClient::login(const std::string &username,
                                   const std::string &password) {
+    forgetDevice();
     sessionCookie_.clear();
     csrf_.clear();
     if (username.empty() || username.size() > 128 ||
@@ -601,6 +613,85 @@ void CoreAdminClient::logout() {
         (void)request("POST", "/api/security/browser-sessions/logout", "{}");
     csrf_.clear();
     sessionCookie_.clear();
+}
+
+namespace {
+bool wireSecret(const std::string &value) {
+    return !value.empty() && value.size() <= 1024 &&
+        std::all_of(value.begin(), value.end(), [](unsigned char c) {
+            return c > 32 && c < 127;
+        });
+}
+}
+CoreStatus CoreAdminClient::beginPairing(const std::string &name,
+        const std::string &version, DevicePairing &pairing) {
+    const auto r = request("POST", "/api/v1/device-pairings",
+        encodeBody({{"displayName", name}, {"clientKind", "suiteosd"},
+                    {"appVersion", version}}, {}), "", "", "", "", true);
+    if (!status(r).ok) return last_;
+    const auto root = parse(r.body);
+    DevicePairing next{origin_, stringOf(root.get(),"pairingRequestId"),
+        stringOf(root.get(),"userCode"), stringOf(root.get(),"pairingToken"),
+        stringOf(root.get(),"status")};
+    if (r.http != 201 || !safeId(next.requestId) || next.userCode.empty() ||
+        !wireSecret(next.token) || next.state != "pending")
+        return (last_ = {false,r.http,"Kopplungsantwort unvollständig"});
+    pairing = std::move(next);
+    return last_;
+}
+CoreStatus CoreAdminClient::readPairing(DevicePairing &pairing) {
+    if (pairing.origin != origin_ || !safeId(pairing.requestId) ||
+        !wireSecret(pairing.token))
+        return (last_ = {false,0,"Keine gültige Kopplungsanfrage für diesen Server"});
+    const auto r = request("GET", "/api/v1/device-pairings/" + pairing.requestId,
+        "", "", "", "", pairing.token, true);
+    if (!status(r).ok) return last_;
+    const auto root = parse(r.body);
+    const auto state = stringOf(root.get(),"status");
+    if (state != "pending" && state != "approved" && state != "rejected")
+        return (last_ = {false,r.http,"Ungültiger Kopplungsstatus"});
+    pairing.state = state;
+    return last_;
+}
+CoreStatus CoreAdminClient::issuePairing(DevicePairing &pairing,
+        DeviceCredential &credential) {
+    if (pairing.origin != origin_ || pairing.state != "approved" ||
+        !safeId(pairing.requestId) || !wireSecret(pairing.token))
+        return (last_ = {false,0,"Kopplung noch nicht bestätigt"});
+    // Issuance is a one-shot mutation; never automatically retry even after
+    // transport failure. A lost response requires a new pairing request.
+    const auto approvedId = pairing.requestId;
+    const auto token = std::move(pairing.token);
+    pairing = {};
+    const auto r = request("POST", "/api/v1/device-pairings/" +
+        approvedId + "/credential", "", "", "", "", token, true);
+    if (!status(r).ok) return last_;
+    const auto root = parse(r.body);
+    DeviceCredential next{origin_, stringOf(root.get(),"deviceId"),
+        stringOf(root.get(),"credentialId"), stringOf(root.get(),"credentialSecret")};
+    if (r.http != 201 || !safeId(next.deviceId) || !safeId(next.credentialId) ||
+        !wireSecret(next.secret))
+        return (last_ = {false,r.http,"Geräteberechtigung unvollständig"});
+    credential = std::move(next);
+    return last_;
+}
+bool CoreAdminClient::setDeviceCredential(const DeviceCredential &credential) {
+    if (!localSocket_.empty() || credential.origin != origin_ ||
+        !safeId(credential.deviceId) || !safeId(credential.credentialId) ||
+        !wireSecret(credential.secret)) return false;
+    logout();
+    device_ = credential;
+    return true;
+}
+CoreStatus CoreAdminClient::testDevice() {
+    if (device_.credentialId.empty())
+        return (last_ = {false,0,"Gerät nicht gekoppelt"});
+    const auto r = request("GET","/api/v1");
+    if (!status(r).ok) return last_;
+    const auto root = parse(r.body);
+    if (!boolOf(field(root.get(),"authentication"),"authenticated"))
+        return (last_ = {false,r.http,"Geräteanmeldung nicht bestätigt"});
+    return last_;
 }
 
 CoreStatus CoreAdminClient::recordingPersons(const std::string &backendId,

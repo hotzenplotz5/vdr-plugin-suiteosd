@@ -78,11 +78,18 @@ struct CoreHomePage {
     int nextOffset = 0;
     bool hasMore = false;
 };
+struct DevicePairing {
+    std::string origin, requestId, userCode, token, state;
+};
+struct DeviceCredential {
+    std::string origin, deviceId, credentialId, secret;
+};
 class CoreAdminClient {
     std::string origin_;
     std::string localSocket_;
     std::string sessionCookie_;
     std::string csrf_;
+    DeviceCredential device_;
     CoreStatus last_;
     struct Reply {
         long http = 0;
@@ -94,7 +101,8 @@ class CoreAdminClient {
     };
     Reply request(const std::string &verb, const std::string &path,
                   const std::string &body = "", const std::string &etag = "",
-                  const std::string &login = "", const std::string &password = "");
+                  const std::string &login = "", const std::string &password = "",
+                  const std::string &pairingToken = "", bool anonymous = false);
     CoreStatus status(const Reply &reply);
     static std::string idPath(const std::string &id);
 public:
@@ -112,6 +120,13 @@ public:
     const std::string &origin() const { return origin_; }
     CoreStatus login(const std::string &username, const std::string &password);
     void logout();
+    CoreStatus beginPairing(const std::string &name, const std::string &version,
+                            DevicePairing &pairing);
+    CoreStatus readPairing(DevicePairing &pairing);
+    CoreStatus issuePairing(DevicePairing &pairing, DeviceCredential &credential);
+    bool setDeviceCredential(const DeviceCredential &credential);
+    CoreStatus testDevice();
+    void forgetDevice() { device_ = {}; }
 
     CoreStatus recordingPersons(const std::string &backendId, const std::string &name,
                                 int limit, int offset, CorePersonSearch &results);
