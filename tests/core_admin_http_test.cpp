@@ -3,6 +3,8 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/un.h>
+#include <cstdlib>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -265,6 +267,38 @@ int main() {
     client.logout();
     assert(!client.authenticated());
     mock.join();
+
+    // A real AF_UNIX request carries no Basic auth, Cookie or CSRF token.
+    char directory[]="/tmp/suiteosd-http-XXXXXX";
+    assert(mkdtemp(directory));
+    const std::string socketPath=std::string(directory)+"/core.sock";
+    const int localFd=socket(AF_UNIX,SOCK_STREAM,0);
+    assert(localFd>=0);
+    sockaddr_un localAddress{};
+    localAddress.sun_family=AF_UNIX;
+    assert(socketPath.size()<sizeof(localAddress.sun_path));
+    std::strcpy(localAddress.sun_path,socketPath.c_str());
+    assert(bind(localFd,reinterpret_cast<sockaddr*>(&localAddress),sizeof(localAddress))==0);
+    assert(listen(localFd,2)==0);
+    std::thread localMock([&]{
+        const int fd=accept(localFd,nullptr,nullptr);assert(fd>=0);
+        const auto request=readRequest(fd);
+        assert(request.method=="GET");
+        assert(request.path=="/api/search?backend=default&query=Will%20Smith&limit=20&offset=0");
+        assert(!request.headers.count("authorization"));
+        assert(!request.headers.count("cookie"));
+        assert(!request.headers.count("x-csrf-token"));
+        answer(fd,R"({"query":"Will Smith","backendId":"default","status":"ready","recordings":[],"epg":[],"people":[],"recordingTotal":0,"epgTotal":0,"limit":20,"offset":0})");
+        close(fd);close(localFd);
+    });
+    suiteosd::CoreAdminClient native("http://localhost",socketPath);
+    native.setOrigin("https://suite.example.invalid");
+    suiteosd::CoreGlobalSearch nativeResult;
+    assert(native.globalSearch("default","Will Smith",20,0,nativeResult).ok);
+    assert(nativeResult.status=="ready"&&!native.authenticated());
+    localMock.join();
+    unlink(socketPath.c_str());rmdir(directory);
+    assert(!native.globalSearch("default","Will Smith",20,0,nativeResult).ok);
 
     suiteosd::CoreAdminClient operatorConfigured("http://192.0.2.1:18080");
     assert(operatorConfigured.configured());

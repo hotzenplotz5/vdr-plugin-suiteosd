@@ -80,6 +80,7 @@ struct CoreHomePage {
 };
 class CoreAdminClient {
     std::string origin_;
+    std::string localSocket_;
     std::string sessionCookie_;
     std::string csrf_;
     CoreStatus last_;
@@ -98,6 +99,8 @@ class CoreAdminClient {
     static std::string idPath(const std::string &id);
 public:
     explicit CoreAdminClient(std::string origin = "http://127.0.0.1:18080");
+    // Native TV data transport: no Browser cookie, no password, no TCP fallback.
+    CoreAdminClient(std::string origin, std::string localSocket);
     ~CoreAdminClient();
     CoreAdminClient(const CoreAdminClient &) = delete;
     CoreAdminClient &operator=(const CoreAdminClient &) = delete;

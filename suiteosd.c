@@ -461,7 +461,9 @@ private:
     suiteosd::CoreAdminClient coreAdmin{gCoreUrl};
     suiteosd::CoreAdminNavigation coreNav;
     // Search reuses the Human session contract; admin login/logout is unchanged.
-    suiteosd::CoreAdminClient searchClient{gCoreUrl};
+    suiteosd::CoreAdminClient searchClient{"http://localhost",
+        std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") && *std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") ?
+        std::getenv("VDR_SUITE_LOCAL_OSD_SOCKET") : "/run/vdr-suite/osd.sock"};
     suiteosd::SearchNavigation searchNav;
     suiteosd::CorePersonSearch personSearch;
     suiteosd::CoreGlobalSearch globalSearch;
@@ -3194,7 +3196,7 @@ private:
             result = searchClient.globalSearch("default", searchNav.query,
                          suiteosd::SearchNavigation::pageSize, searchNav.offset, globalSearch);
         if (result.http == 401) {
-            searchNotice = "Gemeinsame Core-Suche: lokale Anbindung fehlt";
+            searchNotice = "Lokale Core-Zuordnung nicht verfügbar";
         } else if (!result.ok) {
             searchNotice = result.message.empty() ? "Suche fehlgeschlagen" : result.message;
         } else if (!globalSearch.status.empty() && globalSearch.status != "ready" &&
@@ -3215,7 +3217,6 @@ private:
         }
         searchActive = true;
         detailCastNav.Close();
-        searchClient.setOrigin(gCoreUrl);
         searchNav.Open(person);
         personSearch = {};
         globalSearch = {};

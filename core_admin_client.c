@@ -460,9 +460,17 @@ std::string encodeBody(const std::vector<std::pair<std::string, std::string>> &s
 } // namespace
 
 CoreAdminClient::CoreAdminClient(std::string origin) { setOrigin(origin); }
+CoreAdminClient::CoreAdminClient(std::string origin,std::string localSocket)
+    : localSocket_(std::move(localSocket)) {
+    setOrigin(origin);
+}
 CoreAdminClient::~CoreAdminClient() { logout(); }
 
 void CoreAdminClient::setOrigin(const std::string &value) {
+    if (!localSocket_.empty()) {
+        origin_ = "http://localhost";
+        return;
+    }
     if (origin_ != value) logout();
     origin_ = safeOrigin(value) ? value : "";
     if (origin_.empty()) {
@@ -476,6 +484,10 @@ CoreAdminClient::Reply CoreAdminClient::request(
     const std::string &etag, const std::string &username, const std::string &password)
 {
     Reply reply;
+    if (!localSocket_.empty() && (!username.empty() || !sessionCookie_.empty())) {
+        reply.error = "Lokaler Core-Transport verwendet keine Browser-Anmeldung";
+        return reply;
+    }
     if (origin_.empty() || path.empty() || path[0] != '/' ||
         path.find('\r') != std::string::npos ||
         path.find('\n') != std::string::npos) {
@@ -491,7 +503,12 @@ CoreAdminClient::Reply CoreAdminClient::request(
     const std::string url = origin_ + path;
     headers = curl_slist_append(headers, "Accept: application/json");
     headers = curl_slist_append(headers, "Cache-Control: no-store");
-    if (!username.empty()) {
+    if (!localSocket_.empty()) {
+        // The local Core transport uses kernel peer credentials, never a
+        // client-supplied identity header or the browser's credentials.
+        curl_easy_setopt(curl, CURLOPT_UNIX_SOCKET_PATH, localSocket_.c_str());
+        curl_easy_setopt(curl, CURLOPT_PROXY, "");
+    } else if (!username.empty()) {
         curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
         curl_easy_setopt(curl, CURLOPT_USERNAME, username.c_str());
         curl_easy_setopt(curl, CURLOPT_PASSWORD, password.c_str());

@@ -73,3 +73,8 @@ TV-Feedback 26.11.2026: OK auf einer Aufnahme im Suite-Browser führt nun in die
 ## Nutzerfeedback: kein Browser-Login in der nativen Oberfläche
 
 Home und Suche verlangen keine interaktive Human-Browsersitzung mehr. Weiterschauen verwendet bei nicht erreichbaren Core-Daten VDR-Resume, neue Aufnahmen sowie Genres und Ordner die bereits vorhandene native Browserprojektion. Keine neue Suchdatenbank, keine Änderung der HTTP-Authentifizierung. Native Ersatzdaten können vom Webfrontend abweichen; gemeinsame Suche, Core-Historie, zentrale Metadaten und Cover benötigen weiterhin eine transparente lokale Core-Anbindung. Nicht vorhandene gemeinsame Daten werden ausdrücklich benannt. Administrative Einstellungen bleiben getrennt.
+
+
+## Native Core-Verbindung
+
+Home und Suche nutzen ausschließlich den lokalen Unix-HTTP-Socket (`/run/vdr-suite/osd.sock`, alternativ `VDR_SUITE_LOCAL_OSD_SOCKET`). Kein TCP-Fallback, kein Browser-Cookie, keine Passwortabfrage. Die bisherige HTTP-Verbindung bleibt ausschließlich für die separat aufrufbaren Core-Administrationsfunktionen bestehen. Der Socket benötigt den passenden Core-Transport; ein AF_UNIX-Client-Vertragstest prüft echte Socket-Nutzung und die Abwesenheit von Browser-Credentials. Core-seitige Zuordnung und reale yaVDR-Abnahme sind getrennt zu belegen.
