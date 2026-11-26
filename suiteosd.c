@@ -15,7 +15,7 @@
 #include "logo_locator.h"
 #include "artwork_decode.h"
 #include "scraper_detail.h"
-#include "cast_page.h"
+#include "recording_detail_view.h"
 #include "search_navigation.h"
 #include "vendor/tvscraper/services.h"
 
@@ -49,7 +49,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.5-dev";
+static const char *VERSION = "0.9.6-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -71,6 +71,7 @@ int gLivePreviewEnabled = 1;
 // Persisted through suiteosd.PhotoView: 0 = grid, 1 = carousel.
 int gPhotoViewMode = 1;
 char gCoreUrl[256] = "http://127.0.0.1:18080";
+std::string gReplayPersonSearch;
 
 struct Programme {
     int channelNumber = 0;
@@ -120,6 +121,15 @@ std::string formatTime(time_t t)
     struct tm tmValue;
     if (localtime_r(&t, &tmValue))
         strftime(buf, sizeof(buf), "%H:%M", &tmValue);
+    return buf;
+}
+
+std::string recordingDate(time_t t)
+{
+    if (!t) return "";
+    char buf[64] = {};
+    tm value{};
+    if (localtime_r(&t,&value)) strftime(buf,sizeof(buf),"%d.%m.%Y %H:%M",&value);
     return buf;
 }
 
@@ -273,6 +283,9 @@ class cSuiteReplayInfo final : public cOsdObject {
     suiteosd::DetailMetadata detail;
     suiteosd::CreditNavigation castNav;
     std::map<std::string, suiteosd::Artwork> castCache;
+    suiteosd::Artwork heroFanart, heroPoster;
+    std::string recorded;
+    int descriptionScroll = 0;
     int runtime = 0;
     int season = 0, episodeNumber = 0;
     float rating = 0;
@@ -305,6 +318,7 @@ public:
     {
         // Caller holds LOCK_RECORDINGS_READ. Copy everything before it ends.
         if (!recording) return;
+        recorded = recordingDate(recording->Start());
         cString baseName = recording->BaseName();
         title = *baseName ? *baseName : (recording->Name() ? recording->Name() : "");
         if (recording->Info()) {
@@ -360,69 +374,39 @@ public:
         titleFont = cFont::CreateFont("Sans:Bold", std::max(20, Y(49)));
         bodyFont = cFont::CreateFont("Sans", std::max(14, Y(24)));
         smallFont = cFont::CreateFont("Sans", std::max(12, Y(19)));
+        heroFanart = suiteosd::LoadDetailArtwork(fanartPath,X(1050),Y(500),true);
+        heroPoster = suiteosd::LoadDetailArtwork(posterPath,X(262),Y(402));
+        if(detail.title.empty()) detail.title=title;
+        if(detail.episode.empty()) detail.episode=episode;
         Render();
     }
     void Render()
     {
         if (!view) return;
-        if (castNav.active) {
-            suiteosd::DrawCastPage(view, width, height, titleFont, bodyFont, smallFont,
-                                   detail, castNav, castCache);
-            view->Flush();
-            return;
-        }
-        box(0, 0, 1599, 899, kBackground);
-        artwork(fanartPath, 520, 95, 1045, 383);
-        box(0, 0, 1599, 77, kSurface);
-        label(36, 25, "VDR Suite", bodyFont, kText, 225);
-        label(286, 25, "WIEDERGABE  /  AUFNAHMEINFO", bodyFont, kMuted);
-        label(1430, 25, formatTime(time(nullptr)), bodyFont);
-
-        box(43, 119, 323, 500, kCard);
-        artwork(posterPath, 58, 132, 249, 351);
-        box(343, 120, 1545, 495, 0xDF071729);
-        label(377, 153, title, titleFont, kText, 1110);
-        label(377, 217, episode, bodyFont, kText, 1110);
-        std::string facts = "AUFNAHME";
-        if (season > 0) {
-            facts += "  ·  Staffel " + std::to_string(season);
-            if (episodeNumber > 0) facts += ", Folge " + std::to_string(episodeNumber);
-        }
-        if (!release.empty()) facts += "  ·  " + release;
-        if (runtime > 0) facts += "  ·  " + std::to_string(runtime) + " Min";
-        if (rating > 0) {
-            char buffer[28];
-            std::snprintf(buffer, sizeof(buffer), "  ·  %.1f/10", rating);
-            facts += buffer;
-        }
-        label(379, 279, facts, bodyFont, kFocus, 1100);
-        label(379, 337, genres, bodyFont, kMuted, 1090);
-        box(343, 509, 1545, 788, kSurface);
-        label(379, 536, "INHALT", bodyFont, kFocus);
-        if (overview.empty()) overview = "Keine Beschreibung vorhanden.";
-        std::replace(overview.begin(), overview.end(), '\n', ' ');
-        std::istringstream words(overview);
-        std::string line, word;
-        int y = 588;
-        while (words >> word && y < 746) {
-            std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && bodyFont && bodyFont->Width(candidate.c_str()) > X(1110)) {
-                label(378, y, line, bodyFont, kText, 1117);
-                y += 36;
-                line = word;
-            } else line = candidate;
-        }
-        if (!line.empty() && y < 770) label(378, y, line, bodyFont, kText, 1117);
-        box(17, 817, 1580, 889, kSurface);
-        label(56, 837, "OK / Info / Zurück: Wiedergabe", bodyFont, kFocus, 800);
-        if (!detail.people.empty()) label(925, 837, "Runter: Mitwirkende", bodyFont, kText, 600);
+        box(0,0,1599,899,kBackground);
+        box(0,0,1599,77,kSurface);
+        label(36,25,"VDR Suite",bodyFont,kText,225);
+        label(286,25,"WIEDERGABE / AUFNAHMEINFO",bodyFont,kMuted);
+        label(1430,25,formatTime(time(nullptr)),bodyFont);
+        suiteosd::DrawRecordingHero(view,width,height,titleFont,bodyFont,smallFont,
+            detail,title,recorded,overview,heroFanart,heroPoster,descriptionScroll,&castNav,castCache);
+        box(17,817,1580,889,kSurface);
+        label(56,837,castNav.active ? "OK: Person suchen · Links/Rechts: Auswahl" :
+              "OK / Info / Zurück: Wiedergabe",bodyFont,kFocus,820);
+        label(925,837,castNav.active ? "Hoch / Zurück: Details" :
+              "Links/Rechts: Text · Runter: Personen",bodyFont,kText,610);
         view->Flush();
     }
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
         if (castNav.active) {
-            if (base == kBack || base == kUp || base == kInfo) castNav.Close();
+            if (base == kOk && castNav.selected >= 0 && castNav.selected < int(detail.people.size())) {
+                if (cRemote::CallPlugin("suiteosd")) {
+                    gReplayPersonSearch = detail.people[castNav.selected].name;
+                    return osBack;
+                }
+            } else if (base == kBack || base == kUp || base == kInfo) castNav.Close();
             else if (base == kLeft || base == kRight)
                 castNav.Move(base == kLeft ? -1 : 1, int(detail.people.size()));
             else return osContinue;
@@ -431,6 +415,13 @@ public:
         }
         if (base == kDown && !detail.people.empty()) {
             castNav.Open(); Render(); return osContinue;
+        }
+        if (base == kLeft || base == kRight) {
+            const auto lines = suiteosd::HeroLines(overview,bodyFont,X(suiteosd::kHeroTextWidth));
+            descriptionScroll=std::clamp(descriptionScroll+(base==kLeft?-1:1),0,
+                std::max(0,int(lines.size())-suiteosd::kHeroTextRows));
+            Render();
+            return osContinue;
         }
         return base == kOk || base == kBack || base == kInfo ? osBack : osContinue;
     }
@@ -471,6 +462,8 @@ private:
     suiteosd::CorePersonSearch personSearch;
     suiteosd::CoreGlobalSearch globalSearch;
     bool searchActive = false;
+    bool searchFromReplay = false;
+    int detailScroll = 0, searchOriginScroll = 0;
     std::string searchNotice;
     Recording searchRecording;
     suiteosd::CoreSearchEvent searchEvent;
@@ -481,6 +474,7 @@ private:
         Recording recording;
         suiteosd::CoreSearchEvent event;
         suiteosd::CreditNavigation cast;
+        int scroll;
         std::string notice;
     };
     std::vector<SearchFrame> searchHistory;
@@ -1223,7 +1217,7 @@ private:
             recordingBrowser.ToggleSort();
             browserNotice.clear();
         } else if (base == kInfo || base == kBlue) {
-            if (browserSelectedRecording()) { detailCastNav.Close(); browserDetails = true; }
+            if (browserSelectedRecording()) { detailCastNav.Close(); detailScroll=0; browserDetails = true; }
         } else if (base == kYellow) {
             if (browserSelectedRecording()) browserDeleteConfirm = true;
         } else if (base == kRed || base == kPlay) {
@@ -1609,91 +1603,31 @@ private:
         }
         if (image.metadata.title.empty()) image.metadata.title = rec.baseName;
         if (!image.metadata.fanartPath.empty())
-            image.fanart = suiteosd::LoadArtwork(image.metadata.fanartPath, X(980), Y(390));
+            image.fanart = suiteosd::LoadDetailArtwork(image.metadata.fanartPath, X(1050), Y(500), true);
         if (!image.metadata.posterPath.empty())
-            image.poster = suiteosd::LoadArtwork(image.metadata.posterPath, X(250), Y(372));
+            image.poster = suiteosd::LoadDetailArtwork(image.metadata.posterPath, X(262), Y(402));
         return recordingDetailImages.emplace(rec.fileName, std::move(image)).first->second;
     }
 
     void drawRecordingDetailPage(const Recording &rec)
     {
-        const RecordingMeta &meta = metaFor(rec);
-        const RecordingDetailImage &image = detailImageFor(rec);
+        const auto &image = detailImageFor(rec);
         const auto &detail = image.metadata;
-        if (detailCastNav.active) {
-            suiteosd::DrawCastPage(osd, width, height, fontTitle, fontBody, fontSmall,
-                                   detail, detailCastNav, detailCastCache, true);
-            return;
-        }
-        fill(0, 0, 1599, 899, kBackground);
-        // A native artwork hero rather than a second player or HTTP image.
-        if (image.fanart.valid() && osd) {
-            cImage art(cSize(image.fanart.width, image.fanart.height), image.fanart.argb.data());
-            osd->DrawImage(cPoint(X(1585) - image.fanart.width, Y(91)), art);
-        }
-        fill(0, 0, 1599, 78, kSurface);
-        print(35, 22, "VDR Suite", fontLarge, kText, 226);
-        print(284, 24, "AUFNAHMEN  /  DETAILS", fontBody, kMuted);
-        print(1440, 23, formatTime(time(nullptr)), fontLarge);
-
-        panel(43, 114, 280, 386, false, kCardAlt);
-        if (image.poster.valid() && osd) {
-            cImage poster(cSize(image.poster.width, image.poster.height),
-                          image.poster.argb.data());
-            osd->DrawImage(cPoint(X(58) + (X(250) - image.poster.width) / 2,
-                                  Y(124) + (Y(372) - image.poster.height) / 2), poster);
-        } else if (meta.artwork.valid() && osd) {
-            cImage poster(cSize(meta.artwork.width, meta.artwork.height),
-                          meta.artwork.argb.data());
-            osd->DrawImage(cPoint(X(99), Y(236)), poster);
-        } else print(68, 296, "Kein Poster vorhanden", fontBody, kMuted, 241);
-
-        panel(342, 116, 1203, 370, false, 0xDC08192A);
-        const std::string title = detail.title.empty() ? rec.baseName : detail.title;
-        print(371, 142, title, fontTitle, kText, 1128);
-        if (!detail.episode.empty())
-            print(372, 210, detail.episode, fontLarge, kText, 1097);
-        std::string facts = "Aufnahme  ·  " + rec.time;
-        if (detail.season > 0) facts += "  ·  S" + std::to_string(detail.season);
-        if (detail.episodeNumber > 0) facts += " E" + std::to_string(detail.episodeNumber);
-        print(371, 272, facts, fontBody, kFocus, 1120);
-        std::string metadata;
-        for (const std::string &genre : detail.genres)
-            metadata += (metadata.empty() ? "" : "  ·  ") + genre;
-        if (!detail.release.empty())
-            metadata += (metadata.empty() ? "" : "  ·  ") + detail.release;
-        if (detail.runtime > 0)
-            metadata += "  ·  " + std::to_string(detail.runtime) + " Min";
-        if (detail.rating > 0) {
-            char rating[30];
-            std::snprintf(rating, sizeof(rating), "  ·  %.1f/10", detail.rating);
-            metadata += rating;
-        }
-        print(372, 325, metadata, fontBody, kText, 1080);
-
-        panel(342, 506, 1203, 277, false, kSurface);
-        print(372, 524, "INHALT", fontBody, kFocus);
-        std::string summary = detail.overview.empty() ? rec.description : detail.overview;
-        if (summary.empty()) summary = "Keine Beschreibung vorhanden.";
-        std::replace(summary.begin(), summary.end(), '\n', ' ');
-        std::istringstream words(summary);
-        std::string line, word;
-        int y = 569;
-        while (words >> word && y < 737) {
-            const std::string candidate = line.empty() ? word : line + " " + word;
-            if (!line.empty() && fontBody && fontBody->Width(candidate.c_str()) > X(1120)) {
-                print(372, y, line, fontBody, kText, 1131);
-                y += 36;
-                line = word;
-            } else line = candidate;
-        }
-        if (!line.empty() && y < 767)
-            print(372, y, line, fontBody, kText, 1131);
-        fill(18, 813, 1580, 892, kSurface);
-        print(52, 838, "OK / Rot: Wiedergabe", fontBody, kFocus);
-        print(436, 838, "Info / Zurück: Schließen", fontBody);
-        if (!detail.people.empty())
-            print(1055, 838, "Runter: Mitwirkende", fontBody, kFocus, 490);
+        fill(0,0,1599,899,kBackground);
+        fill(0,0,1599,78,kSurface);
+        print(35,22,"VDR Suite",fontLarge,kText,226);
+        print(284,24,"AUFNAHMEN / DETAILS",fontBody,kMuted);
+        print(1440,23,formatTime(time(nullptr)),fontLarge);
+        suiteosd::DrawRecordingHero(osd,width,height,fontTitle,fontBody,fontSmall,
+            detail,rec.baseName,recordingDate(rec.start),
+            detail.overview.empty()?rec.description:detail.overview,
+            image.fanart,image.poster,detailScroll,&detailCastNav,detailCastCache);
+        fill(18,822,1580,892,kSurface);
+        print(52,838,detailCastNav.active ?
+              "OK: Person suchen · Links/Rechts: Auswahl" : "OK / Rot: Wiedergabe",
+              fontBody,kFocus,810);
+        print(900,838,detailCastNav.active ? "Hoch / Zurück: Details" :
+              "Links/Rechts: Text · Runter: Personen",fontBody,kText,640);
     }
 
     bool handleDetailCast(eKeys base, const Recording *rec)
@@ -1711,6 +1645,14 @@ private:
                 detailCastNav.Move(base == kLeft ? -1 : 1, int(detailImageFor(*rec).metadata.people.size()));
             draw();
             return true;
+        }
+        if (base == kLeft || base == kRight) {
+            const auto &meta=detailImageFor(*rec).metadata;
+            const auto lines=suiteosd::HeroLines(meta.overview.empty()?rec->description:meta.overview,
+                          fontBody,X(suiteosd::kHeroTextWidth));
+            detailScroll=std::clamp(detailScroll+(base==kLeft?-1:1),0,
+                          std::max(0,int(lines.size())-suiteosd::kHeroTextRows));
+            draw(); return true;
         }
         if (base == kDown && !detailImageFor(*rec).metadata.people.empty()) {
             detailCastNav.Open();
@@ -3218,10 +3160,11 @@ private:
     {
         if (!searchActive) {
             searchOriginCast = detailCastNav;
+            searchOriginScroll = detailScroll;
             searchHistory.clear();
         } else {
             searchHistory.push_back({searchNav, personSearch, globalSearch,
-                 searchRecording, searchEvent, detailCastNav, searchNotice});
+                 searchRecording, searchEvent, detailCastNav, detailScroll, searchNotice});
         }
         searchActive = true;
         detailCastNav.Close();
@@ -3245,10 +3188,12 @@ private:
             searchRecording = std::move(frame.recording);
             searchEvent = std::move(frame.event);
             detailCastNav = frame.cast;
+            detailScroll = frame.scroll;
             searchNotice = std::move(frame.notice);
         } else {
             searchActive = false;
             detailCastNav = searchOriginCast;
+            detailScroll = searchOriginScroll;
         }
     }
 
@@ -3463,7 +3408,7 @@ private:
                 const int i = searchNav.selected;
                 if (searchNav.tab == SearchTab::Recordings) {
                     if (resolveSearchRecording(searchRecordings()[i], searchRecording)) {
-                        detailCastNav.Close(); searchNav.page = SearchPage::Recording;
+                        detailCastNav.Close(); detailScroll=0; searchNav.page = SearchPage::Recording;
                     } else searchNotice = "Aufnahme nicht mehr im lokalen VDR vorhanden";
                 } else if (searchNav.tab == SearchTab::Epg) {
                     searchEvent = globalSearch.epg[i]; searchNav.page = SearchPage::Event;
@@ -3473,6 +3418,7 @@ private:
                 }
             }
         }
+        if (searchFromReplay && !searchActive) return osEnd;
         draw();
         return osContinue;
     }
@@ -3584,6 +3530,7 @@ private:
             if (nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) &&
                 cDevice::PrimaryDevice() &&
                 !data.recordings[nav.card[3]].fileName.empty()) {
+                restoreLivePreview();
                 cReplayControl::SetRecording(data.recordings[nav.card[3]].fileName.c_str());
                 cControl::Launch(new cSuiteReplayControl());
                 return osEnd; // VDR launches its own canonical replay control
@@ -3644,6 +3591,7 @@ public:
     {
         coreAdmin.logout();
         coreNav.clearPassword();
+        searchLogin.clearPassword();
         restoreLivePreview();
         delete osd;
         delete fontTitle;
@@ -3669,6 +3617,11 @@ public:
         fontLarge = cFont::CreateFont("Sans:Bold", std::max(16, Y(29)));
         fontBody = cFont::CreateFont("Sans", std::max(14, Y(23)));
         fontSmall = cFont::CreateFont("Sans", std::max(12, Y(19)));
+        if (!gReplayPersonSearch.empty()) {
+            searchFromReplay=true;
+            const std::string name=std::exchange(gReplayPersonSearch,"");
+            openSearch(name);
+        }
         draw();
     }
 
@@ -3721,7 +3674,7 @@ public:
         if ((base == kInfo || base == kYellow) && !nav.sideFocused) {
             if (nav.section == 3 && nav.card[3] >= 0 &&
                 nav.card[3] < int(data.recordings.size()))
-                { detailCastNav.Close(); recordingDetails = true; }
+                { detailCastNav.Close(); detailScroll=0; recordingDetails = true; }
             else if (selectedHomeProgramme())
                 homeProgrammeDetails = true;
             draw();

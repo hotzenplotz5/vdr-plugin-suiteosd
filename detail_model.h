@@ -23,6 +23,26 @@ struct DetailMetadata {
     float rating = 0;
 };
 
+inline std::string HeroFacts(const DetailMetadata &data)
+{
+    std::string result;
+    auto add=[&](const std::string &value) {
+        if (!value.empty()) result += (result.empty() ? "" : "  ·  ") + value;
+    };
+    if (data.release.size() >= 4 &&
+        std::all_of(data.release.begin(),data.release.begin()+4,[](char c){return c>='0'&&c<='9';}))
+        add(data.release.substr(0,4));
+    else add(data.release);
+    if (data.runtime > 0) add(std::to_string(data.runtime)+" Min.");
+    for (const auto &genre:data.genres) add(genre);
+    if (data.season>0) {
+        std::string episode="Staffel "+std::to_string(data.season);
+        if (data.episodeNumber>0) episode+=", Folge "+std::to_string(data.episodeNumber);
+        add(episode);
+    }
+    return result;
+}
+
 inline void AddCredit(DetailMetadata &data, PersonCredit credit)
 {
     if (credit.name.empty()) return;

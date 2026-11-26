@@ -1,3 +1,11 @@
+vdr-plugin-suiteosd (0.9.6~dev) unstable; urgency=medium
+
+  * Native Home live-TV window and opaque channel logos.
+  * Shared recording hero, poster, fanart and visible cast rail.
+  * Interactive Suite cast and global search using existing Core endpoints.
+
+ -- VDR-Suite contributors <noreply@github.com>  Thu, 26 Nov 2026 06:45:00 +0100
+
 vdr-plugin-suiteosd (0.9.5~dev) unstable; urgency=medium
 
   * Initial local Debian source packaging for hardware testing.

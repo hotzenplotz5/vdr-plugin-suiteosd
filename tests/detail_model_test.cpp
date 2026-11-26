@@ -24,6 +24,8 @@ int main()
     nav.Open();
     nav.Move(1, 0);
     assert(nav.selected == 0 && nav.first == 0);
+    data.release="2004-07-15"; data.runtime=115; data.genres={"Action","Science-Fiction"};
+    assert(HeroFacts(data)=="2004  ·  115 Min.  ·  Action  ·  Science-Fiction");
     SearchNavigation search;
     search.Open("Will Smith");
     assert(search.person && search.page == SearchPage::Results);

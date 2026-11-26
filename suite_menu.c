@@ -8,6 +8,7 @@
  */
 #include "artwork_decode.h"
 #include "scraper_detail.h"
+#include "recording_detail_view.h"
 #include "vendor/tvscraper/services.h"
 
 #include <vdr/channels.h>
@@ -77,6 +78,7 @@ struct Preview {
     std::string description;
     std::string meta;
     std::string picture;
+    std::string recorded;
     bool hasDetail = false;
     DetailMetadata detail;
 
@@ -184,6 +186,10 @@ class SuiteMenu final : public cSkinDisplayMenu {
     int firstTextLine = 0;
     std::string lastPicture;
     Artwork cachedPicture;
+    int cachedPictureW = 0, cachedPictureH = 0;
+    std::string heroAssetKey;
+    Artwork heroFanart, heroPoster;
+    std::map<std::string,Artwork> heroPortraits;
 
     int X(int v) const { return v * width / 1600; }
     int Y(int v) const { return v * height / 900; }
@@ -230,6 +236,8 @@ class SuiteMenu final : public cSkinDisplayMenu {
 
     std::vector<std::string> contentLines() const
     {
+        if (mode == Body::Recording)
+            return HeroLines(rawText,bodyFont,X(kHeroTextWidth));
         if (!fixedText) {
             return wrap(rawText, X(preview.picture.empty() ? 1406 : 921), bodyFont);
         }
@@ -255,9 +263,10 @@ class SuiteMenu final : public cSkinDisplayMenu {
     void drawPicture(int x, int y, int w, int h)
     {
         if (!osd || preview.picture.empty()) return;
-        if (lastPicture != preview.picture) {
+        if (lastPicture != preview.picture || cachedPictureW != X(w) || cachedPictureH != Y(h)) {
             lastPicture = preview.picture;
-            cachedPicture = LoadArtwork(preview.picture, X(w), Y(h));
+            cachedPictureW = X(w); cachedPictureH = Y(h);
+            cachedPicture = LoadDetailArtwork(preview.picture, X(w), Y(h));
         }
         if (!cachedPicture.valid()) return;
         cImage image(cSize(cachedPicture.width, cachedPicture.height),
@@ -410,6 +419,24 @@ class SuiteMenu final : public cSkinDisplayMenu {
 
     void drawDetails()
     {
+        if (mode == Body::Recording) {
+            auto detail=preview.detail;
+            if(detail.title.empty()) detail.title=preview.title;
+            if(detail.episode.empty()) detail.episode=preview.subtitle;
+            const std::string key=detail.fanartPath+"\n"+detail.posterPath;
+            if(heroAssetKey!=key) {
+                heroAssetKey=key;
+                heroFanart=LoadDetailArtwork(detail.fanartPath,X(1050),Y(500),true);
+                heroPoster=LoadDetailArtwork(detail.posterPath,X(262),Y(402));
+            }
+            DrawRecordingHero(osd,width,height,heading,bodyFont,small,detail,
+                preview.title,preview.recorded,rawText,heroFanart,heroPoster,
+                firstTextLine,nullptr,heroPortraits);
+            // The native VDR menu owns keys. Do not advertise inactive actions.
+            text(48,568,"Pfeile: Text scrollen · Interaktive Personensuche im Suite-Aufnahmenbrowser",
+                 small,kMuted,1480);
+            return;
+        }
         rect(29, 103, 1538, 701, kSurface);
         text(64, 121, mode == Body::Event ? "PROGRAMMINFORMATIONEN" :
              mode == Body::Recording ? "AUFNAHMEDETAILS" : title,
@@ -668,6 +695,7 @@ public:
         preview.description = recording->Info() && recording->Info()->Description() ?
             recording->Info()->Description() : "";
         preview.meta = timeText(recording->Start());
+        preview.recorded = preview.meta;
         preview.hasDetail = true;
         cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
         if (scraper) {
@@ -690,8 +718,9 @@ public:
     {
         if (mode == Body::Items) return;
         const int maxLines = int(contentLines().size());
-        firstTextLine = std::clamp(firstTextLine + (up ? -1 : 1) * (page ? 9 : 1),
-                                   0, std::max(0, maxLines - 10));
+        const int visible = mode == Body::Recording ? kHeroTextRows : 10;
+        firstTextLine = std::clamp(firstTextLine + (up ? -1 : 1) * (page ? visible-1 : 1),
+                                   0, std::max(0, maxLines - visible));
     }
     void Flush() override
     {
