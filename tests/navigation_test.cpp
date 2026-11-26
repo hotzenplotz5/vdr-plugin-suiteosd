@@ -49,6 +49,14 @@ int main()
     static_assert(HomeLayout::cardWidth*3==HomeLayout::cardHeight*2);
     static_assert(HomeLayout::videoY+HomeLayout::videoH<=HomeLayout::liveY+HomeLayout::liveH-56);
     static_assert(HomeLayout::videoW*9==HomeLayout::videoH*16);
+    // An odd OSD origin must not cause the output provider's chroma
+    // alignment to reject the whole live preview.
+    for(int x:{1209,1210})for(int y:{99,100})for(int w:{319,320})for(int h:{179,180}){
+        const auto r=AlignPreviewRect(x,y,w,h);
+        assert((r.x|r.y|r.w|r.h)%2==0);
+        assert(r.x>=x&&r.y>=y&&r.x+r.w<=x+w&&r.y+r.h<=y+h);
+        assert(r.w>=w-2&&r.h>=h-2);
+    }
     assert(HomeLayout::firstRow(0,10)==1);
     assert(HomeLayout::firstRow(2,10)==1);
     assert(HomeLayout::firstRow(3,10)==1);

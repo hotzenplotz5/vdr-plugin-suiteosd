@@ -1,3 +1,10 @@
+vdr-plugin-suiteosd (0.9.15~dev) unstable; urgency=medium
+
+  * Align native live preview to even screen pixels before device negotiation.
+  * Recover temporary preview unavailability in the native OSD idle cycle.
+
+ -- VDR-Suite contributors <noreply@github.com>  Thu, 26 Nov 2026 21:30:00 +0100
+
 vdr-plugin-suiteosd (0.9.14~dev) unstable; urgency=medium
 
   * Read recording and EPG search from the shared Public API v1 using paired device credentials.

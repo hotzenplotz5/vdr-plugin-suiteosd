@@ -3,6 +3,14 @@
 #include <algorithm>
 #include <cstdint>
 namespace suiteosd {
+struct PreviewRect { int x,y,w,h; };
+// Fit an even-pixel video rectangle strictly inside the reserved screen slot.
+// NV12/P010 providers can align down; requesting even coordinates avoids
+// rejecting a valid preview merely because the OSD origin is odd.
+constexpr PreviewRect AlignPreviewRect(int x,int y,int w,int h) {
+    const int ax=x+(x&1), ay=y+(y&1);
+    return {ax,ay,std::max(0,(w-(ax-x))&~1),std::max(0,(h-(ay-y))&~1)};
+}
 struct HomeLayout {
     static constexpr int columns=6, rows=3;
     static constexpr int cardWidth=132, cardHeight=198, gap=36;

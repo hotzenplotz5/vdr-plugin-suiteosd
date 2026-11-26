@@ -54,7 +54,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.14-dev";
+static const char *VERSION = "0.9.15-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -563,6 +563,7 @@ private:
     cDevice *scaledDevice = nullptr;
     cRect scaledRect;
     bool scaledForHome = false;
+    std::chrono::steady_clock::time_point nextPreviewAttempt{};
     using HL = suiteosd::HomeLayout;
     std::array<suiteosd::Artwork,2> cinematicBackgrounds;
     std::map<std::array<int,7>,suiteosd::CinemaPatch> cinematicFrames;
@@ -1691,9 +1692,10 @@ private:
     void startLivePreview(bool home)
     {
         if (!gLivePreviewEnabled) { restoreLivePreview(); return; }
-        if (scaledDevice && scaledForHome==home) return;
-        restoreLivePreview();
         cDevice *device = cDevice::PrimaryDevice();
+        if (scaledDevice && scaledDevice==device && scaledForHome==home &&
+            !(device->Replaying()&&!device->Transferring())) return;
+        restoreLivePreview();
         // Live DVB transfer mode has an attached player too. Only exclude
         // real recording replay, not the transfer player used for live TV.
         if (!device || (device->Replaying() && !device->Transferring()))
@@ -1701,7 +1703,14 @@ private:
         const int left = cOsd::OsdLeft();
         const int top = cOsd::OsdTop();
         // Reuse the exact rectangle verified by the user in recordings.
-        const cRect requested(left + X(home?HL::videoX:1197), top + Y(home?HL::videoY:151), X(home?HL::videoW:338), Y(home?HL::videoH:190));
+        // 4:2:0 output providers may round odd screen coordinates down.
+        // Align inward before negotiation, so normalization cannot make an
+        // otherwise supported video rectangle escape the reserved slot.
+        const int x=left+X(home?HL::videoX:1197), y=top+Y(home?HL::videoY:151);
+        const int w=X(home?HL::videoW:338), h=Y(home?HL::videoH:190);
+        const auto aligned=suiteosd::AlignPreviewRect(x,y,w,h);
+        if(aligned.w<2||aligned.h<2)return;
+        const cRect requested(aligned.x,aligned.y,aligned.w,aligned.h);
         const cRect available = device->CanScaleVideo(requested);
         if (available.IsEmpty() ||
             available.X() < requested.X() || available.Y() < requested.Y() ||
@@ -4292,6 +4301,20 @@ public:
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        if(base==kNone&&osd&&gLivePreviewEnabled&&!searchActive&&!photosActive&&!settingsActive&&!timelineActive){
+            const bool home=!recordingsActive;
+            const bool wantsPreview=home?(!recordingDetails&&!homeProgrammeDetails):
+                (!browserDetails&&!browserDeleteConfirm);
+            if(wantsPreview&&std::chrono::steady_clock::now()>=nextPreviewAttempt){
+                nextPreviewAttempt=std::chrono::steady_clock::now()+std::chrono::milliseconds(750);
+                const auto *previous=scaledDevice;
+                startLivePreview(home);
+                if(previous!=scaledDevice){
+                    if(home){drawHomeLivePanel();osd->Flush();}
+                    else draw();
+                }
+            }
+        }
         if (searchActive) return searchKey(base);
         if (base == kSetup) {
             openSettings();
