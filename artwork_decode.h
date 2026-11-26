@@ -80,6 +80,39 @@ inline void FadeArtwork(Artwork &art,uint32_t matte)
     }
 }
 
+// Center-crop to the card bounds without stretching. The dark, opaque
+// lower gradient is part of the cached poster, not the live-video plane.
+inline Artwork CoverHomePoster(Artwork source,int w,int h,int radius,
+                                uint32_t matte=0xFF091B30u)
+{
+    if(!source.valid()||w<1||h<1||w>1024||h>1024)return {};
+    OpaqueArtwork(source,matte);
+    Artwork out{w,h,std::vector<uint32_t>(size_t(w)*h)};
+    const double scale=std::max(double(w)/source.width,double(h)/source.height);
+    const double x0=(source.width-w/scale)/2.0;
+    const double y0=(source.height-h/scale)/2.0;
+    radius=std::clamp(radius,0,std::min(w,h)/2);
+    for(int y=0;y<h;++y)for(int x=0;x<w;++x){
+        const int dx=std::max(0,radius-std::min(x,w-1-x));
+        const int dy=std::max(0,radius-std::min(y,h-1-y));
+        auto &pixel=out.argb[size_t(y)*w+x];
+        if(dx*dx+dy*dy>radius*radius){pixel=matte;continue;}
+        const double sx=std::clamp(x0+(x+.5)/scale-.5,0.0,double(source.width-1));
+        const double sy=std::clamp(y0+(y+.5)/scale-.5,0.0,double(source.height-1));
+        const int ix=int(sx),iy=int(sy),jx=std::min(ix+1,source.width-1),jy=std::min(iy+1,source.height-1);
+        const double fx=sx-ix,fy=sy-iy;
+        const double fade=std::clamp((.91-double(y)/std::max(1,h-1))/.33,0.0,1.0);
+        pixel=0xFF000000u;
+        for(unsigned shift:{0u,8u,16u}){
+            auto c=[&](int xx,int yy){return (source.argb[size_t(yy)*source.width+xx]>>shift)&255u;};
+            const double v=(c(ix,iy)*(1-fx)+c(jx,iy)*fx)*(1-fy)+(c(ix,jy)*(1-fx)+c(jx,jy)*fx)*fy;
+            const double bg=(matte>>shift)&255u;
+            pixel|=uint32_t(v*fade+bg*(1-fade)+.5)<<shift;
+        }
+    }
+    return out;
+}
+
 // Pure image decoder, independent of VDR. Decode only the small on-screen image.
 // Supports PNG/JPEG/SVG, preserves aspect ratio, no network or shell invocations.
 Artwork LoadArtwork(const std::string &path, int maxWidth, int maxHeight);

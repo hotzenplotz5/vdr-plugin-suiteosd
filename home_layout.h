@@ -8,6 +8,7 @@ struct HomeLayout {
     static constexpr int cardWidth=140, cardHeight=210, gap=28;
     static constexpr int left=157, top=83, rowStep=246, titleHeight=30;
     static constexpr int radius=12;
+    static constexpr int posterW=cardWidth-12, posterH=cardHeight-8;
     static constexpr int right=1184, rightWidth=372;
     static constexpr int videoX=1197, videoY=105, videoW=338, videoH=190;
     static constexpr int detailY=354, detailBottom=820;
@@ -15,6 +16,9 @@ struct HomeLayout {
     static constexpr int headingY(int row){return top+row*rowStep;}
     static constexpr int firstRow(int section,int sections){
         return std::clamp(section-rows+1,1,std::max(1,sections-rows));
+    }
+    static constexpr int progressPercent(std::int64_t start,std::int64_t end,std::int64_t now){
+        return end<=start||now<=start?0:now>=end?100:int(100.0*(now-start)/(end-start));
     }
     static constexpr int remainingMinutes(std::int64_t start,std::int64_t end,std::int64_t now){
         return start<=now&&now<end?int((end-now+59)/60):-1;

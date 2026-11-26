@@ -38,6 +38,14 @@ int main()
     assert(large.valid() && large.width==4 && large.height==4 && large.argb[5]==0xFFFFFFFFu);
     suiteosd::FadeArtwork(large,0xFF090B0Fu);
     assert(large.argb[0]==0xFF090B0Fu && large.argb[3]==0xFFFFFFFFu && large.argb[15]==0xFF090B0Fu);
+    suiteosd::Artwork wide{6,2,std::vector<uint32_t>(12,0xFFFF0000u)};
+    wide.argb[2]=wide.argb[3]=0xFF00FF00u;
+    auto poster=suiteosd::CoverHomePoster(wide,4,6,1);
+    assert(poster.valid()&&poster.width==4&&poster.height==6);
+    assert(poster.argb.front()==0xFF091B30u&&poster.argb.back()==0xFF091B30u);
+    assert(poster.argb[2]==0xFF00FF00u); // center crop, not stretched wide source
+    assert(poster.argb[5*4+2]==0xFF091B30u); // opaque text gradient
+    assert(!suiteosd::CoverHomePoster({},4,6,1).valid());
     auto smaller = suiteosd::LoadArtwork(pngPath, 1, 1);
     assert(smaller.valid() && smaller.width == 1 && smaller.height == 1);
 

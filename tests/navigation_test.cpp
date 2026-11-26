@@ -55,6 +55,10 @@ int main()
     assert(HomeLayout::remainingMinutes(100,5500,2800)==45);
     assert(HomeLayout::remainingMinutes(100,5500,5500)==-1);
     assert(HomeLayout::remainingMinutes(100,5500,99)==-1);
+    assert(HomeLayout::progressPercent(100,5500,2800)==50);
+    assert(HomeLayout::progressPercent(100,5500,5500)==100);
+    assert(HomeLayout::progressPercent(100,5500,99)==0);
+    assert(HomeLayout::progressPercent(0,0,99)==0);
 
     Navigation direct;
     direct.Move(Direction::Left, 1, 4);

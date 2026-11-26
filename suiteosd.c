@@ -568,6 +568,7 @@ private:
     std::string focusKey;
     std::chrono::steady_clock::time_point focusSince{};
     bool focusPending=false;
+    time_t focusClockMinute=-1;
     std::string notice;
     bool recordingDetails = false;
     bool homeProgrammeDetails = false;
@@ -1375,6 +1376,12 @@ private:
 
     }
 
+    suiteosd::Artwork loadHomePoster(const std::string &path) {
+        const int w=X(HL::posterW),h=Y(HL::posterH);
+        return suiteosd::CoverHomePoster(
+            suiteosd::LoadArtwork(path,std::min(1024,w*2),std::min(1024,h*2)),
+            w,h,std::max(1,X(6)));
+    }
     const suiteosd::Artwork &programmePoster(const Programme &item)
     {
         const std::string key="epg:"+std::to_string(item.channelNumber)+":"+std::to_string(item.eventId)+":"+std::to_string(item.start);
@@ -1395,7 +1402,7 @@ private:
                         cOrientations(eOrientation::portrait,eOrientation::landscape,eOrientation::banner),true).path;
             }
         }
-        return homeArtwork.emplace(key,suiteosd::LoadDetailArtwork(path,X(HL::cardWidth-12),Y(162))).first->second;
+        return homeArtwork.emplace(key,loadHomePoster(path)).first->second;
     }
 
     void homePicture(const suiteosd::Artwork &art,int x,int y,int w,int h)
@@ -1440,8 +1447,10 @@ private:
         roundedHomeRect(x+2,y+2,w-4,h-4,r-2,0xFF091B30);
     }
     void portraitTitle(int x,int top,const std::string &title,const std::string &subtitle) {
-        print(x+8,top+166,title,fontSmall,kText,HL::cardWidth-16);
-        print(x+8,top+188,subtitle,fontSmall,kMuted,HL::cardWidth-16);
+        const auto lines=suiteosd::HeroLines(title,fontSmall,X(HL::cardWidth-16));
+        for(int i=0;i<2&&i<int(lines.size());++i)
+            print(x+8,top+144+i*19,lines[i],fontSmall,kText,HL::cardWidth-16);
+        print(x+8,top+185,subtitle,fontSmall,kMuted,HL::cardWidth-16);
     }
     void drawPrograms(int section, int y, const char *heading, const std::vector<Programme> &items)
     {
@@ -1451,13 +1460,13 @@ private:
             const auto &item=items[index];
             const bool focus=!nav.sideFocused&&nav.section==section&&nav.card[section]==index;
             portraitCard(x,top,focus);
-            homePicture(programmePoster(item),x+6,top+4,HL::cardWidth-12,162);
+            homePicture(programmePoster(item),x+6,top+4,HL::posterW,HL::posterH);
             suiteosd::TimelineChannel logo;logo.name=item.channel;
             drawChannelLogo(logo,x+8,top+8,48,30);
             portraitTitle(x,top,item.title,item.time);
             if(section==1){
                 fill(x+8,top+204,x+HL::cardWidth-8,top+206,kLine);
-                fill(x+8,top+204,x+8+(HL::cardWidth-16)*item.progress/100,top+206,0xFF16DDF2);
+                fill(x+8,top+204,x+8+(HL::cardWidth-16)*HL::progressPercent(item.start,item.end,time(nullptr))/100,top+206,0xFF16DDF2);
             }
         }
         if(items.empty())print(HL::left,y+94,"Keine EPG-Daten verfügbar",fontBody,kMuted);
@@ -1663,7 +1672,7 @@ private:
                         cOrientations(eOrientation::portrait,eOrientation::landscape),true).path;
             }
         }
-        return homeArtwork.emplace(key,suiteosd::LoadDetailArtwork(path,X(w),Y(h))).first->second;
+        return homeArtwork.emplace(key,w==HL::posterW&&h==HL::posterH?loadHomePoster(path):suiteosd::LoadDetailArtwork(path,X(w),Y(h))).first->second;
     }
     void drawRecordings(int y)
     {
@@ -1674,7 +1683,7 @@ private:
             const int x=HL::cardX(col),top=y+HL::titleHeight;
             portraitCard(x,top,!nav.sideFocused&&nav.section==suiteosd::Navigation::kNew&&
                          nav.card[suiteosd::Navigation::kNew]==first+col);
-            homePicture(recordingPoster(item,HL::cardWidth-12,162),x+6,top+4,HL::cardWidth-12,162);
+            homePicture(recordingPoster(item,HL::posterW,HL::posterH),x+6,top+4,HL::posterW,HL::posterH);
             portraitTitle(x,top,item.baseName,recordingDate(item.start));
         }
     }
@@ -1942,6 +1951,7 @@ private:
             &it->second.page.cards[index]:nullptr;
     }
     void drawHomeSidePanel() {
+        focusClockMinute=time(nullptr)/60;
         const bool liveFocused=homeCollections.empty()&&nav.section==0&&!nav.sideFocused;
         if(liveFocused)roundedHomeRect(HL::right-2,78,HL::rightWidth+4,264,14,0xFF16E0F8);
         roundedHomeRect(HL::right,80,HL::rightWidth,260,12,0xFF142C43);
@@ -1954,7 +1964,7 @@ private:
         print(HL::videoX,80,"LIVE-TV  ·  "+data.live.channel,fontSmall,kFocus,338);
         print(HL::videoX,298,data.live.title,fontBody,kText,338);
         fill(HL::videoX,329,HL::videoX+HL::videoW,332,kLine);
-        fill(HL::videoX,329,HL::videoX+HL::videoW*data.live.progress/100,332,0xFF16DDF2);
+        fill(HL::videoX,329,HL::videoX+HL::videoW*HL::progressPercent(data.live.start,data.live.end,time(nullptr))/100,332,0xFF16DDF2);
         roundedHomeRect(HL::right,HL::detailY,HL::rightWidth,HL::detailBottom-HL::detailY,12,0xFF0A1B2E);
         const Programme *p=homeCollections.empty()?selectedHomeProgramme():nullptr;
         const auto *card=p?nullptr:focusedCoreCard();
@@ -2025,6 +2035,7 @@ private:
                 const int minutes=v.duration>0?(v.duration+59)/60:v.metadata.runtime;
                 if(minutes>0)facts+=(facts.empty()?"":" · ")+std::to_string(minutes)+" Min.";
             }
+            if(!v.metadata.genres.empty())facts+=(facts.empty()?"":" · ")+v.metadata.genres.front();
         }
         const int tx=HL::right+12;
         const auto titleLines=suiteosd::HeroLines(title.empty()?"Sendung oder Aufnahme auswählen":title,fontBody,X(348));
@@ -2038,11 +2049,23 @@ private:
             else if(p->start>time(nullptr))print(tx,658,"Beginn: "+formatTime(p->start),fontSmall,kFocus,348);
         }else if(rec)print(tx,635,recordingDate(rec->start),fontSmall,kMuted,348);
         int y=p?684:658;
-        for(const auto &line:suiteosd::HeroLines(description,fontSmall,X(348))){
-            if(y>796)break;
-            if(!title.empty())print(tx,y,line,fontSmall,kText,348);
+        std::string director,cast;
+        if(cached!=focusPreviews.end()){
+            for(const auto &person:cached->second.metadata.people){
+                if(person.role=="Regie"&&director.empty())director=person.name;
+                if(person.role=="Schauspiel"||person.role=="Gastrolle"){
+                    if(cast.size()<45)cast+=(cast.empty()?"":", ")+person.name;
+                }
+            }
+        }
+        const int summaryBottom=796-(!director.empty()?23:0)-(!cast.empty()?23:0);
+        const auto lines=suiteosd::HeroLines(description,fontSmall,X(348));
+        for(size_t i=0;i<lines.size()&&y<=summaryBottom;++i){
+            if(!title.empty())print(tx,y,lines[i]+(y+23>summaryBottom&&i+1<lines.size()?" …":""),fontSmall,kText,348);
             y+=23;
         }
+        if(!director.empty()) {print(tx,y,"Regie: "+director,fontSmall,kMuted,348);y+=23;}
+        if(!cast.empty())print(tx,y,"Mit: "+cast,fontSmall,kMuted,348);
     }
 
     void drawHomeProgrammeInfo()
@@ -3715,7 +3738,7 @@ private:
             if(card.kind==suiteosd::CoreHomeCard::Kind::Recording){
                 const auto *local=findRecording(card.recording.nativeId);
                 if(local&&card.recording.backendId=="default")
-                    homePicture(recordingPoster(*local,HL::cardWidth-12,162),x+6,top+4,HL::cardWidth-12,162);
+                    homePicture(recordingPoster(*local,HL::posterW,HL::posterH),x+6,top+4,HL::posterW,HL::posterH);
                 const std::string subtitle=card.completed?"Angesehen":card.position>=0?playbackClock(card.position):card.subtitle;
                 portraitTitle(x,top,card.title,subtitle);
                 if(card.duration>0&&card.position>=0){
@@ -4082,6 +4105,9 @@ public:
         }
         if(base==kNone){
             if(focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220))draw();
+            else if(osd&&notice.empty()&&focusClockMinute!=time(nullptr)/60){
+                drawHomeSidePanel();osd->Flush(); // local clock only, no status polling
+            }
             return osContinue;
         }
         if(!homeCollections.empty())return homeCollectionKey(base);
