@@ -5,6 +5,7 @@
  */
 #include "artwork_decode.h"
 #include "logo_locator.h"
+#include "web_palette.h"
 #include "skin_registration.h"
 #include "vendor/tvscraper/services.h"
 
@@ -25,12 +26,12 @@
 namespace suiteosd {
 cSkinDisplayMenu *CreateSuiteMenu();
 namespace {
-constexpr tColor bg = 0xFF091729;
-constexpr tColor dark = 0xF6071426;
-constexpr tColor accent = 0xFF08D2F6;
-constexpr tColor white = 0xFFF7FAFF;
-constexpr tColor muted = 0xFFA9BBD0;
-constexpr tColor line = 0xFF2A4961;
+constexpr tColor bg = suiteosd::webSurface;
+constexpr tColor dark = suiteosd::webBackground;
+constexpr tColor accent = suiteosd::webFocus;
+constexpr tColor white = suiteosd::webText;
+constexpr tColor muted = suiteosd::webMuted;
+constexpr tColor line = suiteosd::webLine;
 
 std::string clockTime(time_t t)
 {
@@ -193,11 +194,12 @@ public:
     void setLogo(const std::string &path)
     {
         cachedLogo = path.empty() ? Artwork{} : LoadArtwork(path, W(245), H(100));
-        OpaqueArtwork(cachedLogo, bg);
+        OpaqueArtwork(cachedLogo, webLogo);
     }
     bool logo()
     {
         if (!osd || !cachedLogo.valid()) return false;
+        rect(52,30,297,130,webLogo);
         cImage img(cSize(cachedLogo.width, cachedLogo.height), cachedLogo.argb.data());
         osd->DrawImage(cPoint(W(52) + (W(245) - cachedLogo.width) / 2,
                               H(30) + (H(100) - cachedLogo.height) / 2), img);

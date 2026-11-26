@@ -31,6 +31,8 @@ int main()
     n.Move(Direction::Down, 6, 4);
     for (int i = 0; i < 20; ++i) n.Move(Direction::Down, 6, 4);
     assert(n.sideIndex == Navigation::kSidebarItems - 1);
+    assert(n.sideIndex == Navigation::kClassicMenuItem);
+    n.Move(Direction::Up, 6, 4);
     assert(n.sideIndex == Navigation::kSearchItem);
     for (int i = 0; i < 20; ++i) n.Move(Direction::Up, 6, 4);
     assert(n.sideIndex == 0);

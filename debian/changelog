@@ -1,3 +1,11 @@
+vdr-plugin-suiteosd (0.9.7~dev) unstable; urgency=medium
+
+  * Webfrontend palette, white channel-logo plates and native navigation icons.
+  * Portrait artwork on Home programme and recent-recording rails.
+  * Native timer action in Home programme details and classic VDR menu entry.
+
+ -- VDR-Suite contributors <noreply@github.com>  Thu, 26 Nov 2026 11:20:00 +0100
+
 vdr-plugin-suiteosd (0.9.6~dev) unstable; urgency=medium
 
   * Native Home live-TV window and opaque channel logos.

@@ -5,6 +5,8 @@
  * This is not a cSkin replacement or an embedded HTML/video player.
  */
 #include "navigation.h"
+#include "web_palette.h"
+#include "sidebar_icons.h"
 #include "settings_navigation.h"
 #include "core_admin_client.h"
 #include "core_admin_navigation.h"
@@ -49,21 +51,21 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.6-dev";
+static const char *VERSION = "0.9.7-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
 
 namespace {
-constexpr tColor kBackground = 0xFF040A19;
-constexpr tColor kSurface = 0xFF071729;
-constexpr tColor kCard = 0xFF11243B;
-constexpr tColor kCardAlt = 0xFF132A44;
-constexpr tColor kFocus = 0xFF09D2FA;
-constexpr tColor kHighlight = 0xFF056BA0;
-constexpr tColor kText = 0xFFF5F9FF;
-constexpr tColor kMuted = 0xFF9DB2C9;
-constexpr tColor kLine = 0xFF20506D;
+constexpr tColor kBackground = suiteosd::webBackground;
+constexpr tColor kSurface = suiteosd::webSurface;
+constexpr tColor kCard = suiteosd::webCard;
+constexpr tColor kCardAlt = suiteosd::webCardAlt;
+constexpr tColor kFocus = suiteosd::webFocus;
+constexpr tColor kHighlight = suiteosd::webPrimary;
+constexpr tColor kText = suiteosd::webText;
+constexpr tColor kMuted = suiteosd::webMuted;
+constexpr tColor kLine = suiteosd::webLine;
 
 // Suite-OSD configuration is stored under the plugin owner in VDR setup.conf.
 // This variable is loaded by SetupParse and written only through SetupStore.
@@ -80,6 +82,9 @@ struct Programme {
     std::string time;
     std::string description;
     int progress = 0;
+    tEventID eventId = 0;
+    time_t start = 0, end = 0;
+    std::string subtitle;
 };
 struct Recording {
     std::string title;
@@ -147,6 +152,8 @@ Programme fromEvent(const cChannel *ch, const cEvent *event)
     p.channel = ch->Name() ? ch->Name() : "";
     p.title = event ? event->Title() : "Keine Programminformation";
     p.time = eventTime(event);
+    if (event) { p.eventId=event->EventID(); p.start=event->StartTime(); p.end=event->EndTime();
+        p.subtitle=event->ShortText()?event->ShortText():""; }
     p.description = event && event->Description() ? event->Description() : "";
     if (event && event->Duration() > 0) {
         const time_t now = time(nullptr);
@@ -200,6 +207,7 @@ Snapshot readVdrSnapshot()
             }
         }
     }
+    std::stable_sort(snapshot.recordings.begin(),snapshot.recordings.end(),[](const Recording &a,const Recording &b){return a.start>b.start;});
     return snapshot;
 }
 
@@ -259,13 +267,10 @@ suiteosd::Timeline ReadNativeTimeline()
     return timeline;
 }
 
-const std::array<const char *, 12> kSidebar = {{
+const std::array<const char *, 13> kSidebar = {{
     "Home", "Live-TV", "EPG", "Aufnahmen", "Timer",
     "Suchtimer", "HbbTV", "Teletext", "Bilder", "Media Tools",
-    "Einstellungen", "Suche"
-}};
-const std::array<const char *, 12> kSymbols = {{
-    "H", "TV", "E", "REC", "T", "S", "Hb", "TXT", "IMG", "M", "SET", "SUC"
+    "Einstellungen", "Suche", "VDR-Menü"
 }};
 
 
@@ -493,6 +498,7 @@ private:
     bool timelineTimerConfirm = false;
     std::string timelineTimerNotice;
     std::map<std::string, suiteosd::Artwork> channelLogos;
+    std::map<std::string, suiteosd::Artwork> homeArtwork;
     std::map<std::string, suiteosd::Artwork> timelineArtwork;
     Snapshot data;
     std::map<std::string, RecordingMeta> recordingMeta;
@@ -522,6 +528,8 @@ private:
     std::string notice;
     bool recordingDetails = false;
     bool homeProgrammeDetails = false;
+    bool homeTimerConfirm = false;
+    std::string homeTimerNotice;
     int width = 1600;
     int height = 900;
 
@@ -564,25 +572,25 @@ private:
         return 0;
     }
 
-    const suiteosd::Artwork &channelLogo(const suiteosd::TimelineChannel &channel)
+    const suiteosd::Artwork &channelLogo(const suiteosd::TimelineChannel &channel,int w,int h)
     {
-        const std::string key = channel.name + "\n" + channel.shortName;
+        const std::string key = channel.name + "\n" + channel.shortName + ":" + std::to_string(w) + ":" + std::to_string(h);
         auto it = channelLogos.find(key);
         if (it != channelLogos.end()) return it->second;
         if (channelLogos.size() >= 48) channelLogos.clear();
         const std::string path = suiteosd::FindChannelLogo(channel.name, channel.shortName);
-        auto art = suiteosd::LoadArtwork(path, X(64), Y(42));
-        suiteosd::OpaqueArtwork(art, kSurface);
+        auto art = suiteosd::LoadArtwork(path, std::max(1,X(w)), std::max(1,Y(h)));
+        suiteosd::OpaqueArtwork(art, suiteosd::webLogo);
         return channelLogos.emplace(key, std::move(art)).first->second;
     }
 
     bool drawChannelLogo(const suiteosd::TimelineChannel &channel,
                          int x, int y, int w, int h)
     {
-        const suiteosd::Artwork &art = channelLogo(channel);
+        const suiteosd::Artwork &art = channelLogo(channel,std::max(1,w-10),std::max(1,h-8));
         if (!art.valid() || !osd) return false;
         cImage image(cSize(art.width, art.height), art.argb.data());
-        fill(x, y, x + w - 1, y + h - 1, kSurface);
+        fill(x, y, x + w - 1, y + h - 1, suiteosd::webLogo);
         const int px = X(x) + (X(w) - art.width) / 2;
         const int py = Y(y) + (Y(h) - art.height) / 2;
         osd->DrawImage(cPoint(px, py), image);
@@ -872,7 +880,11 @@ private:
         const int channelNumber = timeline.channels[timeline.channel].number;
         const tEventID eventID = selected->id;
         const time_t eventStart = selected->start;
+        return createNativeTimer(channelNumber,eventID,eventStart);
+    }
 
+    std::string createNativeTimer(int channelNumber,tEventID eventID,time_t eventStart)
+    {
         // Match the lock order and timer life cycle of VDR's own
         // cMenuSchedule::Record(). Resolve the original event again under
         // its lock, so an outdated EPG snapshot never writes a wrong timer.
@@ -1276,10 +1288,12 @@ private:
         if (y + 275 < 80 || y > 830)
             return;
         panel(154, y, 1415, 270, nav.section == 0 && !nav.sideFocused, kSurface);
-        print(189, y + 23, "LIVE-TV  ·  KANAL " + std::to_string(data.live.channelNumber),
+        suiteosd::TimelineChannel logo; logo.name=data.live.channel;
+        drawChannelLogo(logo,187,y+22,130,88);
+        print(337, y + 23, "LIVE-TV  ·  KANAL " + std::to_string(data.live.channelNumber),
               fontSmall, kFocus);
-        print(189, y + 61, data.live.channel.empty() ? "Kein aktiver Sender" : data.live.channel,
-              fontTitle, kText, 760);
+        print(337, y + 61, data.live.channel.empty() ? "Kein aktiver Sender" : data.live.channel,
+              fontTitle, kText, 482);
         // Match the approved Webfrontend Home: Jetzt and Als Nächstes
         // come from VDR's present/following events for the tuned channel.
         print(189, y + 130, "JETZT", fontSmall, kFocus);
@@ -1324,36 +1338,62 @@ private:
         }
     }
 
+    const suiteosd::Artwork &programmePoster(const Programme &item)
+    {
+        const std::string key="epg:"+std::to_string(item.channelNumber)+":"+std::to_string(item.eventId)+":"+std::to_string(item.start);
+        auto it=homeArtwork.find(key);
+        if(it!=homeArtwork.end()) return it->second;
+        if(homeArtwork.size()>=48) homeArtwork.clear();
+        std::string path;
+        if (item.start && item.eventId) if (auto *scraper=cPluginManager::GetPlugin("tvscraper")) {
+            LOCK_CHANNELS_READ;
+            LOCK_SCHEDULES_READ;
+            const auto *ch=Channels?Channels->GetByNumber(item.channelNumber):nullptr;
+            const auto *schedule=ch&&Schedules?Schedules->GetSchedule(ch):nullptr;
+            const auto *event=schedule?schedule->GetEventById(item.eventId):nullptr;
+            if(event&&event->StartTime()==item.start) {
+                cGetScraperVideo req(event,nullptr);
+                if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo)
+                    path=req.m_scraperVideo->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
+                        cOrientations(eOrientation::portrait,eOrientation::landscape,eOrientation::banner),true).path;
+            }
+        }
+        return homeArtwork.emplace(key,suiteosd::LoadDetailArtwork(path,X(184),Y(226))).first->second;
+    }
+
+    void homePicture(const suiteosd::Artwork &art,int x,int y,int w,int h)
+    {
+        if(!art.valid())return;
+        cImage img(cSize(art.width,art.height),art.argb.data());
+        osd->DrawImage(cPoint(X(x)+(X(w)-art.width)/2,Y(y)+(Y(h)-art.height)/2),img);
+    }
+    void homeCard(int x,int y,int w,int h,bool focused)
+    {
+        fill(x-1,y-1,x+w+1,y+h+1,focused?kFocus:kLine);
+        fill(x,y,x+w,y+h,kCard);
+    }
     void drawPrograms(int section, int y, const char *heading, const std::vector<Programme> &items)
     {
-        if (y < 75 || y > 815)
-            return;
-        print(155, y, heading, fontLarge);
-        const int columns = 7;
-        const int gap = 12;
-        const int cw = 188;
-        const int first = nav.firstCard[section];
-        for (int col = 0; col < columns && first + col < int(items.size()); ++col) {
-            const Programme &item = items[first + col];
-            const int x = 157 + col * (cw + gap);
-            const bool focus = !nav.sideFocused && nav.section == section &&
-                               nav.card[section] == first + col;
-            panel(x, y + 48, cw, 160, focus, kCard);
-            suiteosd::TimelineChannel logoChannel;
-            logoChannel.name = item.channel;
-            if (!drawChannelLogo(logoChannel, x + 10, y + 55, 65, 43))
-                print(x + 13, y + 61, item.channel, fontBody, kText, cw - 25);
-            else
-                print(x + 82, y + 64, item.channel, fontSmall, kText, cw - 92);
-            print(x + 13, y + 104, item.title, fontSmall, kText, cw - 24);
-            print(x + 13, y + 132, item.time, fontSmall, kMuted, cw - 24);
-            fill(x + 13, y + 190, x + cw - 13, y + 198, kLine);
-            if (section == 1)
-                fill(x + 13, y + 190,
-                     x + 13 + (cw - 26) * item.progress / 100, y + 198, kFocus);
+        print(155,y,heading,fontLarge);
+        for(int col=0;col<7 && nav.firstCard[section]+col<int(items.size());++col){
+            int index=nav.firstCard[section]+col, x=157+col*200, top=y+40;
+            const auto &item=items[index];
+            bool focus=!nav.sideFocused&&nav.section==section&&nav.card[section]==index;
+            homeCard(x,top,188,306,focus);
+            const auto &art=programmePoster(item);
+            fill(x+1,top+1,x+187,top+229,kCardAlt);
+            // Poster fit without distortion. The image area is dominant.
+            homePicture(art,x+2,top+2,184,226);
+            suiteosd::TimelineChannel logo;logo.name=item.channel;
+            drawChannelLogo(logo,x+9,top+181,74,45);
+            print(x+9,top+233,item.channel+" · "+item.time,fontSmall,kMuted,172);
+            print(x+9,top+257,item.title,fontBody,kText,172);
+            if(section==1){
+                fill(x+9,top+293,x+179,top+298,kLine);
+                fill(x+9,top+293,x+9+170*item.progress/100,top+298,suiteosd::webProgress);
+            } else print(x+9,top+282,item.subtitle,fontSmall,kMuted,172);
         }
-        if (items.empty())
-            print(159, y + 94, "Keine EPG-Daten verfügbar", fontBody, kMuted);
+        if(items.empty())print(159,y+94,"Keine EPG-Daten verfügbar",fontBody,kMuted);
     }
 
     RecordingMeta loadRecordingMeta(const Recording &item)
@@ -1542,42 +1582,38 @@ private:
         nav.section = 0;
     }
 
+    const suiteosd::Artwork &recordingPoster(const Recording &rec)
+    {
+        const std::string key="rec:"+rec.fileName;
+        auto it=homeArtwork.find(key);if(it!=homeArtwork.end())return it->second;
+        if(homeArtwork.size()>=48)homeArtwork.clear();
+        std::string path;
+        if(auto *scraper=cPluginManager::GetPlugin("tvscraper")){
+            LOCK_RECORDINGS_READ;
+            const auto *r=Recordings?Recordings->GetByName(rec.fileName.c_str()):nullptr;
+            if(r){
+                cGetScraperVideo req(nullptr,r);
+                if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo)
+                    path=req.m_scraperVideo->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
+                        cOrientations(eOrientation::portrait,eOrientation::landscape),true).path;
+            }
+        }
+        return homeArtwork.emplace(key,suiteosd::LoadDetailArtwork(path,X(184),Y(240))).first->second;
+    }
     void drawRecordings(int y)
     {
-        if (y < 75 || y > 815)
-            return;
-        print(155, y, "Aufnahmen (" + std::to_string(data.recordings.size()) + ")", fontLarge);
-        const int cw = 188;
-        const int first = nav.firstCard[3];
-        for (int col = 0; col < 7 && first + col < int(data.recordings.size()); ++col) {
-            const Recording &item = data.recordings[first + col];
-            const int x = 157 + col * 200;
-            const bool focus = !nav.sideFocused && nav.section == 3 &&
-                               nav.card[3] == first + col;
-            panel(x, y + 48, cw, 160, focus, kCardAlt);
-            const RecordingMeta &meta = metaFor(item);
-            fill(x + 12, y + 59, x + cw - 12, y + 143, kLine);
-            if (meta.artwork.valid()) {
-                cImage picture(cSize(meta.artwork.width, meta.artwork.height),
-                               meta.artwork.argb.data());
-                const int left = X(x + 12) +
-                    (X(cw - 24) - meta.artwork.width) / 2;
-                const int top = Y(y + 59) +
-                    (Y(84) - meta.artwork.height) / 2;
-                osd->DrawImage(cPoint(left, top), picture);
-            } else
-                print(x + 25, y + 70, "AUFNAHME", fontSmall, kMuted);
-
-            const std::string &title = meta.title.empty() ? item.title : meta.title;
-            print(x + 13, y + 147, title, fontBody, kText, cw - 24);
-            const std::string detail = !meta.episode.empty() ? meta.episode :
-                                       !meta.release.empty() ? meta.release : item.time;
-            print(x + 13, y + 181, detail, fontSmall, kMuted, cw - 24);
+        print(155,y,"Neu aufgenommen",fontLarge);
+        const int first=nav.firstCard[3];
+        for(int col=0;col<7 && first+col<int(data.recordings.size());++col){
+            const auto &item=data.recordings[first+col];
+            int x=157+col*200,top=y+40;
+            homeCard(x,top,188,306,!nav.sideFocused&&nav.section==3&&nav.card[3]==first+col);
+            homePicture(recordingPoster(item),x+2,top+2,184,240);
+            const auto &meta=metaFor(item);
+            print(x+9,top+245,meta.episode.empty()?(meta.title.empty()?item.baseName:meta.title):meta.episode,fontBody,kText,172);
+            print(x+9,top+277,recordingDate(item.start),fontSmall,kMuted,172);
         }
-        if (data.recordings.empty())
-            print(159, y + 94, "Keine Aufnahmen vorhanden", fontBody, kMuted);
     }
-
 
     const RecordingDetailImage &detailImageFor(const Recording &rec)
     {
@@ -1856,7 +1892,9 @@ private:
         }
         if (!line.empty() && y <= 671)
             print(301, y, line, fontBody, kText, 988);
-        print(301, 675, "Gelb / Info / Zurück: Schließen", fontSmall, kFocus);
+        fill(290,638,1328,704,kSurface);
+        print(301,643,homeTimerConfirm?"OK: Timer bestätigen · Zurück: Abbrechen":"Rot: Timer erstellen · Info/Zurück: Schließen",fontSmall,kFocus,1000);
+        print(301,676,homeTimerNotice,fontSmall,kText,1000);
     }
 
     static const char *settingsTitle(int id)
@@ -3430,14 +3468,16 @@ private:
         const int right = nav.sideFocused ? 270 : 99;
         panel(18, 90, right - 18, 726, false, kSurface);
         for (int i = 0; i < int(kSidebar.size()); ++i) {
-            const int y = 104 + i * 58;
+            const int y = 98 + i * 54;
             const bool selected = nav.sideFocused && nav.sideIndex == i;
             if (selected)
                 panel(31, y, right - 51, 48, true, kHighlight);
             else if (!nav.sideFocused && i ==
                      (searchActive ? 11 : photosActive ? 8 : settingsActive ? 10 : timelineActive ? 2 : recordingsActive ? 3 : 0))
                 panel(31, y, 52, 48, false, kHighlight);
-            print(41, y + 13, kSymbols[i], fontSmall, kText, 56);
+            suiteosd::DrawSidebarIcon(i,[&](int px,int py){
+                fill(42+px,y+12+py,43+px,y+13+py,kText);
+            });
             if (nav.sideFocused)
                 print(102, y + 11, kSidebar[i], fontBody, kText, 145);
         }
@@ -3467,7 +3507,7 @@ private:
             return;
         }
         const bool home = !photosActive && !settingsActive && !recordingsActive && !timelineActive;
-        if (home && !recordingDetails && !homeProgrammeDetails && nav.firstVisibleSection != 2)
+        if (home && !recordingDetails && !homeProgrammeDetails && nav.section <= 1)
             startLivePreview(true);
         else if (recordingsActive && !browserDetails && !browserDeleteConfirm)
             startLivePreview(false);
@@ -3495,11 +3535,16 @@ private:
         }
         fill(0, 0, 1599, 899, kBackground);
         drawHeader();
-        const int scroll = nav.firstVisibleSection == 2 ? 402 : 0;
-        drawHero(scroll);
-        drawPrograms(1, 394 - scroll, "Was läuft jetzt", data.now);
-        drawPrograms(2, 614 - scroll, "Was läuft als nächstes", data.next);
-        drawRecordings(834 - scroll);
+        if(nav.section<=1){
+            drawHero(0);
+            drawPrograms(1,390,"Was läuft jetzt",data.now);
+        } else if(nav.section==2){
+            drawPrograms(1,83,"Was läuft jetzt",data.now);
+            drawPrograms(2,449,"Was läuft danach",data.next);
+        } else {
+            drawPrograms(2,83,"Was läuft danach",data.next);
+            drawRecordings(449);
+        }
         drawFooter();
         drawSidebar();
         drawRecordingDetails();
@@ -3524,7 +3569,7 @@ private:
             break;
         }
         case suiteosd::Activation::ChannelNext:
-            notice = "Sendungsdetails und Timer folgen mit der Suite-Integration.";
+            homeProgrammeDetails=true; homeTimerConfirm=false; homeTimerNotice.clear();
             break;
         case suiteosd::Activation::Recording:
             if (nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) &&
@@ -3549,6 +3594,7 @@ private:
             case 8: openPhotoGallery(); return osContinue; // image_next VDR service
             case 4: nativeKey = kTimers; break;     // Timers
             case 11: openSearch(); return osContinue;
+            case 12: nativeKey = kMenu; break; // classic VDR menu remains accessible
             case 10: openSettings(); return osContinue; // Unified VDR+Suite settings
             default: break;
             }
@@ -3648,11 +3694,18 @@ public:
         if (settingsActive)
             return settingsKey(base);
         if (homeProgrammeDetails) {
-            if (base == kYellow || base == kInfo || base == kBack || base == kOk) {
-                homeProgrammeDetails = false;
-                draw();
+            if(homeTimerConfirm){
+                if(base==kOk){
+                    const auto *p=selectedHomeProgramme();
+                    homeTimerNotice=p?createNativeTimer(p->channelNumber,p->eventId,p->start):"Keine Sendung ausgewählt";
+                    homeTimerConfirm=false;
+                }else if(base==kBack||base==kInfo)homeTimerConfirm=false;
+            }else if(base==kRed||base==kRecord){
+                homeTimerConfirm=true;homeTimerNotice.clear();
+            }else if(base==kYellow||base==kInfo||base==kBack||base==kOk){
+                homeProgrammeDetails=false;homeTimerNotice.clear();
             }
-            return osContinue;
+            draw();return osContinue;
         }
         if (recordingDetails) {
             const Recording *selected = nav.card[3] >= 0 && nav.card[3] < int(data.recordings.size()) ?
@@ -3701,6 +3754,7 @@ public:
             data = readVdrSnapshot();
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
             recordingDetailImages.clear();
+            homeArtwork.clear();
             nav.KeepVisible(7, count(nav.section));
             notice = "EPG und Aufnahmen aktualisiert";
             draw();

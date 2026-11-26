@@ -127,3 +127,7 @@ Alle Bilddateien werden nur aus dem lokalen TVScraper-Cache gelesen. Pfade und M
 ## Korrektur nach TV-Abnahme (26.11.2026)
 
 Home nutzt denselben nativen ScaleVideo-Pfad wie der Aufnahmenbrowser: oben rechts ein 16:9-Fenster, keine zweite Videoquelle, und Rücksetzen beim Wechsel in Details/andere Ansichten sowie beim Schließen. Beide Ansichten respektieren die vorhandene LivePreview-Einstellung. Logos werden mit einer opaken dunklen Unterlage alpha-komponiert; der Home-Hintergrund und die Kanalinfo-Leiste sind deckend. Ein TV-Test der Home-Geometrie und der Rückkehr zur Vollbildausgabe bleibt erforderlich.
+
+## TV-Home 0.9.7 (26.11.2026)
+
+Nutzerreferenz: sieben mobile Webfrontend-Screenshots (Home, Jetzt/Danach, Weiterschauen, Serien, Genres/Ordner, Neu aufgenommen, Empfehlungen, zuletzt angesehen). Quellvorlage `hotzenplotz5/vdr-suite@52c67da2c74a2757785ded3eb3bccecc703756ce`, `web/frontend/home-live-hero.js` und `home-recording-discovery.js`. Die Palette übernimmt dunkle Flächen, helle Logo-Matten, Weiß und sparsame blaue Akzente. Native Linienicons, vertikal fokussierte Reihen mit Portrait-Artwork, native TV-Vorschau, neueste Aufnahmen und Timer aus dem gewählten Event. Die Daten stammen aus dem bestehenden lokalen VDR/TVScraper, nicht einer zweiten Datenbank. Die restlichen Discovery-/History-Reihen benötigen die bestehenden Core-Owner und werden nicht durch erfundene Daten ersetzt. Der native klassische Menüeintrag bleibt unabhängig vom Remapping erreichbar. Hardwareabnahme offen.

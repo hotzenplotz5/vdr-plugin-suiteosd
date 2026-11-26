@@ -9,6 +9,7 @@
 #include "artwork_decode.h"
 #include "scraper_detail.h"
 #include "recording_detail_view.h"
+#include "web_palette.h"
 #include "vendor/tvscraper/services.h"
 
 #include <vdr/channels.h>
@@ -31,14 +32,14 @@
 
 namespace suiteosd {
 namespace {
-constexpr tColor kBase = 0xFF050F20;
-constexpr tColor kSurface = 0xFF081A30;
-constexpr tColor kCard = 0xFF102940;
-constexpr tColor kFocusBg = 0xFF075E8B;
-constexpr tColor kCyan = 0xFF08D2F6;
-constexpr tColor kWhite = 0xFFF6FAFF;
-constexpr tColor kMuted = 0xFFA8BBD2;
-constexpr tColor kLine = 0xFF29465F;
+constexpr tColor kBase = suiteosd::webBackground;
+constexpr tColor kSurface = suiteosd::webSurface;
+constexpr tColor kCard = suiteosd::webCard;
+constexpr tColor kFocusBg = suiteosd::webPrimary;
+constexpr tColor kCyan = suiteosd::webFocus;
+constexpr tColor kWhite = suiteosd::webText;
+constexpr tColor kMuted = suiteosd::webMuted;
+constexpr tColor kLine = suiteosd::webLine;
 constexpr tColor kRed = 0xFFF6656B;
 constexpr tColor kGreen = 0xFF67DEA1;
 constexpr tColor kYellow = 0xFFF7CE68;
