@@ -41,6 +41,7 @@
 #include <vdr/timers.h>
 #include <vdr/videodir.h>
 #include <vdr/svdrp.h>
+#include <vdr/status.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -507,13 +508,51 @@ class NativeHomeCache {
     std::future<void> publicPrime;
     std::atomic<bool> publicPrimeCancel{false};
     bool publicPrimeRequested=true;
-    Clock::time_point nextPublicPrime{};
+    std::atomic<bool> nativeChanged{true};
+    std::atomic<bool> recordingChanged{true};
+    cStateKey channelState,scheduleState,recordingState;
+    std::future<std::array<suiteosd::Artwork,2>> backgroundJob;
+    int backgroundW=0,backgroundH=0;
+    bool nativePrimeRequested=true;
+    unsigned long snapshotRevision_=0;
+    class StatusMonitor final : public cStatus {
+        NativeHomeCache &owner;
+        void ChannelChange(const cChannel *) override {owner.nativeChanged.store(true);}
+        void ChannelSwitch(const cDevice *,int number,bool live) override {if(live&&number>0)owner.nativeChanged.store(true);}
+        void Recording(const cDevice *,const char *,const char *,bool) override {owner.recordingChanged.store(true);}
+        void Replaying(const cControl *,const char *,const char *,bool) override {owner.nativeChanged.store(true);}
+    public:
+        explicit StatusMonitor(NativeHomeCache &cache):owner(cache){}
+    } monitor{*this};
+    // VDR exposes revision keys, not an EPG/recording-list change callback.
+    // No periodic snapshot or network request: a changed native key triggers work.
+    void observeNativeChanges(){
+        if(cChannels::GetChannelsRead(channelState,1)){channelState.Remove();nativeChanged.store(true);}
+        if(cSchedules::GetSchedulesRead(scheduleState,1)){scheduleState.Remove();nativeChanged.store(true);}
+        if(cRecordings::GetRecordingsRead(recordingState,1)){recordingState.Remove();recordingChanged.store(true);}
+        const bool changed=recordingChanged.exchange(false);
+        if(changed){publicPrimeRequested=true;nativePrimeRequested=true;}
+        if(nativeChanged.exchange(false)||changed){++snapshotRevision_;nativePrimeRequested=true;}
+    }
+    void prepareBackground(){
+        if(backgroundJob.valid()&&backgroundJob.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+            auto result=backgroundJob.get();
+            if(backgroundW==width&&backgroundH==height){
+                for(size_t i=0;i<result.size();++i)if(!backgrounds[i].valid())backgrounds[i]=std::move(result[i]);
+            }
+        }
+        if(menu||backgroundJob.valid()||width<=0||height<=0||(backgrounds[0].valid()&&backgrounds[1].valid()))return;
+        backgroundW=width;backgroundH=height;
+        backgroundJob=std::async(std::launch::async,[w=width,h=height]{
+            return std::array<suiteosd::Artwork,2>{suiteosd::CinematicBackground(w,h,112),suiteosd::CinematicBackground(w,h,272)};
+        });
+    }
     std::string inFlight;
     std::map<std::string,Clock::time_point> missing;
     unsigned long generation=0;
     int width=0,height=0;
     bool menu=false,stopped=false;
-    Clock::time_point nextPrime{};
+
     std::vector<std::string> dirty;
     std::vector<std::uintptr_t> evicted;
     const suiteosd::Artwork empty;
@@ -677,15 +716,17 @@ public:
     }
     void reset(){
         ++generation;pending.clear();missing.clear();artwork.clear();titles.clear();logos.clear();focusPreviews.clear();backgrounds={};frames.clear();glyphs.clear();
-        dirty.clear();evicted.clear();nextPrime={};publicPrimeCancel.store(true);publicPrimeRequested=true;nextPublicPrime={};privateArtwork.clear();
+        dirty.clear();evicted.clear();nativePrimeRequested=true;publicPrimeCancel.store(true);publicPrimeRequested=true;privateArtwork.clear();
     }
     void setSize(int w,int h){
         if(w==width&&h==height)return;
         reset();width=w;height=h;
     }
-    void opened(){menu=true;publicPrimeCancel.store(true);dirty.clear();evicted.clear();}
-    void closed(){menu=false;publicPrimeRequested=true;dirty.clear();evicted.clear();nextPrime={};}
-    void cancelPending(){++generation;pending.clear();nextPrime={};}
+    void opened(){menu=true;if(publicPrime.valid())publicPrimeRequested=true;publicPrimeCancel.store(true);dirty.clear();evicted.clear();}
+    void closed(){menu=false;dirty.clear();evicted.clear();}
+    void cancelPending(){++generation;pending.clear();nativePrimeRequested=true;}
+    unsigned long snapshotRevision()const{return snapshotRevision_;}
+    void recordingMetadataChanged(){publicPrimeRequested=true;}
     std::size_t pixelBytes()const{return artwork.totalWeight(bytes)+logos.totalWeight(bytes);}
     const suiteosd::Artwork &programme(const Programme &p,bool visible=true){
         Work w;w.key=programmeKey(p);w.programme=p;w.epg=true;
@@ -721,8 +762,8 @@ public:
     // A closed-menu pass consumes no-store projections only inside this job.
     // Only explicitly cacheable decoded artwork survives it.
     void startPublicPrime(){
-        if(menu||stopped||publicPrime.valid()||!publicPrimeRequested||Clock::now()<nextPublicPrime||width<=0||height<=0)return;
-        publicPrimeRequested=false;nextPublicPrime=Clock::now()+std::chrono::minutes(5);
+        if(menu||stopped||publicPrime.valid()||!publicPrimeRequested||width<=0||height<=0)return;
+        publicPrimeRequested=false;
         publicPrimeCancel.store(false);
         const std::string origin=gCoreUrl,profile=deviceProfilePath();
         const int w=HL::posterW*width/1600,h=HL::posterH*height/900;
@@ -766,12 +807,13 @@ public:
             try{apply(job.get());++completed;}catch(const std::exception &){esyslog("suiteosd: native Home preparation failed");}
             inFlight.clear();
         }
-        if(!menu&&Clock::now()>=nextPrime){
-            nextPrime=Clock::now()+std::chrono::minutes(1);
+        observeNativeChanges();
+        if(!menu&&nativePrimeRequested){
+            nativePrimeRequested=false;
             int w=0,h=0;double aspect=1.0;
             if(auto *device=cDevice::PrimaryDevice())device->GetOsdSize(w,h,aspect);
             const auto area=suiteosd::FullscreenOsdRect(w,h,{cOsd::OsdLeft(),cOsd::OsdTop(),cOsd::OsdWidth(),cOsd::OsdHeight()});
-            setSize(area.w,area.h);nextPrime=Clock::now()+std::chrono::minutes(1);
+            setSize(area.w,area.h);nativePrimeRequested=false;
             // Native snapshot only, never a server poll. Bound preparation to
             // the initial view, then the next rail and horizontal neighbors.
             privateArtwork.expire();
@@ -783,6 +825,7 @@ public:
             for(size_t i=HL::columns;i<2*HL::columns&&i<snapshot.now.size();++i)programme(snapshot.now[i],false);
             for(size_t i=HL::columns;i<2*HL::columns&&i<snapshot.next.size();++i)programme(snapshot.next[i],false);
         }
+        try{prepareBackground();}catch(const std::exception &){esyslog("suiteosd: background preparation failed");}
         if(publicPrime.valid()&&publicPrime.wait_for(std::chrono::seconds(0))==std::future_status::ready){
             try{publicPrime.get();}catch(const std::exception &){esyslog("suiteosd: public artwork preparation failed");}
         }
@@ -798,6 +841,7 @@ public:
         stopped=true;publicPrimeCancel.store(true);pending.clear();
         if(job.valid())job.wait();
         if(publicPrime.valid())publicPrime.wait();
+        if(backgroundJob.valid())backgroundJob.wait();
     }
 };
 
@@ -921,6 +965,7 @@ private:
     suiteosd::HomeLru<std::string, suiteosd::Artwork> &homeArtwork=nativeHome.artwork;
     std::map<std::string, suiteosd::Artwork> timelineArtwork;
     Snapshot data;
+    unsigned long seenNativeRevision=0;
     std::map<std::string, RecordingMeta> recordingMeta;
     // Titles are copied together with the portrait path, not obtained by a second scraper request.
     suiteosd::HomeLru<std::string, suiteosd::DetailMetadata> &homeRecordingTitles=nativeHome.titles;
@@ -2507,6 +2552,7 @@ private:
         const auto *selected=heroProgramme(0);
         const int number=!initial&&selected?selected->channelNumber:0;
         data=readVdrSnapshot();
+        seenNativeRevision=nativeHome.snapshotRevision();
         int index=0;
         for(int i=0;i<int(data.now.size());++i){
             if(data.now[i].channelNumber==data.live.channelNumber)index=i;
@@ -5183,7 +5229,9 @@ public:
 
     void Show() override
     {
+        const auto started=PerfClock::now();
         refreshHomeSnapshot(true);
+        const auto snapshotDone=PerfClock::now();
         int outputW=0,outputH=0;
         double pixelAspect=1.0;
         if(auto *device=cDevice::PrimaryDevice())
@@ -5203,6 +5251,7 @@ public:
         }
         isyslog("suiteosd: dashboard OSD %dx%d at (%d,%d), output %dx%d",
             width,height,osdOriginX,osdOriginY,outputW,outputH);
+        const auto osdDone=PerfClock::now();
         // Cover the entire output before exposing any intentional video slot.
         osd->DrawRectangle(0,0,width-1,height-1,kBackground);
         fontTitle = cFont::CreateFont("Sans:Bold", std::max(20, Y(50)));
@@ -5212,6 +5261,7 @@ public:
         fontCinemaBrand = cFont::CreateFont("Sans:Bold",std::max(20,Y(34)));
         fontCinemaCard = cFont::CreateFont("Sans:Bold",std::max(12,Y(18)));
         fontCinemaMeta = cFont::CreateFont("Sans",std::max(11,Y(16)));
+        const auto fontsDone=PerfClock::now();
         nav.section=0;
         startHomeEvents();
         if (!gReplayPersonSearch.empty()) {
@@ -5219,7 +5269,12 @@ public:
             const std::string name=std::exchange(gReplayPersonSearch,"");
             openSearch(name);
         }
+        const auto eventsDone=PerfClock::now();
         draw();
+        auto ms=[](auto a,auto b){return std::chrono::duration_cast<std::chrono::milliseconds>(b-a).count();};
+        isyslog("suiteosd: HOME_PERF_OPEN snapshot_ms=%lld osd_ms=%lld fonts_ms=%lld events_ms=%lld draw_ms=%lld",
+            (long long)ms(started,snapshotDone),(long long)ms(snapshotDone,osdDone),(long long)ms(osdDone,fontsDone),
+            (long long)ms(fontsDone,eventsDone),(long long)ms(eventsDone,PerfClock::now()));
     }
 
     eOSState ProcessKey(eKeys key) override
@@ -5337,6 +5392,10 @@ public:
         if(base==kNone){
             if(homeChanged&&osd&&!homeDashboard){draw();return osContinue;}
             if(osd&&homeCollections.empty()){
+                if(seenNativeRevision!=nativeHome.snapshotRevision()){
+                    refreshHomeSnapshot();
+                    draw();
+                }
                 if(homeProgressChanged.exchange(false)){
                     for(const int section:{suiteosd::Navigation::kContinue,suiteosd::Navigation::kRecent}){
                         auto it=homeRails.find(section);
@@ -5344,6 +5403,7 @@ public:
                     }
                 }
                 if(homeEventChanged.exchange(false)){
+                    nativeHome.recordingMetadataChanged();
                     refreshHomeSnapshot();
                     // Invalidate once on hello/change; keep visible last data until refreshed.
                     for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
