@@ -20,8 +20,13 @@ struct HomeLayout {
     static constexpr int right=1156, rightWidth=426;
     static constexpr int visibleColumns(bool expanded){return expanded?5:columns;}
     static constexpr int liveY=top+titleHeight, liveH=cardHeight;
-    static constexpr int heroX=440, heroW=536, nextX=990;
-    static constexpr int videoW=288, videoH=162, videoY=liveY+8, videoX=heroX+12;
+    static constexpr int heroRight=right-18,heroGap=14;
+    static constexpr int videoW=288, videoH=162, videoY=liveY+8;
+    static constexpr int neighborW(bool expanded){return expanded?148:180;}
+    static constexpr int heroX(bool expanded){return (expanded?282:left)+neighborW(expanded)+heroGap;}
+    static constexpr int nextX(bool expanded){return heroRight-neighborW(expanded);}
+    static constexpr int heroW(bool expanded){return nextX(expanded)-heroGap-heroX(expanded);}
+    static constexpr int videoX(bool expanded){return heroX(expanded)+12;}
     static constexpr int detailY=94, detailBottom=850;
     static constexpr int cardX(int column,bool expanded=false){return (expanded?282:left)+column*(cardWidth+(expanded?expandedGap:gap));}
     static constexpr int headingY(int row){return top+row*rowStep;}
@@ -55,7 +60,9 @@ static_assert(HomeLayout::cardX(HomeLayout::visibleColumns(true)-1,true)+HomeLay
 static_assert(HomeLayout::gap>=18 && HomeLayout::expandedGap>=14);
 static_assert(HomeLayout::videoY+HomeLayout::videoH<=HomeLayout::liveY+HomeLayout::liveH-32);
 static_assert(HomeLayout::videoW*9==HomeLayout::videoH*16);
-static_assert(HomeLayout::heroX+HomeLayout::heroW<HomeLayout::nextX);
-static_assert(HomeLayout::nextX+148+7<HomeLayout::right);
+static_assert(HomeLayout::heroX(false)+HomeLayout::heroW(false)+HomeLayout::heroGap==HomeLayout::nextX(false));
+static_assert(HomeLayout::heroX(true)+HomeLayout::heroW(true)+HomeLayout::heroGap==HomeLayout::nextX(true));
+static_assert(HomeLayout::heroRight+7<HomeLayout::right);
+static_assert(HomeLayout::heroW(true)>HomeLayout::videoW+180);
 }
 #endif

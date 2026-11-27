@@ -120,6 +120,11 @@ int main()
     assert(HomeLayout::progressPercent(100,5500,99)==0);
     assert(HomeLayout::progressPercent(0,0,99)==0);
 
+    for(bool expanded:{false,true}){
+        assert(HomeLayout::heroX(expanded)-HomeLayout::cardX(0,expanded)-HomeLayout::heroGap==HomeLayout::neighborW(expanded));
+        assert(HomeLayout::heroRight-HomeLayout::nextX(expanded)==HomeLayout::neighborW(expanded));
+        assert(HomeLayout::videoX(expanded)+HomeLayout::videoW<HomeLayout::nextX(expanded));
+    }
     Navigation hero;
     assert(hero.card[0]==1&&hero.firstVisibleSection==0);
     hero.Move(Direction::Left,3,6);assert(hero.card[0]==0&&!hero.sideFocused);

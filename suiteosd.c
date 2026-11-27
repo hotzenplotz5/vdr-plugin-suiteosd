@@ -602,6 +602,7 @@ private:
     cDevice *scaledDevice = nullptr;
     cRect scaledRect;
     bool scaledForHome = false;
+    bool scaledHomeExpanded = false;
     std::chrono::steady_clock::time_point nextPreviewAttempt{};
     using HL = suiteosd::HomeLayout;
     // Only rail drawing is redirected while preparing a clipped animation strip.
@@ -1744,6 +1745,7 @@ private:
         if (!gLivePreviewEnabled) { restoreLivePreview(); return; }
         cDevice *device = cDevice::PrimaryDevice();
         if (scaledDevice && scaledDevice==device && scaledForHome==home &&
+            (!home||scaledHomeExpanded==nav.sideFocused)&&
             !(device->Replaying()&&!device->Transferring())) return;
         restoreLivePreview();
         // Live DVB transfer mode has an attached player too. Only exclude
@@ -1756,7 +1758,7 @@ private:
         // 4:2:0 output providers may round odd screen coordinates down.
         // Align inward before negotiation, so normalization cannot make an
         // otherwise supported video rectangle escape the reserved slot.
-        const int x=left+X(home?HL::videoX:1197), y=top+Y(home?HL::videoY:151);
+        const int x=left+X(home?HL::videoX(nav.sideFocused):1197), y=top+Y(home?HL::videoY:151);
         const int w=X(home?HL::videoW:338), h=Y(home?HL::videoH:190);
         const auto aligned=suiteosd::AlignPreviewRect(x,y,w,h);
         if(aligned.w<2||aligned.h<2)return;
@@ -1769,6 +1771,7 @@ private:
             return; // never cover surrounding controls with the video plane
         scaledDevice = device;
         scaledForHome = home;
+        scaledHomeExpanded=home&&nav.sideFocused;
         // The device uses screen coordinates, the OSD draws locally.
         scaledRect = cRect(available.X() - left, available.Y() - top,
                            available.Width(), available.Height());
@@ -2165,11 +2168,12 @@ private:
                 printFit(x+10,top+112+j*22,lines[j]+(j==1&&lines.size()>2?"…":""),fontSmall,kText,w-20);
             printFit(x+10,top+170,p->time,fontCinemaMeta,kMuted,w-20);
         };
-        neighbor(0,homeLeft(),HL::heroX-homeLeft()-14);
-        neighbor(2,HL::nextX,148);
-        cinemaPanel(HL::heroX,top,HL::heroW,HL::liveH,16,
+        const bool expanded=nav.sideFocused;
+        neighbor(0,homeLeft(),HL::neighborW(expanded));
+        neighbor(2,HL::nextX(expanded),HL::neighborW(expanded));
+        cinemaPanel(HL::heroX(expanded),top,HL::heroW(expanded),HL::liveH,16,
             focused(1)?suiteosd::CinemaStyle::Focus:suiteosd::CinemaStyle::Panel);
-        const int vx=HL::videoX,vy=top+8;
+        const int vx=HL::videoX(expanded),vy=top+8;
         fill(vx,vy,vx+HL::videoW-1,vy+HL::videoH-1,0xFF061626u);
         if(!railDrawPixmap&&y==HL::top&&scaledDevice&&!scaledRect.IsEmpty())
             osd->DrawRectangle(scaledRect.X(),scaledRect.Y(),scaledRect.X()+scaledRect.Width()-1,
@@ -2181,7 +2185,7 @@ private:
                 drawCinemaImage(art,X(vx+HL::videoW/2)-art.width/2,Y(vy+HL::videoH/2)-art.height/2);
             }
         }
-        const int tx=vx+HL::videoW+12,tw=HL::heroX+HL::heroW-tx-12;
+        const int tx=vx+HL::videoW+12,tw=HL::heroX(expanded)+HL::heroW(expanded)-tx-12;
         printFit(tx,top+9,data.live.channel,fontBody,kFocus,tw);
         printFit(tx,top+40,data.live.title,fontBody,kText,tw);
         printFit(tx,top+67,data.live.time,fontSmall,kMuted,tw);
