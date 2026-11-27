@@ -116,6 +116,7 @@ inline Artwork CoverHomePoster(Artwork source,int w,int h,int radius,
 // Pure image decoder, independent of VDR. Decode only the small on-screen image.
 // Supports PNG/JPEG/SVG, preserves aspect ratio, no network or shell invocations.
 Artwork LoadArtwork(const std::string &path, int maxWidth, int maxHeight);
+Artwork LoadArtworkBytes(const std::string &bytes,int maxWidth,int maxHeight);
 
 } // namespace suiteosd
 

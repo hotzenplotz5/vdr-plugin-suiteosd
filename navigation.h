@@ -22,9 +22,9 @@ struct Navigation {
     bool sideFocused = false;
     int sideIndex = 0;
     int section = 0;
-    std::array<int, kSections> card = {{0, 0, 0, 0}};
+    std::array<int, kSections> card = {{1, 0, 0, 0}};
     std::array<int, kSections> firstCard = {{0, 0, 0, 0}};
-    int firstVisibleSection = 1; // first fully visible rail; section zero is the fixed live panel
+    int firstVisibleSection = 0; // Live-TV is the first scrollable rail
 
     void KeepVisible(int visibleCards, int sectionCount)
     {
@@ -56,7 +56,7 @@ struct Navigation {
             else if (key == Direction::Select) {
                 sideFocused = false;
                 switch (sideIndex) {
-                case 0: section = 0; break; // Home stays in the approved Suite dashboard
+                case 0: section = 0; card[0]=1; break; // Home stays in the approved Suite dashboard
                 default: return Activation::Module; // VDR menus or installed plugins
                 }
                 KeepVisible(visibleCards, sectionCount);
@@ -65,7 +65,7 @@ struct Navigation {
             return Activation::None;
         }
         if (key == Direction::Left) {
-            if (section == 0 || card[section] == 0)
+            if (card[section] == 0)
                 sideFocused = true;
             else
                 --card[section];
@@ -85,7 +85,7 @@ struct Navigation {
             }
         }
         KeepVisible(visibleCards, sectionCount);
-        // The visible rails stay together; subsequent rails scroll vertically. Section zero focuses the separate live panel.
+        // All rows including the Live-TV hero share one scrollable viewport.
         firstVisibleSection = HomeLayout::firstRow(section,kSections,firstVisibleSection);
         return Activation::None;
     }

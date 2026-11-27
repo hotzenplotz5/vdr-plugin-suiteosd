@@ -110,11 +110,12 @@ struct Transfer {
     std::string etag;
     std::string cookie;
     bool tooLarge = false;
+    size_t limit = 1024U * 1024U;
 };
 size_t receiveBody(char *bytes, size_t n, size_t size, void *ctx) {
     auto &x = *static_cast<Transfer *>(ctx);
     const size_t count = n * size;
-    if (count > 1024U * 1024U || x.body.size() > 1024U * 1024U - count) {
+    if (count > x.limit || x.body.size() > x.limit - count) {
         x.tooLarge = true;
         return 0;
     }
@@ -506,7 +507,7 @@ void CoreAdminClient::setOrigin(const std::string &value) {
 CoreAdminClient::Reply CoreAdminClient::request(
     const std::string &verb, const std::string &path, const std::string &body,
     const std::string &etag, const std::string &username, const std::string &password,
-    const std::string &pairingToken, bool anonymous)
+    const std::string &pairingToken, bool anonymous, bool image)
 {
     Reply reply;
     if (!localSocket_.empty() && (!username.empty() || !sessionCookie_.empty())) {
@@ -524,8 +525,9 @@ CoreAdminClient::Reply CoreAdminClient::request(
     if (!curl) { reply.error = "HTTP-Client nicht verfügbar"; return reply; }
     struct curl_slist *headers = nullptr;
     Transfer receive;
+    if(image)receive.limit=32U*1024U*1024U;
     const std::string url = origin_ + path;
-    headers = curl_slist_append(headers, "Accept: application/json");
+    headers = curl_slist_append(headers, image?"Accept: image/png, image/jpeg, image/webp":"Accept: application/json");
     headers = curl_slist_append(headers, "Cache-Control: no-store");
     if (!localSocket_.empty()) {
         // The local Core transport uses kernel peer credentials, never a
@@ -1069,12 +1071,44 @@ CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row
     next.title=row.title;next.backendId=row.backendId;
     next.nativeMatchProof=stringOf(root.get(),"nativeMatchProof");
     auto *meta=field(root.get(),"metadata");
+    const auto provider=stringOf(meta,"providerTitle"),series=stringOf(meta,"seriesTitle");
+    if(!series.empty())next.title=series;else if(!provider.empty())next.title=provider;
     next.subtitle=stringOf(meta,"episodeTitle");
     if(next.subtitle.empty())next.subtitle=stringOf(meta,"subtitle");
     next.description=stringOf(meta,"overview");
     if(next.description.empty())next.description=stringOf(root.get(),"description");
     next.startTime=stringOf(root.get(),"recordedAt");
     detail=std::move(next);return last_;
+}
+CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &row,std::string &bytes) {
+    bytes.clear();
+    if(!safeId(row.id)||row.id.rfind("rec_",0)!=0||!safeId(row.backendId))
+        return (last_={false,0,"Ungültige Aufnahme-ID"});
+    const auto base="/api/v1/recordings/"+row.id+"/artwork";
+    const auto scope="?backendId="+queryEncode(row.backendId);
+    const auto list=request("GET",base+scope);
+    if(!status(list).ok)return last_;
+    const auto root=parse(list.body);
+    auto *items=field(root.get(),"items");
+    if(stringOf(root.get(),"recordingId")!=row.id||stringOf(root.get(),"backendId")!=row.backendId||
+       !json_object_is_type(items,json_type_array))
+        return (last_={false,list.http,"Ungültige Artwork-Liste"});
+    std::string id;int rank=99;
+    for(size_t i=0;i<json_object_array_length(items);++i){
+        auto *item=json_object_array_get_idx(items,i);
+        const auto kind=stringOf(item,"kind"),candidate=stringOf(item,"artworkId");
+        const int priority=kind=="poster"?0:kind=="fanart"?1:kind=="still"?2:kind=="banner"?3:99;
+        if(priority<rank&&candidate.size()==32&&candidate.find_first_not_of("0123456789abcdef")==std::string::npos){
+            rank=priority;id=candidate;
+        }
+    }
+    if(id.empty())return (last_={true,list.http,""});
+    // Construct only the documented same-origin opaque-ID route. Never
+    // follow a server-provided arbitrary URL or attach credentials to it.
+    auto image=request("GET",base+"/"+id+scope,"","","","","",false,true);
+    if(!status(image).ok)return last_;
+    bytes=std::move(image.body);
+    return last_;
 }
 CoreStatus CoreAdminClient::publicHomePage(const std::string &backend,HomeKind kind,
     const std::string &key,int limit,int offset,int year,CoreHomePage &page) {

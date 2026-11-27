@@ -9,6 +9,7 @@
 #include <png.h>
 #include <cairo.h>
 #include <librsvg/rsvg.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -257,6 +258,50 @@ Artwork LoadArtwork(const std::string &path, int maxWidth, int maxHeight)
 
     Artwork result = ScaleToFit(raw, maxWidth, maxHeight);
     free(raw.pixels);
+    return result;
+}
+
+// GdkPixbuf is already part of the librsvg image stack. Accept only the
+// Public-v1 binary formats and keep the decoded result thumbnail-sized.
+Artwork LoadArtworkBytes(const std::string &bytes,int maxWidth,int maxHeight)
+{
+    if(bytes.size()<12||bytes.size()>kMaxDecodeBytes||maxWidth<1||maxHeight<1||
+       maxWidth>kMaxThumbnailSide||maxHeight>kMaxThumbnailSide)return {};
+    const auto *p=reinterpret_cast<const unsigned char*>(bytes.data());
+    const char *type=png_sig_cmp(p,0,8)==0?"png":
+        p[0]==0xff&&p[1]==0xd8?"jpeg":
+        bytes.compare(0,4,"RIFF")==0&&bytes.compare(8,4,"WEBP")==0?"webp":nullptr;
+    if(!type)return {};
+    GError *error=nullptr;
+    auto *loader=gdk_pixbuf_loader_new_with_type(type,&error);
+    if(error){g_error_free(error);error=nullptr;}
+    if(!loader)return {};
+    struct Size {int w,h;bool valid=true;} size{maxWidth,maxHeight};
+    g_signal_connect(loader,"size-prepared",G_CALLBACK(+[](GdkPixbufLoader *l,int w,int h,gpointer u){
+        auto &s=*static_cast<Size*>(u);
+        if(w<=0||h<=0){s.valid=false;return;}
+        const double scale=std::min({1.0,double(s.w)/w,double(s.h)/h});
+        gdk_pixbuf_loader_set_size(l,std::max(1,int(w*scale)),std::max(1,int(h*scale)));
+    }),&size);
+    const bool written=gdk_pixbuf_loader_write(loader,p,bytes.size(),&error);
+    if(error){g_error_free(error);error=nullptr;}
+    const bool closed=gdk_pixbuf_loader_close(loader,&error);
+    if(error)g_error_free(error);
+    Artwork result;
+    if(written&&closed&&size.valid)if(auto *pix=gdk_pixbuf_loader_get_pixbuf(loader)){
+        const int w=gdk_pixbuf_get_width(pix),h=gdk_pixbuf_get_height(pix);
+        const int channels=gdk_pixbuf_get_n_channels(pix),stride=gdk_pixbuf_get_rowstride(pix);
+        if(w>0&&h>0&&w<=maxWidth&&h<=maxHeight&&(channels==3||channels==4)){
+            result={w,h,std::vector<uint32_t>(size_t(w)*h)};
+            const auto *pixels=gdk_pixbuf_read_pixels(pix);
+            for(int y=0;y<h;++y)for(int x=0;x<w;++x){
+                const auto *q=pixels+y*stride+x*channels;
+                result.argb[size_t(y)*w+x]=(uint32_t(channels==4?q[3]:255)<<24)|
+                    (uint32_t(q[0])<<16)|(uint32_t(q[1])<<8)|q[2];
+            }
+        }
+    }
+    g_object_unref(loader);
     return result;
 }
 

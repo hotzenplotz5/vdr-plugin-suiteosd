@@ -6,7 +6,8 @@ int main()
     using namespace suiteosd;
     Navigation n;
     assert(n.section == 0 && !n.sideFocused);
-    n.Move(Direction::Left, 1, 5);
+    n.card[0]=0;
+    n.Move(Direction::Left, 3, 6);
     assert(n.sideFocused); // collapsed icon rail expands all labels when focused
     n.Move(Direction::Down, 1, 5);
     assert(n.sideIndex == 1);
@@ -45,14 +46,14 @@ int main()
     Navigation posterRails;
     posterRails.Move(Direction::Down, 12, Navigation::kHomeVisibleCards);
     for(int i=0;i<6;++i)posterRails.Move(Direction::Right,12,Navigation::kHomeVisibleCards);
-    assert(posterRails.card[1]==6 && posterRails.firstCard[1]==2);
-    static_assert(HomeLayout::columns==5 && HomeLayout::rows==3);
+    assert(posterRails.card[1]==6 && posterRails.firstCard[1]==1);
+    static_assert(HomeLayout::columns==6 && HomeLayout::rows==3);
     static_assert(HomeLayout::cardWidth==140 && HomeLayout::cardHeight==210);
     static_assert(HomeLayout::cardWidth*3==HomeLayout::cardHeight*2);
     for(bool expanded:{false,true}){
-        for(int i=1;i<HomeLayout::columns;++i)
+        for(int i=1;i<HomeLayout::visibleColumns(expanded);++i)
             assert(HomeLayout::cardX(i,expanded)-HomeLayout::cardX(i-1,expanded)-HomeLayout::cardWidth==(expanded?14:20));
-        assert(HomeLayout::cardX(HomeLayout::columns-1,expanded)+HomeLayout::cardWidth+7<=HomeLayout::right-9);
+        assert(HomeLayout::cardX(HomeLayout::visibleColumns(expanded)-1,expanded)+HomeLayout::cardWidth+7<=HomeLayout::right-9);
     }
     posterRails.Move(Direction::Down,12,Navigation::kHomeVisibleCards);
     posterRails.Move(Direction::Down,12,Navigation::kHomeVisibleCards);
@@ -65,8 +66,8 @@ int main()
     assert(posterRails.firstVisibleSection==2);
     posterRails.Move(Direction::Up,12,Navigation::kHomeVisibleCards);
     assert(posterRails.firstVisibleSection==1);
-    assert(posterRails.card[1]==6 && posterRails.firstCard[1]==2);
-    static_assert(HomeLayout::videoY+HomeLayout::videoH<=HomeLayout::liveY+HomeLayout::liveH-56);
+    assert(posterRails.card[1]==6 && posterRails.firstCard[1]==1);
+    static_assert(HomeLayout::videoY+HomeLayout::videoH<=HomeLayout::liveY+HomeLayout::liveH-32);
     static_assert(HomeLayout::videoW*9==HomeLayout::videoH*16);
     // An odd OSD origin must not cause the output provider's chroma
     // alignment to reject the whole live preview.
@@ -76,14 +77,14 @@ int main()
         assert(r.x>=x&&r.y>=y&&r.x+r.w<=x+w&&r.y+r.h<=y+h);
         assert(r.w>=w-2&&r.h>=h-2);
     }
-    assert(HomeLayout::firstRow(0,10)==1);
-    assert(HomeLayout::firstRow(2,10)==1);
+    assert(HomeLayout::firstRow(0,10)==0);
+    assert(HomeLayout::firstRow(2,10)==0);
     assert(HomeLayout::firstRow(3,10)==1);
     assert(HomeLayout::firstRow(4,10)==2);
     assert(HomeLayout::firstRow(9,10)==7);
     assert(HomeLayout::firstRow(7,10,7)==7);
     assert(HomeLayout::firstRow(6,10,7)==6);
-    assert(HomeLayout::firstRow(0,10,7)==1);
+    assert(HomeLayout::firstRow(0,10,7)==0);
     assert(HomeLayout::headingY(3)==HomeLayout::viewportBottom);
     for(int from:{0,256}){
         const int to=256-from;
@@ -119,8 +120,14 @@ int main()
     assert(HomeLayout::progressPercent(100,5500,99)==0);
     assert(HomeLayout::progressPercent(0,0,99)==0);
 
+    Navigation hero;
+    assert(hero.card[0]==1&&hero.firstVisibleSection==0);
+    hero.Move(Direction::Left,3,6);assert(hero.card[0]==0&&!hero.sideFocused);
+    hero.Move(Direction::Right,3,6);hero.Move(Direction::Right,3,6);assert(hero.card[0]==2);
+    assert(hero.Move(Direction::Select,3,6)==Activation::Hero);
     Navigation direct;
-    direct.Move(Direction::Left, 1, 4);
+    direct.card[0]=0;
+    direct.Move(Direction::Left, 3, 6);
     direct.Move(Direction::Down, 1, 4);
     direct.Move(Direction::Down, 1, 4);
     direct.Move(Direction::Down, 1, 4);
@@ -134,7 +141,8 @@ int main()
     // not another location of the Home carousel.
     for (int index = 1; index < Navigation::kSidebarItems; ++index) {
         Navigation menu;
-        menu.Move(Direction::Left, 1, 4);
+        menu.card[0]=0;
+        menu.Move(Direction::Left, 3, 6);
         for (int j = 0; j < index; ++j)
             menu.Move(Direction::Down, 1, 4);
         assert(menu.sideIndex == index);

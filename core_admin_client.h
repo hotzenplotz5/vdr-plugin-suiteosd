@@ -118,7 +118,7 @@ class CoreAdminClient {
     Reply request(const std::string &verb, const std::string &path,
                   const std::string &body = "", const std::string &etag = "",
                   const std::string &login = "", const std::string &password = "",
-                  const std::string &pairingToken = "", bool anonymous = false);
+                  const std::string &pairingToken = "", bool anonymous = false, bool image = false);
     CoreStatus status(const Reply &reply);
     static std::string idPath(const std::string &id);
 public:
@@ -162,6 +162,7 @@ public:
                                   int limit, int offset, CoreGlobalSearch &results);
     CoreStatus publicRecordingDetail(const CoreSearchRecording &row, CoreSearchEvent &detail,
                                      bool nativeMatch = false);
+    CoreStatus publicRecordingArtwork(const CoreSearchRecording &row, std::string &bytes);
     CoreStatus publicHomePage(const std::string &backend, HomeKind kind, const std::string &key,
                         int limit, int offset, int year, CoreHomePage &page);
     CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,
