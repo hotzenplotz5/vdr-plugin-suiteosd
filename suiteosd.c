@@ -6,6 +6,8 @@
  */
 #include "navigation.h"
 #include "home_cache.h"
+#include "home_perf.h"
+#include <sys/resource.h>
 #include "web_palette.h"
 #include "sidebar_icons.h"
 #include "settings_navigation.h"
@@ -578,18 +580,21 @@ class NativeHomeCache {
         if(result.work.generation!=generation)return;
         const auto &key=result.work.key;
         auto old=artwork.find(key);
-        const bool changed=old==artwork.end()||old->second.argb!=result.poster.argb;
+        const bool changed=old==artwork.end()||old->second.width!=result.poster.width||old->second.height!=result.poster.height||old->second.argb!=result.poster.argb;
         if(old!=artwork.end()){
             // Do not replace good pixels with a transient missing scraper file.
             if(result.missing&&old->second.valid()){
                 missing[key]=Clock::now()+std::chrono::minutes(1);return;
             }
-            discard(key,old->second);artwork.erase(key);
+            if(changed){discard(key,old->second);artwork.erase(key);}
+            else missing.erase(key);
         }
+        if(changed){
         while(artwork.size()&&
               (artwork.size()>=192||artwork.totalWeight(bytes)+bytes(result.poster)>budget))
             artwork.evictOldest([&](const auto &k,const auto &a){discard(k,a);});
         artwork.emplace(key,std::move(result.poster));
+        }
         if(result.missing)missing[key]=Clock::now()+std::chrono::minutes(1);
         if(!result.work.epg){
             if(titles.size()>=512)titles.evictOldest();
@@ -852,6 +857,7 @@ private:
     PerfClock::time_point keyAt{};
     const unsigned long long startHits=nativeHome.hits,startMisses=nativeHome.misses,startScraper=nativeHome.scraperCalls,startScraperUs=nativeHome.scraperUs,startCompleted=nativeHome.completed;
     const bool warmOpen=nativeHome.artwork.size()!=0;
+    const unsigned long long startHttp=suiteosd::homePerf.http.load(),startHttpBytes=suiteosd::homePerf.httpBytes.load(),startHttpUs=suiteosd::homePerf.httpUs.load(),startConnections=suiteosd::homePerf.connections.load(),startDecodes=suiteosd::homePerf.decodes.load(),startDecodeUs=suiteosd::homePerf.decodeUs.load();
     unsigned long long fullDraws=0,flushes=0,flushUs=0,keySamples=0,keyUs=0,keyMaxUs=0;
     long long firstFrameUs=-1;
     bool keyPending=false;
@@ -5040,6 +5046,9 @@ public:
             int(warmOpen),firstFrameUs,fullDraws,flushes,flushUs,keySamples,keyUs,keyMaxUs,
             nativeHome.hits-startHits,nativeHome.misses-startMisses,nativeHome.scraperCalls-startScraper,
             nativeHome.scraperUs-startScraperUs,nativeHome.completed-startCompleted,nativeHome.pixelBytes());
+        struct rusage usage{};getrusage(RUSAGE_SELF,&usage);
+        isyslog("suiteosd: HOME_PERF_PROCESS http=%llu http_bytes=%llu http_us=%llu connections=%llu decode_attempts=%llu decode_us=%llu peak_rss_kib=%ld",
+            suiteosd::homePerf.http.load()-startHttp,suiteosd::homePerf.httpBytes.load()-startHttpBytes,suiteosd::homePerf.httpUs.load()-startHttpUs,suiteosd::homePerf.connections.load()-startConnections,suiteosd::homePerf.decodes.load()-startDecodes,suiteosd::homePerf.decodeUs.load()-startDecodeUs,usage.ru_maxrss);
         nativeHome.closed();
         homeEventStop.store(true);
         for(auto &entry:homePosterJobs)if(entry.second.valid())entry.second.wait();

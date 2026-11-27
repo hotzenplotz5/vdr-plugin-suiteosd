@@ -123,6 +123,8 @@ class CoreAdminClient {
     std::string csrf_;
     DeviceCredential device_;
     CoreStatus last_;
+    void *requestHandle_ = nullptr;
+    void resetTransport();
     struct Reply {
         long http = 0;
         std::string body;

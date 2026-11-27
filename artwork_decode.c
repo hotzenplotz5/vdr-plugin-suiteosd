@@ -1,4 +1,5 @@
 #include "artwork_decode.h"
+#include "home_perf.h"
 
 #include <algorithm>
 #include <csetjmp>
@@ -235,6 +236,7 @@ Artwork ScaleToFit(const RawImage &source, int maxWidth, int maxHeight)
 
 Artwork LoadArtwork(const std::string &path, int maxWidth, int maxHeight)
 {
+    DecodePerf perf;
     if (path.empty() || maxWidth < 1 || maxHeight < 1 ||
         maxWidth > kMaxThumbnailSide || maxHeight > kMaxThumbnailSide)
         return {};
@@ -266,6 +268,7 @@ Artwork LoadArtwork(const std::string &path, int maxWidth, int maxHeight)
 // Public-v1 binary formats and keep the decoded result thumbnail-sized.
 Artwork LoadArtworkBytes(const std::string &bytes,int maxWidth,int maxHeight)
 {
+    DecodePerf perf;
     if(bytes.size()<12||bytes.size()>kMaxDecodeBytes||maxWidth<1||maxHeight<1||
        maxWidth>kMaxThumbnailSide||maxHeight>kMaxThumbnailSide)return {};
     const auto *p=reinterpret_cast<const unsigned char*>(bytes.data());

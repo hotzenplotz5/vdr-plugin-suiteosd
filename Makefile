@@ -24,7 +24,7 @@ all: $(SOFILE)
 $(SOFILE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -shared -o $@ $^ $(ARTWORK_LIBS) $(CORE_LIBS)
 
-suiteosd.o: suiteosd.c pairing_dialog.h cinematic_home.h home_layout.h home_cache.h web_palette.h sidebar_icons.h navigation.h core_admin_client.h core_admin_navigation.h settings_navigation.h recording_browser.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h photo_gallery.h photo_carousel.h image-next-service-v1.h epg_timeline.h logo_locator.h artwork_decode.h scraper_detail.h detail_model.h recording_detail_view.h search_navigation.h vendor/tvscraper/services.h
+suiteosd.o: suiteosd.c home_perf.h pairing_dialog.h cinematic_home.h home_layout.h home_cache.h web_palette.h sidebar_icons.h navigation.h core_admin_client.h core_admin_navigation.h settings_navigation.h recording_browser.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h photo_gallery.h photo_carousel.h image-next-service-v1.h epg_timeline.h logo_locator.h artwork_decode.h scraper_detail.h detail_model.h recording_detail_view.h search_navigation.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
 suite_menu.o: suite_menu.c pairing_dialog.h web_palette.h artwork_decode.h scraper_detail.h detail_model.h recording_detail_view.h vendor/vdr-suite/CanonicalGenreRegistry.h vendor/vdr-suite/GenreClassification.h vendor/tvscraper/services.h
@@ -33,10 +33,10 @@ suite_menu.o: suite_menu.c pairing_dialog.h web_palette.h artwork_decode.h scrap
 suite_skin.o: suite_skin.c web_palette.h artwork_decode.h logo_locator.h skin_registration.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
-core_admin_client.o: core_admin_client.c core_admin_client.h
+core_admin_client.o: core_admin_client.c home_perf.h core_admin_client.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
 
-artwork_decode.o: artwork_decode.c artwork_decode.h
+artwork_decode.o: artwork_decode.c home_perf.h artwork_decode.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 check-artwork:

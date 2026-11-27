@@ -1,6 +1,7 @@
 #include "../navigation.h"
 #include "../home_cache.h"
 #include <cassert>
+#include <string>
 
 int main()
 {

@@ -1,4 +1,5 @@
 #include "core_admin_client.h"
+#include "home_perf.h"
 
 #include <curl/curl.h>
 #include <openssl/evp.h>
@@ -489,14 +490,18 @@ CoreAdminClient::CoreAdminClient(std::string origin,std::string localSocket)
     : localSocket_(std::move(localSocket)) {
     setOrigin(origin);
 }
-CoreAdminClient::~CoreAdminClient() { logout(); }
+CoreAdminClient::~CoreAdminClient() { logout(); resetTransport(); }
+void CoreAdminClient::resetTransport() {
+    if(requestHandle_)curl_easy_cleanup(static_cast<CURL*>(requestHandle_));
+    requestHandle_=nullptr;
+}
 
 void CoreAdminClient::setOrigin(const std::string &value) {
     if (!localSocket_.empty()) {
         origin_ = "http://localhost";
         return;
     }
-    if (origin_ != value) { logout(); forgetDevice(); }
+    if (origin_ != value) { logout(); forgetDevice(); resetTransport(); }
     origin_ = safeOrigin(value) ? value : "";
     if (origin_.empty()) {
         last_.ok = false;
@@ -521,8 +526,11 @@ CoreAdminClient::Reply CoreAdminClient::request(
         return reply;
     }
     initializeCurl();
-    CURL *curl = curl_easy_init();
+    if(!requestHandle_)requestHandle_=curl_easy_init();
+    CURL *curl=static_cast<CURL*>(requestHandle_);
     if (!curl) { reply.error = "HTTP-Client nicht verfügbar"; return reply; }
+    // Reset request-specific headers, method and authentication; retain only the connection pool.
+    curl_easy_reset(curl);
     struct curl_slist *headers = nullptr;
     Transfer receive;
     if(image)receive.limit=32U*1024U*1024U;
@@ -584,7 +592,12 @@ CoreAdminClient::Reply CoreAdminClient::request(
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_PROTOCOLS, long(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    const auto began=std::chrono::steady_clock::now();
     const CURLcode code = curl_easy_perform(curl);
+    ++homePerf.http;homePerf.httpBytes+=receive.body.size();
+    homePerf.httpUs+=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-began).count();
+    long connections=0;curl_easy_getinfo(curl,CURLINFO_NUM_CONNECTS,&connections);
+    if(connections>0)homePerf.connections+=connections;
     if (code != CURLE_OK)
         reply.error = receive.tooLarge ? "Core-Antwort zu groß" :
                         "Core-HTTP-Verbindung fehlgeschlagen";
@@ -592,8 +605,8 @@ CoreAdminClient::Reply CoreAdminClient::request(
     reply.body = std::move(receive.body);
     reply.etag = std::move(receive.etag);
     reply.cookie = std::move(receive.cookie);
+    curl_easy_reset(curl);
     curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
     return reply;
 }
 
