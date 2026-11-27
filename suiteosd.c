@@ -491,7 +491,7 @@ class NativeHomeCache {
         std::string key;
         Programme programme;
         Recording recording;
-        bool epg=false,focus=false;
+        bool epg=false,focus=false,logoOnly=false;
         int w=0,h=0,logoW=0,logoH=0,pad=0;
         unsigned long generation=0;
     };
@@ -504,6 +504,10 @@ class NativeHomeCache {
     };
     std::deque<Work> pending;
     std::future<Result> job;
+    std::future<void> publicPrime;
+    std::atomic<bool> publicPrimeCancel{false};
+    bool publicPrimeRequested=true;
+    Clock::time_point nextPublicPrime{};
     std::string inFlight;
     std::map<std::string,Clock::time_point> missing;
     unsigned long generation=0;
@@ -547,7 +551,7 @@ class NativeHomeCache {
         NativeFocusPreview preview;
         const auto began=Clock::now();
         auto *scraper=cPluginManager::GetPlugin("tvscraper");
-        if(work.epg&&scraper){
+        if(!work.logoOnly&&work.epg&&scraper){
             LOCK_CHANNELS_READ;
             LOCK_SCHEDULES_READ;
             const auto *ch=Channels?Channels->GetByNumber(work.programme.channelNumber):nullptr;
@@ -562,7 +566,7 @@ class NativeHomeCache {
                         cOrientations(eOrientation::portrait,eOrientation::landscape,eOrientation::banner),true).path;
                 }
             }
-        }else if(!work.epg){
+        }else if(!work.logoOnly&&!work.epg){
             LOCK_RECORDINGS_READ;
             const auto *r=Recordings?Recordings->GetByName(work.recording.fileName.c_str()):nullptr;
             if(r&&r->Start()==work.recording.start){
@@ -588,6 +592,10 @@ class NativeHomeCache {
         job=std::async(std::launch::async,[work=std::move(work),path=std::move(path),title=std::move(title),preview=std::move(preview)]() mutable {
             Result result;result.work=std::move(work);result.title=std::move(title);
             const auto &w=result.work;
+            if(w.logoOnly){
+                result.logo=suiteosd::LoadArtwork(suiteosd::FindChannelLogo(w.programme.channel,""),w.logoW,w.logoH);
+                return result;
+            }
             if(w.focus){
                 result.preview=std::move(preview);
                 result.preview.fanart=suiteosd::CoverHomePoster(
@@ -609,6 +617,14 @@ class NativeHomeCache {
     void apply(Result result){
         if(result.work.generation!=generation)return;
         const auto &key=result.work.key;
+        if(result.work.logoOnly){
+            if(logos.find(result.work.programme.channel)==logos.end()){
+                if(logos.size()>=128)logos.evictOldest();
+                logos.emplace(result.work.programme.channel,std::move(result.logo));
+                if(menu)dirty.push_back(key);
+            }
+            return;
+        }
         if(result.work.focus){
             const auto panelBytes=std::size_t(std::max(1,width*HL::rightWidth/1600))*std::max(1,height*(HL::detailBottom-HL::detailY)/900)*4;
             const auto count=std::clamp<std::size_t>((16U*1024U*1024U)/std::max<std::size_t>(1,2*panelBytes+bytes(result.preview.fanart)),1,12);
@@ -637,7 +653,7 @@ class NativeHomeCache {
         if(!result.work.epg){
             if(titles.size()>=512)titles.evictOldest();
             titles.insertOrAssign(result.work.recording.fileName,std::move(result.title));
-        }else if(result.logo.valid()&&logos.find(result.work.programme.channel)==logos.end()){
+        }else if(logos.find(result.work.programme.channel)==logos.end()){
             if(logos.size()>=128)logos.evictOldest();
             logos.emplace(result.work.programme.channel,std::move(result.logo));
         }
@@ -661,14 +677,14 @@ public:
     }
     void reset(){
         ++generation;pending.clear();missing.clear();artwork.clear();titles.clear();logos.clear();focusPreviews.clear();backgrounds={};frames.clear();glyphs.clear();
-        dirty.clear();evicted.clear();nextPrime={};privateArtwork.clear();
+        dirty.clear();evicted.clear();nextPrime={};publicPrimeCancel.store(true);publicPrimeRequested=true;nextPublicPrime={};privateArtwork.clear();
     }
     void setSize(int w,int h){
         if(w==width&&h==height)return;
         reset();width=w;height=h;
     }
-    void opened(){menu=true;dirty.clear();evicted.clear();}
-    void closed(){menu=false;dirty.clear();evicted.clear();nextPrime={};}
+    void opened(){menu=true;publicPrimeCancel.store(true);dirty.clear();evicted.clear();}
+    void closed(){menu=false;publicPrimeRequested=true;dirty.clear();evicted.clear();nextPrime={};}
     void cancelPending(){++generation;pending.clear();nextPrime={};}
     std::size_t pixelBytes()const{return artwork.totalWeight(bytes)+logos.totalWeight(bytes);}
     const suiteosd::Artwork &programme(const Programme &p,bool visible=true){
@@ -695,6 +711,52 @@ public:
         if(pending.size()>=64)pending.pop_back();
         if(visible)pending.push_front(std::move(w));else pending.push_back(std::move(w));
     }
+    const suiteosd::Artwork &requestLogo(const std::string &name,bool visible=true){
+        auto it=logos.find(name);
+        if(it!=logos.end())return it->second;
+        Work w;w.key="logo:"+name;w.programme.channel=name;w.logoOnly=true;
+        w.logoW=std::max(1,49*width/1600);w.logoH=std::max(1,30*height/900);
+        return queue(std::move(w),visible);
+    }
+    // A closed-menu pass consumes no-store projections only inside this job.
+    // Only explicitly cacheable decoded artwork survives it.
+    void startPublicPrime(){
+        if(menu||stopped||publicPrime.valid()||!publicPrimeRequested||Clock::now()<nextPublicPrime||width<=0||height<=0)return;
+        publicPrimeRequested=false;nextPublicPrime=Clock::now()+std::chrono::minutes(5);
+        publicPrimeCancel.store(false);
+        const std::string origin=gCoreUrl,profile=deviceProfilePath();
+        const int w=HL::posterW*width/1600,h=HL::posterH*height/900;
+        const auto now=time(nullptr);tm t{};const int year=localtime_r(&now,&t)?1900+t.tm_year:2026;
+        publicPrime=std::async(std::launch::async,[this,origin,profile,w,h,year]{
+            suiteosd::CoreAdminClient client(origin);
+            suiteosd::DeviceCredential credential;
+            if(!suiteosd::loadDeviceProfile(profile,origin,credential)||!client.setDeviceCredential(credential))return;
+            const auto scope=client.artworkCredentialScope();
+            if(scope.empty())return;
+            for(auto kind:{suiteosd::HomeKind::New,suiteosd::HomeKind::Movies}){
+                if(publicPrimeCancel.load())return;
+                suiteosd::CoreHomePage page;
+                if(!client.publicHomePage("default",kind,"",6,0,year,page).ok)continue;
+                size_t count=0;
+                for(const auto &card:page.cards){
+                    if(publicPrimeCancel.load())return;
+                    if(count++>=6)break;
+                    if(card.kind!=suiteosd::CoreHomeCard::Kind::Recording)continue;
+                    const auto &row=card.recording;
+                    if(row.backendId!="default"||row.id.empty())continue;
+                    const PrivateKey key{scope,row.backendId,row.id,w,h};
+                    if(!privateArtwork.get(key).asset.empty())continue;
+                    std::string bytes,asset;int maxAge=0;
+                    const auto began=Clock::now();
+                    auto status=client.publicRecordingArtwork(row,bytes,&asset,{},&maxAge);
+                    if(publicPrimeCancel.load())return;
+                    if(!status.ok||maxAge<=0||bytes.empty()||asset.empty())continue;
+                    auto pixels=suiteosd::CoverHomePoster(suiteosd::LoadArtworkBytes(bytes,std::min(1024,w*2),std::min(1024,h*2)),w,h,0);
+                    if(!publicPrimeCancel.load())privateArtwork.put(key,{asset,std::move(pixels),began+std::chrono::seconds(maxAge)});
+                }
+            }
+        });
+    }
     void takeChanges(std::vector<std::string> &keys,std::vector<std::uintptr_t> &ids){
         keys.swap(dirty);ids.swap(evicted);
     }
@@ -716,10 +778,16 @@ public:
             const auto snapshot=readVdrSnapshot(true);
             for(size_t i=0;i<HL::columns&&i<snapshot.now.size();++i)programme(snapshot.now[i],false);
             for(size_t i=0;i<HL::columns&&i<snapshot.next.size();++i)programme(snapshot.next[i],false);
-            if(snapshot.live.channelNumber>0)requestFocus(&snapshot.live,nullptr,false);
+            if(snapshot.live.channelNumber>0){requestLogo(snapshot.live.channel,false);requestFocus(&snapshot.live,nullptr,false);}
             for(size_t i=0;i<HL::columns&&i<snapshot.recordings.size();++i)recording(snapshot.recordings[i],false);
             for(size_t i=HL::columns;i<2*HL::columns&&i<snapshot.now.size();++i)programme(snapshot.now[i],false);
             for(size_t i=HL::columns;i<2*HL::columns&&i<snapshot.next.size();++i)programme(snapshot.next[i],false);
+        }
+        if(publicPrime.valid()&&publicPrime.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+            try{publicPrime.get();}catch(const std::exception &){esyslog("suiteosd: public artwork preparation failed");}
+        }
+        if(!menu&&!job.valid()&&pending.empty()){
+            try{startPublicPrime();}catch(const std::exception &){esyslog("suiteosd: cannot launch public artwork preparation");}
         }
         if(!job.valid()&&!pending.empty()){
             auto work=std::move(pending.front());pending.pop_front();
@@ -727,8 +795,9 @@ public:
         }
     }
     void stop(){
-        stopped=true;pending.clear();
+        stopped=true;publicPrimeCancel.store(true);pending.clear();
         if(job.valid())job.wait();
+        if(publicPrime.valid())publicPrime.wait();
     }
 };
 
@@ -911,13 +980,27 @@ private:
     const bool warmOpen=nativeHome.artwork.size()!=0;
     const unsigned long long startHttp=suiteosd::homePerf.http.load(),startHttpBytes=suiteosd::homePerf.httpBytes.load(),startHttpUs=suiteosd::homePerf.httpUs.load(),startConnections=suiteosd::homePerf.connections.load(),startDecodes=suiteosd::homePerf.decodes.load(),startDecodeUs=suiteosd::homePerf.decodeUs.load();
     unsigned long long fullDraws=0,flushes=0,flushUs=0,keySamples=0,keyUs=0,keyMaxUs=0;
-    long long firstFrameUs=-1;
+    long long firstFrameUs=-1,initialRailsUs=-1;
+    int initialExpected=0,initialPixelCards=0;
     bool keyPending=false;
     void flushHomeOsd(){
         const auto began=PerfClock::now();osd->Flush();
         const auto now=PerfClock::now();
         ++flushes;flushUs+=std::chrono::duration_cast<std::chrono::microseconds>(now-began).count();
         if(firstFrameUs<0)firstFrameUs=std::chrono::duration_cast<std::chrono::microseconds>(now-openedAt).count();
+        if(initialRailsUs<0&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails&&homeCollections.empty()&&!nav.sideFocused&&nav.firstVisibleSection==0&&nav.firstCard[1]==0&&nav.firstCard[2]==0){
+            int expected=0,resolved=0,pixels=0;
+            const auto &cache=nativeHome.artwork;
+            for(const auto *items:{&data.now,&data.next}){
+                for(size_t i=0;i<HL::columns&&i<items->size();++i){
+                    ++expected;
+                    auto it=cache.find(NativeHomeCache::programmeKey((*items)[i]));
+                    if(it!=cache.end()){++resolved;if(it->second.valid())++pixels;}
+                }
+            }
+            initialExpected=expected;initialPixelCards=pixels;
+            if(expected==resolved)initialRailsUs=std::chrono::duration_cast<std::chrono::microseconds>(now-openedAt).count();
+        }
         if(keyPending){
             const auto us=static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::microseconds>(now-keyAt).count());
             ++keySamples;keyUs+=us;keyMaxUs=std::max(keyMaxUs,us);keyPending=false;
@@ -1776,11 +1859,7 @@ private:
     }
     const suiteosd::Artwork &cinematicLogo(const std::string &name)
     {
-        auto it=cinematicLogos.find(name);
-        if(it!=cinematicLogos.end())return it->second;
-        if(cinematicLogos.size()>=128)cinematicLogos.evictOldest();
-        return cinematicLogos.emplace(name,suiteosd::LoadArtwork(
-            suiteosd::FindChannelLogo(name,""),std::max(1,X(49)),std::max(1,Y(30)))).first->second;
+        return nativeHome.requestLogo(name);
     }
     int cinematicSidebarWidth() const {return nav.sideFocused?272:112;}
     int homeCardX(int col) const {return HL::cardX(col,nav.sideFocused);}
@@ -5079,8 +5158,8 @@ public:
     explicit cSuiteHome(NativeHomeCache &cache):nativeHome(cache){nativeHome.opened();}
     ~cSuiteHome() override
     {
-        isyslog("suiteosd: HOME_PERF warm=%d first_flush_us=%lld full_draws=%llu flushes=%llu flush_us=%llu dpad_samples=%llu dpad_total_us=%llu dpad_max_us=%llu native_hits=%llu native_misses=%llu scraper_calls=%llu scraper_us=%llu native_completed=%llu native_pixel_bytes=%zu private_pixel_bytes=%zu",
-            int(warmOpen),firstFrameUs,fullDraws,flushes,flushUs,keySamples,keyUs,keyMaxUs,
+        isyslog("suiteosd: HOME_PERF warm=%d first_flush_us=%lld initial_epg_resolved_us=%lld initial_epg_cards=%d initial_epg_pixel_cards=%d full_draws=%llu flushes=%llu flush_us=%llu dpad_samples=%llu dpad_total_us=%llu dpad_max_us=%llu native_hits=%llu native_misses=%llu scraper_calls=%llu scraper_us=%llu native_completed=%llu native_pixel_bytes=%zu private_pixel_bytes=%zu",
+            int(warmOpen),firstFrameUs,initialRailsUs,initialExpected,initialPixelCards,fullDraws,flushes,flushUs,keySamples,keyUs,keyMaxUs,
             nativeHome.hits-startHits,nativeHome.misses-startMisses,nativeHome.scraperCalls-startScraper,
             nativeHome.scraperUs-startScraperUs,nativeHome.completed-startCompleted,nativeHome.pixelBytes(),nativeHome.privateArtwork.pixelBytes());
         struct rusage usage{};getrusage(RUSAGE_SELF,&usage);
@@ -5180,9 +5259,10 @@ public:
             else {
                 const bool events=std::any_of(localKeys.begin(),localKeys.end(),[](const auto &k){return k.rfind("epg:",0)==0;});
                 const bool recordings=std::any_of(localKeys.begin(),localKeys.end(),[](const auto &k){return k.rfind("rec:",0)==0;});
+                const bool logos=std::any_of(localKeys.begin(),localKeys.end(),[](const auto &k){return k.rfind("logo:",0)==0;});
                 bool changed=false;const int first=nav.firstVisibleSection;
                 for(int section=first;section<first+HL::rows;++section){
-                    if((events&&(section==1||section==2))||(recordings&&section>=3)){
+                    if((events&&(section==1||section==2))||(logos&&section<=2)||(recordings&&section>=3)){
                         redrawHomeRail(section,first,true);changed=true;
                     }
                 }
