@@ -22,7 +22,7 @@ struct Navigation {
     bool sideFocused = false;
     int sideIndex = 0;
     int section = 0;
-    std::array<int, kSections> card = {{1, 0, 0, 0}};
+    std::array<int, kSections> card = {{0, 0, 0, 0}};
     std::array<int, kSections> firstCard = {{0, 0, 0, 0}};
     int firstVisibleSection = 0; // Live-TV is the first scrollable rail
 
@@ -35,6 +35,7 @@ struct Navigation {
             return;
         }
         card[section] = std::clamp(card[section], 0, count - 1);
+        if(section==0){firstCard[0]=0;return;} // centered circular hero, not a paged poster rail
         const int columns = std::max(1, visibleCards);
         if (card[section] < firstCard[section])
             firstCard[section] = card[section];
@@ -56,13 +57,21 @@ struct Navigation {
             else if (key == Direction::Select) {
                 sideFocused = false;
                 switch (sideIndex) {
-                case 0: section = 0; card[0]=1; break; // Home stays in the approved Suite dashboard
+                case 0: section = 0; break; // Home stays in the approved Suite dashboard
                 default: return Activation::Module; // VDR menus or installed plugins
                 }
                 KeepVisible(visibleCards, sectionCount);
                 firstVisibleSection = HomeLayout::firstRow(section,kSections,firstVisibleSection);
             }
             return Activation::None;
+        }
+        if(section==0){
+            if(key==Direction::Left||key==Direction::Right){
+                card[0]=HomeLayout::channelIndex(card[0],key==Direction::Left?-1:1,sectionCount);
+                firstCard[0]=0;
+                return Activation::None;
+            }
+            if(key==Direction::Up){sideFocused=true;sideIndex=0;return Activation::None;}
         }
         if (key == Direction::Left) {
             if (card[section] == 0)

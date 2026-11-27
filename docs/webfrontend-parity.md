@@ -136,3 +136,7 @@ Identische Collection-Readbacks werden nach sichtbarer Projektion verglichen: we
 ## Home-Ladegeschwindigkeit 0.9.21
 
 Die bestehende Public-v1-Detail-/Artwork-Kette wird nicht mehr vollständig seriell je Karte ausgeführt: bis zu vier unabhängige Aufnahmen sind gleichzeitig in Arbeit, dedupliziert nach backendId/rec-ID. Sichtbare fehlende Poster haben Vorrang, benachbarte Rails werden mit freien Slots vorbereitet. Fertige Ergebnisse werden pro UI-Zyklus zusammengeführt, jede betroffene sichtbare Rail höchstens einmal neu gezeichnet. Bestehende LRU-/SSE-/Autorisierungssemantik bleibt erhalten. Keine Datumszeile auf Aufnahmepostern; Titel und Episodentitel bleiben erhalten, Wiedergabefortschritt bei Continue/Recent bleibt erhalten, EPG-Sendezeiten und Detaildaten unverändert. Keine neue API oder Berechtigung, reale Latenzmessung auf dem TV offen.
+
+## Live-TV-Karussell 0.9.22
+
+Geprüfter Web-Owner `web/frontend/home-live-hero.js`: `selectOffset`, `neighborChannel`, `render`, `bindHeroInteractions`; Auswahl startet keine Wiedergabe, Nachbarn zirkulär, Watch separat. Native Umsetzung verwendet die vollständige bestehende VDR-Kanalliste und EPG-Projektion, stabilisiert Auswahl über Snapshot-Refresh per Kanalnummer, nutzt OK für den bestehenden VDR-Senderwechsel und schaltet nie beim Browsen um. Hoch auf Hero erreicht Sidebar; unten unveränderte Rails. Keine zusätzliche API, Rechte oder Player. Unit-Navigation deckt Mehrfachschritte, Wrap, leere/einzelne Liste, Rückkehr und Sidebar ab; echte Video-/Fernbedienungsabnahme und Konkurrenzmessung offen.

@@ -1,3 +1,10 @@
+vdr-plugin-suiteosd (0.9.22~dev) unstable; urgency=medium
+
+  * Browse the complete native channel list in a circular Live-TV hero.
+  * Separate channel selection from tuning and animate horizontal steps.
+
+ -- VDR-Suite contributors <noreply@github.com>  Fri, 27 Nov 2026 03:15:00 +0100
+
 vdr-plugin-suiteosd (0.9.21~dev) unstable; urgency=medium
 
   * Load visible recording artwork and metadata with four independent workers.

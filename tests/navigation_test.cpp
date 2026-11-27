@@ -30,7 +30,7 @@ int main()
     Navigation n;
     assert(n.section == 0 && !n.sideFocused);
     n.card[0]=0;
-    n.Move(Direction::Left, 3, 6);
+    n.Move(Direction::Up, 3, 6);
     assert(n.sideFocused); // collapsed icon rail expands all labels when focused
     n.Move(Direction::Down, 1, 5);
     assert(n.sideIndex == 1);
@@ -149,13 +149,26 @@ int main()
         assert(HomeLayout::videoX(expanded)+HomeLayout::videoW<HomeLayout::nextX(expanded));
     }
     Navigation hero;
-    assert(hero.card[0]==1&&hero.firstVisibleSection==0);
-    hero.Move(Direction::Left,3,6);assert(hero.card[0]==0&&!hero.sideFocused);
-    hero.Move(Direction::Right,3,6);hero.Move(Direction::Right,3,6);assert(hero.card[0]==2);
-    assert(hero.Move(Direction::Select,3,6)==Activation::Hero);
+    assert(hero.card[0]==0&&hero.firstVisibleSection==0);
+    hero.Move(Direction::Left,123,6);assert(hero.card[0]==122&&!hero.sideFocused);
+    hero.Move(Direction::Right,123,6);assert(hero.card[0]==0);
+    for(int i=0;i<250;++i)hero.Move(Direction::Right,123,6);
+    assert(hero.card[0]==4&&!hero.sideFocused&&hero.firstCard[0]==0);
+    for(int i=0;i<250;++i)hero.Move(Direction::Left,123,6);
+    assert(hero.card[0]==0&&!hero.sideFocused);
+    hero.Move(Direction::Right,0,6);assert(hero.card[0]==0);
+    hero.Move(Direction::Left,1,6);assert(hero.card[0]==0);
+    hero.Move(Direction::Right,123,6);
+    hero.Move(Direction::Down,12,6);hero.Move(Direction::Up,123,6);
+    assert(hero.card[0]==1);
+    assert(hero.Move(Direction::Select,123,6)==Activation::Hero);
+    hero.Move(Direction::Up,123,6);assert(hero.sideFocused);
+    hero.Move(Direction::Right,123,6);assert(!hero.sideFocused&&hero.card[0]==1);
+    assert(HomeLayout::channelIndex(0,-1,123)==122);
+    assert(HomeLayout::channelIndex(122,1,123)==0);
     Navigation direct;
     direct.card[0]=0;
-    direct.Move(Direction::Left, 3, 6);
+    direct.Move(Direction::Up, 3, 6);
     direct.Move(Direction::Down, 1, 4);
     direct.Move(Direction::Down, 1, 4);
     direct.Move(Direction::Down, 1, 4);
@@ -170,7 +183,7 @@ int main()
     for (int index = 1; index < Navigation::kSidebarItems; ++index) {
         Navigation menu;
         menu.card[0]=0;
-        menu.Move(Direction::Left, 3, 6);
+        menu.Move(Direction::Up, 3, 6);
         for (int j = 0; j < index; ++j)
             menu.Move(Direction::Down, 1, 4);
         assert(menu.sideIndex == index);

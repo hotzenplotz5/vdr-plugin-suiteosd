@@ -57,7 +57,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.21-dev";
+static const char *VERSION = "0.9.22-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -680,7 +680,7 @@ private:
     int count(int section) const
     {
         switch (section) {
-        case 0: return 3;
+        case 0: return int(data.now.size());
         case 1: return int(data.now.size());
         case 2: return int(data.next.size());
         case suiteosd::Navigation::kNew:
@@ -1287,7 +1287,7 @@ private:
             ++homePosterRevision;
             recordingDetailImages.erase(fileName);
             recordingGenres.erase(fileName);
-            data = readVdrSnapshot();
+            refreshHomeSnapshot();
             refreshBrowser();
             browserNotice = "Aufnahme gelöscht";
         } else
@@ -1824,7 +1824,7 @@ private:
         recordingBrowser.tabsFocused = true;
         browserDetails = browserDeleteConfirm = false;
         browserNotice.clear();
-        data = readVdrSnapshot();
+        refreshHomeSnapshot();
         refreshBrowser();
         recordingsActive = true;
     }
@@ -2127,7 +2127,7 @@ private:
     const Programme *selectedHomeProgramme() const
     {
         switch (nav.section) {
-        case 0: return heroProgramme(nav.card[0]);
+        case 0: return heroProgramme(0);
         case 1:
             return nav.card[1] >= 0 && nav.card[1] < int(data.now.size()) ?
                 &data.now[nav.card[1]] : nullptr;
@@ -2158,23 +2158,31 @@ private:
         osd->DrawEllipse(X(x),Y(y),X(x+h)-1,Y(y+h)-1,color);
         osd->DrawEllipse(X(x+w-h),Y(y),X(x+w)-1,Y(y+h)-1,color);
     }
-    const Programme *heroProgramme(int position) const {
-        if(position==1)return &data.live;
+    const Programme *heroProgramme(int offset) const {
         const int count=int(data.now.size());
-        if(!count)return nullptr;
-        for(int i=0;i<count;++i)if(data.now[i].channelNumber==data.live.channelNumber)
-            return &data.now[(i+(position==0?-1:1)+count)%count];
-        return nullptr;
+        return count?&data.now[HL::channelIndex(nav.card[0],offset,count)]:nullptr;
+    }
+    void refreshHomeSnapshot(bool initial=false){
+        const auto *selected=heroProgramme(0);
+        const int number=!initial&&selected?selected->channelNumber:0;
+        data=readVdrSnapshot();
+        int index=0;
+        for(int i=0;i<int(data.now.size());++i){
+            if(data.now[i].channelNumber==data.live.channelNumber)index=i;
+        }
+        if(number)for(int i=0;i<int(data.now.size());++i)
+            if(data.now[i].channelNumber==number){index=i;break;}
+        nav.card[0]=index;nav.firstCard[0]=0;
     }
     bool homeHeroVisible() const {return homeCollections.empty()&&nav.firstVisibleSection==0;}
     void drawHomeHero(int y) {
         focusClockMinute=time(nullptr)/60;
         cinematicHeading(y,"Live-TV");
         const int top=y+HL::titleHeight;
-        auto focused=[&](int i){return nav.section==0&&!nav.sideFocused&&nav.card[0]==i;};
+        auto focused=[&](int i){return nav.section==0&&!nav.sideFocused&&i==1;};
         auto neighbor=[&](int i,int x,int w){
             cinemaPanel(x,top,w,HL::liveH,16,focused(i)?suiteosd::CinemaStyle::Focus:suiteosd::CinemaStyle::Panel);
-            const auto *p=heroProgramme(i);
+            const auto *p=heroProgramme(i-1);
             if(!p)return;
             suiteosd::TimelineChannel channel;channel.name=p->channel;
             // Use the cached logo through the same draw target as the rail.
@@ -2194,29 +2202,35 @@ private:
         neighbor(2,HL::nextX(expanded),HL::neighborW(expanded));
         cinemaPanel(HL::heroX(expanded),top,HL::heroW(expanded),HL::liveH,16,
             focused(1)?suiteosd::CinemaStyle::Focus:suiteosd::CinemaStyle::Panel);
+        const auto *selected=heroProgramme(0);
+        if(!selected){printFit(HL::heroX(expanded)+12,top+55,"Keine Sender vorhanden",fontBody,kMuted,HL::heroW(expanded)-24);return;}
+        const auto &current=*selected;
+        const auto &next=nav.card[0]<int(data.next.size())?data.next[nav.card[0]]:current;
+        const bool tuned=current.channelNumber==data.live.channelNumber;
         const int vx=HL::videoX(expanded),vy=top+8;
         fill(vx,vy,vx+HL::videoW-1,vy+HL::videoH-1,0xFF061626u);
-        if(!railDrawPixmap&&y==HL::top&&scaledDevice&&!scaledRect.IsEmpty())
+        if(tuned&&!railDrawPixmap&&y==HL::top&&scaledDevice&&!scaledRect.IsEmpty())
             osd->DrawRectangle(scaledRect.X(),scaledRect.Y(),scaledRect.X()+scaledRect.Width()-1,
                 scaledRect.Y()+scaledRect.Height()-1,clrTransparent);
         else {
-            const auto &logo=cinematicLogo(data.live.channel);
+            const auto &logo=cinematicLogo(current.channel);
             if(logo.valid()){
                 auto art=logo;suiteosd::OpaqueArtwork(art,0xFF061626u);
                 drawCinemaImage(art,X(vx+HL::videoW/2)-art.width/2,Y(vy+HL::videoH/2)-art.height/2);
             }
+            if(!tuned)printFit(vx+12,vy+HL::videoH-28,"OK: Live ansehen",fontSmall,kText,HL::videoW-24);
         }
         const int tx=vx+HL::videoW+12,tw=HL::heroX(expanded)+HL::heroW(expanded)-tx-12;
-        printFit(tx,top+9,data.live.channel,fontBody,kFocus,tw);
-        printFit(tx,top+40,data.live.title,fontBody,kText,tw);
-        printFit(tx,top+67,data.live.time,fontSmall,kMuted,tw);
+        printFit(tx,top+9,current.channel,fontBody,kFocus,tw);
+        printFit(tx,top+40,current.title,fontBody,kText,tw);
+        printFit(tx,top+67,current.time,fontSmall,kMuted,tw);
         print(tx,top+103,"Als nächstes",fontSmall,kFocus,tw);
-        const auto lines=suiteosd::HeroLines(data.liveNext.title,fontSmall,X(tw));
+        const auto lines=suiteosd::HeroLines(next.title,fontSmall,X(tw));
         for(int i=0;i<2&&i<int(lines.size());++i)
             printFit(tx,top+128+i*21,lines[i]+(i==1&&lines.size()>2?"…":""),fontSmall,kText,tw);
-        printFit(tx,top+174,data.liveNext.time,fontCinemaMeta,kMuted,tw);
+        printFit(tx,top+174,next.time,fontCinemaMeta,kMuted,tw);
         cinemaProgress(vx,top+HL::liveH-15,HL::videoW,
-            HL::progressPercent(data.live.start,data.live.end,time(nullptr)));
+            HL::progressPercent(current.start,current.end,time(nullptr)));
     }
     void drawHomeLivePanel() {if(homeHeroVisible())drawHomeHero(HL::top);}
     void drawHomeFocusPanel() {
@@ -4560,6 +4574,45 @@ private:
         }
         drawHomeRail(section,HL::headingY(row));
     }
+    // Slide only the hero rail; the decoder stays on the tuned channel.
+    // During the transition both compositions are opaque, then the true
+    // video cutout is restored only for the tuned selection.
+    bool animateHeroChannels(int previous,bool forward){
+        if(!osd||previous==nav.card[0])return false;
+        const int x0=X(homeLeft()-12),x1=X(HL::right-9);
+        const int y0=Y(HL::top),y1=Y(HL::headingY(1));
+        const int w=x1-x0,h=y1-y0;
+        if(w<=0||h<=0)return false;
+        auto *strip=osd->CreatePixmap(1,cRect(x0,y0,w,h),cRect(0,0,2*w,h));
+        if(!strip)return false;
+        const auto &bg=cinematicBackground();
+        suiteosd::Artwork patch{w,h,std::vector<uint32_t>(size_t(w)*h)};
+        for(int y=0;y<h;++y)
+            std::copy_n(bg.argb.begin()+size_t(y0+y)*width+x0,w,patch.argb.begin()+size_t(y)*w);
+        const int selected=nav.card[0],from=forward?0:w,to=forward?w:0;
+        railDrawPixmap=strip;railDrawY=-y0;
+        for(int i=0;i<2;++i){
+            railDrawX=i*w-x0;
+            nav.card[0]=i*w==from?previous:selected;
+            drawCinemaImage(patch,x0,y0);
+            drawHomeHero(HL::top);
+        }
+        nav.card[0]=selected;railDrawPixmap=nullptr;
+        strip->SetDrawPortPoint(cPoint(-from,0));osd->Flush();
+        const auto began=std::chrono::steady_clock::now();
+        for(;;){
+            const auto now=std::chrono::steady_clock::now();
+            const int ms=int(std::chrono::duration_cast<std::chrono::milliseconds>(now-began).count());
+            if(ms>=HL::heroScrollDurationMs)break;
+            strip->SetDrawPortPoint(cPoint(-HL::scrollOffset(from,to,ms*HL::scrollDurationMs/HL::heroScrollDurationMs),0));
+            osd->Flush();
+            std::this_thread::sleep_until(now+std::chrono::milliseconds(24));
+        }
+        redrawHomeRail(0,0,true);
+        osd->DestroyPixmap(strip);
+        drawHomeFocusPanel();osd->Flush();
+        return true;
+    }
     // Render four adjacent rails once, then move their native draw port inside
     // the fixed three-rail viewport. No image decoding or API work per frame.
     bool animateHomeRows(int previousFirst,int first)
@@ -4692,13 +4745,13 @@ private:
     {
         switch (a) {
         case suiteosd::Activation::Hero: {
-            if(nav.card[0]==1)return osEnd;
-            const auto *p=heroProgramme(nav.card[0]);
+            const auto *p=heroProgramme(0);
             if(p){
+                if(p->channelNumber==cDevice::CurrentChannel())return osEnd;
                 restoreLivePreview();
                 bool switched=false;
                 {LOCK_CHANNELS_READ; switched=Channels&&Channels->SwitchTo(p->channelNumber);}
-                if(switched){data=readVdrSnapshot();nav.card[0]=1;break;}
+                if(switched)return osEnd;
             }
             notice="Senderwechsel nicht verfügbar";break;
         }
@@ -4797,7 +4850,7 @@ public:
 
     void Show() override
     {
-        data = readVdrSnapshot();
+        refreshHomeSnapshot(true);
         int outputW=0,outputH=0;
         double pixelAspect=1.0;
         if(auto *device=cDevice::PrimaryDevice())
@@ -4932,7 +4985,7 @@ public:
                     }
                 }
                 if(homeEventChanged.exchange(false)){
-                    data=readVdrSnapshot();
+                    refreshHomeSnapshot();
                     // Invalidate once on hello/change; keep visible last data until refreshed.
                     for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
                     recordingGenres.clear();
@@ -4985,7 +5038,7 @@ public:
             return osContinue;
         }
         if (base == k0) {
-            data = readVdrSnapshot();
+            refreshHomeSnapshot();
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
             recordingDetailImages.clear();
             focusPreviews.clear();focusKey.clear();focusPending=false;
@@ -5032,6 +5085,9 @@ public:
             previous.sideIndex!=nav.sideIndex||previous.card!=nav.card||previous.firstCard!=nav.firstCard;
         if(direction==suiteosd::Direction::Select||hadNotice){draw();return osContinue;}
         if(!changed&&!railLoaded)return osContinue;
+        if(previous.section==0&&nav.section==0&&!previous.sideFocused&&!nav.sideFocused&&
+           (direction==suiteosd::Direction::Left||direction==suiteosd::Direction::Right)&&
+           !(key&k_Repeat)&&animateHeroChannels(previous.card[0],direction==suiteosd::Direction::Right))return osContinue;
         const int first=nav.firstVisibleSection;
         if(osd&&!previous.sideFocused&&!nav.sideFocused&&first!=previous.firstVisibleSection&&
             (direction==suiteosd::Direction::Up||direction==suiteosd::Direction::Down)&&

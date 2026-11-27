@@ -45,6 +45,12 @@ struct HomeLayout {
         if(section>=first+rows)return std::clamp(section-rows+1,0,last);
         return first;
     }
+    static constexpr int channelIndex(int selected,int delta,int count){
+        if(count<=0)return 0;
+        const auto offset=(static_cast<std::int64_t>(std::clamp(selected,0,count-1))+delta)%count;
+        return int(offset<0?offset+count:offset);
+    }
+    static constexpr int heroScrollDurationMs=160;
     static constexpr int scrollDurationMs=240;
     static constexpr int scrollOffset(int from,int to,int elapsedMs){
         const double t=double(std::clamp(elapsedMs,0,scrollDurationMs))/scrollDurationMs;

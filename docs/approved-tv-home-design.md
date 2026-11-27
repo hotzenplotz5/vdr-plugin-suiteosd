@@ -165,3 +165,7 @@ SuiteOSD belegt als eigener Menü-Owner die vollständige vom primären Ausgabeg
 ## Aufnahmekarten ohne Datum (27.11.2026)
 
 Aufnahmeposter zeigen Titel bzw. Episodentitel ohne Aufnahmedatum oder generischen Untertitel; Fortschrittsangaben bei Wiedergabe-Historie bleiben funktional erhalten. Ohne zusätzliche Zeile sitzt der Titel näher am unteren Rand. Die sechs Karten, drei Rails, Live-Hero, EPG-Zeiten und Detailpanel bleiben unverändert.
+
+## Durchlaufendes Live-TV-Senderkarussell (27.11.2026)
+
+Links/Rechts blättert über die vollständige vorhandene VDR-Kanalliste mit Wrap, die Auswahl steht stets mittig, Nachbarn und Jetzt/Danach folgen ihr. Die Auswahl startet analog zum Webfrontend keine Wiedergabe. OK öffnet den ausgewählten Sender im Vollbild; bei einem nicht eingeschalteten Sender zeigt der Vorschauplatz Logo und OK-Hinweis statt eines falschen Live-Bilds. Hoch im ersten Rail öffnet die Sidebar (Links ist für das Karussell reserviert); Rechts zurück, Runter zu den Rails. Einzelne Schritte erhalten eine kurze horizontale native Pixmap-Animation, Tastenwiederholung und fehlende Pixmap-Unterstützung nutzen den direkten Wechsel. Das restliche Layout und die Cache-/API-Architektur bleiben unverändert. Reale TV-Abnahme offen.
