@@ -2,8 +2,11 @@
 #define SUITEOSD_HOME_CACHE_H
 #include <map>
 #include <cstdint>
+#include <cstddef>
 #include <utility>
 namespace suiteosd {
+// Small bounded concurrent working set; not a server-side request gate.
+inline constexpr std::size_t kHomePosterWorkers=4;
 // A bounded Home working set with stable node addresses. Evict individual
 // least-recently used entries, never the entire cache on a capacity miss.
 template<class Key,class Value> class HomeLru {

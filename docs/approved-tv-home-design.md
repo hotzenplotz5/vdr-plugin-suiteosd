@@ -161,3 +161,7 @@ Die erste scrollbare Reihe ist Live-TV mit dem vorherigen und nächsten VDR-Send
 ## Vollbild-Dashboard (27.11.2026)
 
 SuiteOSD belegt als eigener Menü-Owner die vollständige vom primären Ausgabegerät gemeldete OSD-Fläche ab (0,0), nicht die normale VDR-Menüfläche mit Overscan-/Sicherheitsrand. Die bestätigte Geometrie von sechs Postern, drei Rails und Live-Hero bleibt proportional erhalten. Das Video ist nur in der ausdrücklich vorgesehenen Vorschaufläche sichtbar; beim Herausscrollen wird die native Skalierung zurückgesetzt und die gesamte OSD-Fläche bleibt opak. Keine Änderung an Setup.OSDLeft/Top/Width/Height, anderen Skins, VDR-Core oder Ausgabeplugin. Bei nicht gemeldeter Ausgabegröße bleibt die vorhandene VDR-Menügeometrie als Fallback. Reale Randfreiheit auf dem TV noch zu prüfen.
+
+## Aufnahmekarten ohne Datum (27.11.2026)
+
+Aufnahmeposter zeigen Titel bzw. Episodentitel ohne Aufnahmedatum oder generischen Untertitel; Fortschrittsangaben bei Wiedergabe-Historie bleiben funktional erhalten. Ohne zusätzliche Zeile sitzt der Titel näher am unteren Rand. Die sechs Karten, drei Rails, Live-Hero, EPG-Zeiten und Detailpanel bleiben unverändert.

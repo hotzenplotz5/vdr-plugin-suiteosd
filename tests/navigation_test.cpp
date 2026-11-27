@@ -5,6 +5,7 @@
 int main()
 {
     using namespace suiteosd;
+    static_assert(kHomePosterWorkers==4);
     HomeLru<int,int> cache;
     cache.emplace(1,10);cache.emplace(2,20);cache.emplace(3,30);
     const auto *retained=&cache.find(1)->second;

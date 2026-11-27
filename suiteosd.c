@@ -57,7 +57,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.20-dev";
+static const char *VERSION = "0.9.21-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -534,7 +534,7 @@ private:
         unsigned long generation=0,revision=0;
         bool reused=false;
     };
-    std::future<HomePosterRead> homePosterJob;
+    std::map<std::string,std::future<HomePosterRead>> homePosterJobs;
     suiteosd::HomeLru<std::string,HomePosterRead> publicHomePosters;
     unsigned long homePosterGeneration=0,homePosterRevision=0;
     unsigned long homeReadSerial=0;
@@ -1607,9 +1607,11 @@ private:
             auto episodes=suiteosd::HeroLines(episode,f,X(HL::cardWidth-16));
             if(!episodes.empty())lines.push_back(episodes.front()+(episodes.size()>1?"…":""));
         }
+        const int titleY=top+HL::cardHeight-(subtitle.empty()?(lines.size()>1?47:29):65);
         for(int i=0;i<2&&i<int(lines.size());++i)
-            printFit(x+8,top+HL::cardHeight-65+i*18,lines[i]+(i==1&&lines.size()>2?"…":""),f,kText,HL::cardWidth-16);
-        printFit(x+8,top+HL::cardHeight-28,subtitle,fontCinemaMeta?fontCinemaMeta:fontSmall,0xFFD8E4F2u,HL::cardWidth-16);
+            printFit(x+8,titleY+i*18,lines[i]+(i==1&&lines.size()>2?"…":""),f,kText,HL::cardWidth-16);
+        if(!subtitle.empty())
+            printFit(x+8,top+HL::cardHeight-28,subtitle,fontCinemaMeta?fontCinemaMeta:fontSmall,0xFFD8E4F2u,HL::cardWidth-16);
     }
     void cinematicHeading(int y,const std::string &heading)
     {
@@ -1847,13 +1849,6 @@ private:
         const auto found=homeRecordingTitles.find(rec.fileName);
         return found==homeRecordingTitles.end()?std::string{}:suiteosd::RecordingEpisodeLabel(found->second);
     }
-    static std::string homeRecordingDate(time_t t)
-    {
-        if(!t)return {};
-        tm value{};char buf[32]={};
-        if(localtime_r(&t,&value))strftime(buf,sizeof(buf),"%d.%m. %H:%M",&value);
-        return buf;
-    }
     const suiteosd::Artwork &recordingPoster(const Recording &rec,int w=184,int h=240)
     {
         const std::string key="rec:"+rec.fileName+":"+std::to_string(w)+":"+std::to_string(h);
@@ -1889,7 +1884,7 @@ private:
             const auto &poster=recordingPoster(item,HL::posterW,HL::posterH);
             portraitCard(x,top,!nav.sideFocused&&nav.section==suiteosd::Navigation::kNew&&
                          nav.card[suiteosd::Navigation::kNew]==first+col,&poster);
-            portraitTitle(x,top,homeRecordingTitle(item,item.baseName),homeRecordingDate(item.start),homeRecordingEpisode(item));
+            portraitTitle(x,top,homeRecordingTitle(item,item.baseName),{},homeRecordingEpisode(item));
         }
     }
 
@@ -4240,15 +4235,17 @@ private:
         return it==publicHomePosters.end()?nullptr:&it->second;
     }
     void scheduleVisibleHomePoster(){
-        if(homePosterJob.valid()||searchActive||photosActive||settingsActive||recordingsActive||
+        if(searchActive||photosActive||settingsActive||recordingsActive||
            timelineActive||recordingDetails||homeProgrammeDetails)return;
+        while(homePosterJobs.size()<suiteosd::kHomePosterWorkers){
         const suiteosd::CoreSearchRecording *candidate=nullptr,*stale=nullptr;
         auto scan=[&](const HomeRail &rail,int first){
             if(!rail.status.ok||candidate)return;
             for(int i=first;i<first+HL::visibleColumns(nav.sideFocused)&&i<int(rail.page.cards.size());++i){
                 const auto &card=rail.page.cards[i];
                 if(card.kind!=suiteosd::CoreHomeCard::Kind::Recording||
-                   card.recording.id.rfind("rec_",0)!=0)continue;
+                   card.recording.id.rfind("rec_",0)!=0||
+                   homePosterJobs.count(homePosterKey(card.recording)))continue;
                 const auto *cached=publicHomePoster(card.recording);
                 if(!cached){candidate=&card.recording;return;}
                 if(!stale&&cached->revision!=homePosterRevision)stale=&card.recording;
@@ -4261,10 +4258,10 @@ private:
                 auto it=homeRails.find(section);
                 if(it!=homeRails.end())scan(it->second,nav.firstCard[section]);
             }
-            // Visible misses first, then refresh visible cards, then prepare
-            // the immediately adjacent rail; scrolling itself is cache-only.
-            if(!candidate)candidate=stale;
-            if(!candidate)for(int section:{first+HL::rows,first-1}){
+            // Prioritize never-loaded posters over refreshing still-visible
+            // cached pixels. Adjacent rails are only considered after visible
+            // misses, and one slot remains free when only prefetching.
+            if(!candidate&&homePosterJobs.size()<suiteosd::kHomePosterWorkers-1)for(int section:{first+HL::rows,first-1}){
                 auto it=homeRails.find(section);
                 if(it!=homeRails.end())scan(it->second,nav.firstCard[section]);
                 if(candidate)break;
@@ -4282,7 +4279,7 @@ private:
         const int w=X(HL::posterW),h=Y(HL::posterH);
         std::vector<std::string> names;
         if(row.backendId=="default")for(const auto &rec:data.recordings)names.push_back(rec.fileName);
-        homePosterJob=std::async(std::launch::async,[row,origin,profile,generation,revision,w,h,knownAsset,names=std::move(names)]{
+        homePosterJobs.emplace(homePosterKey(row),std::async(std::launch::async,[row,origin,profile,generation,revision,w,h,knownAsset,names=std::move(names)]{
             HomePosterRead result;result.key=homePosterKey(row);result.generation=generation;result.revision=revision;
             suiteosd::CoreAdminClient client(origin);suiteosd::DeviceCredential saved;
             if(!suiteosd::loadDeviceProfile(profile,origin,saved)||!client.setDeviceCredential(saved))return result;
@@ -4297,11 +4294,21 @@ private:
                 result.fetched=std::chrono::steady_clock::now();
             }
             return result;
-        });
+        }));
+        }
     }
-    std::string finishHomePoster(){
-        if(!homePosterJob.valid()||homePosterJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return {};
-        auto result=homePosterJob.get();
+    std::vector<std::string> finishHomePosters(){
+        std::vector<std::string> changed;
+        for(auto it=homePosterJobs.begin();it!=homePosterJobs.end();){
+            if(it->second.wait_for(std::chrono::seconds(0))!=std::future_status::ready){++it;continue;}
+            auto result=it->second.get();
+            it=homePosterJobs.erase(it);
+            auto key=applyHomePoster(std::move(result));
+            if(!key.empty())changed.push_back(std::move(key));
+        }
+        return changed;
+    }
+    std::string applyHomePoster(HomePosterRead result){
         if(result.generation!=homePosterGeneration)return {};
         const auto key=result.key;
         auto old=publicHomePosters.find(key);
@@ -4370,7 +4377,7 @@ private:
                 const auto *poster=loaded&&loaded->poster.valid()?&loaded->poster:
                     native?&recordingPoster(*local,HL::posterW,HL::posterH):nullptr;
                 portraitCard(x,top,focus&&index==selected,poster);
-                const std::string subtitle=card.completed?"Angesehen":card.position>=0?playbackClock(card.position):native?homeRecordingDate(local->start):card.subtitle;
+                const std::string subtitle=card.completed?"Angesehen":card.position>=0?playbackClock(card.position):std::string{};
                 const std::string title=loaded&&!loaded->detail.title.empty()?loaded->detail.title:
                     native?homeRecordingTitle(*local,card.title):card.title;
                 portraitTitle(x,top,title,subtitle,loaded&&!loaded->detail.subtitle.empty()?loaded->detail.subtitle:
@@ -4774,7 +4781,7 @@ public:
     ~cSuiteHome() override
     {
         homeEventStop.store(true);
-        if(homePosterJob.valid())homePosterJob.wait();
+        for(auto &entry:homePosterJobs)if(entry.second.valid())entry.second.wait();
         if(homeEventJob.valid())homeEventJob.wait();
         if(homeProgressJob.valid())homeProgressJob.wait();
         restoreLivePreview();
@@ -4847,7 +4854,7 @@ public:
         }
         if(homeDetailPending&&base!=kNone){homeDetailPending=false;invalidateSearchRead();notice.clear();}
         const bool homeChanged=finishHomeRead();
-        const auto posterChanged=finishHomePoster();
+        const auto posterChanged=finishHomePosters();
         const bool searchChanged=finishSearchRead();
         const bool homeDashboard=osd&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails;
         if(homeChanged&&homeDashboard)draw(); // also when a remote key arrives with the readback
@@ -4862,7 +4869,7 @@ public:
                     const auto &cards=it->second.page.cards;
                     const int start=nav.firstCard[section];
                     for(int i=start;i<start+HL::visibleColumns(nav.sideFocused)&&i<int(cards.size());++i)
-                        if(homePosterKey(cards[i].recording)==posterChanged){
+                        if(std::find(posterChanged.begin(),posterChanged.end(),homePosterKey(cards[i].recording))!=posterChanged.end()){
                             redrawHomeRail(section,first,true);changed=true;break;
                         }
                 }
