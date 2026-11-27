@@ -4121,8 +4121,9 @@ private:
     }
     // Queue every visible rail immediately; a pending recommendation
     // dependency must not starve unrelated rows further down.
-    void loadVisibleHomeRails(bool redraw=false){
-        if(!homeCollections.empty())return;
+    bool loadVisibleHomeRails(bool redraw=false){
+        if(!homeCollections.empty())return false;
+        bool changed=false;
         const int first=nav.firstVisibleSection;
         for(int section=std::max(3,first);section<first+HL::rows;++section){
             const auto it=homeRails.find(section);
@@ -4132,8 +4133,10 @@ private:
             if(redraw&&loaded!=homeRails.end()&&loaded->second.attempted){
                 if(section==nav.section)nav.KeepVisible(HL::columns,count(section));
                 redrawHomeRail(section,first,true);
+                changed=true;
             }
         }
+        return changed;
     }
     void loadHomeCollection(HomeCollection &collection) {
         collection.rail.page={};collection.rail.status={};
@@ -4595,6 +4598,7 @@ private:
             if(nav.card[0]==1)return osEnd;
             const auto *p=heroProgramme(nav.card[0]);
             if(p){
+                restoreLivePreview();
                 bool switched=false;
                 {LOCK_CHANNELS_READ; switched=Channels&&Channels->SwitchTo(p->channelNumber);}
                 if(switched){data=readVdrSnapshot();nav.card[0]=1;break;}
@@ -4827,9 +4831,8 @@ public:
                     recordingGenres.clear();
                     invalidatePublicHomePosters();
                 }
-                loadVisibleHomeRails(true);
+                if(loadVisibleHomeRails(true)){drawHomeFocusPanel();osd->Flush();}
                 scheduleVisibleHomePoster();
-                osd->Flush();
             }
             if(osd&&focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
                 drawHomeFocusPanel();osd->Flush();

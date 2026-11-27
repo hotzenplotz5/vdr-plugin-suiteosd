@@ -10,6 +10,7 @@
 #include <cairo.h>
 #include <librsvg/rsvg.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <webp/decode.h>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -268,9 +269,30 @@ Artwork LoadArtworkBytes(const std::string &bytes,int maxWidth,int maxHeight)
     if(bytes.size()<12||bytes.size()>kMaxDecodeBytes||maxWidth<1||maxHeight<1||
        maxWidth>kMaxThumbnailSide||maxHeight>kMaxThumbnailSide)return {};
     const auto *p=reinterpret_cast<const unsigned char*>(bytes.data());
+    if(bytes.compare(0,4,"RIFF")==0&&bytes.compare(8,4,"WEBP")==0){
+        // WebP is an actual Public-v1 response type. Do not depend on an
+        // optional, distribution-specific GdkPixbuf WebP loader.
+        WebPDecoderConfig config;
+        if(!WebPInitDecoderConfig(&config)||WebPGetFeatures(p,bytes.size(),&config.input)!=VP8_STATUS_OK||
+           config.input.width<=0||config.input.height<=0)return {};
+        const double scale=std::min({1.0,double(maxWidth)/config.input.width,double(maxHeight)/config.input.height});
+        const int w=std::max(1,int(config.input.width*scale)),h=std::max(1,int(config.input.height*scale));
+        config.options.use_scaling=1;
+        config.options.scaled_width=w;config.options.scaled_height=h;
+        config.output.colorspace=MODE_RGBA;
+        std::vector<unsigned char> rgba(size_t(w)*h*4);
+        config.output.is_external_memory=1;
+        config.output.u.RGBA.rgba=rgba.data();
+        config.output.u.RGBA.stride=w*4;
+        config.output.u.RGBA.size=rgba.size();
+        const auto status=WebPDecode(p,bytes.size(),&config);
+        WebPFreeDecBuffer(&config.output);
+        if(status!=VP8_STATUS_OK)return {};
+        RawImage raw{w,h,4,rgba.data()};
+        return ScaleToFit(raw,w,h);
+    }
     const char *type=png_sig_cmp(p,0,8)==0?"png":
-        p[0]==0xff&&p[1]==0xd8?"jpeg":
-        bytes.compare(0,4,"RIFF")==0&&bytes.compare(8,4,"WEBP")==0?"webp":nullptr;
+        p[0]==0xff&&p[1]==0xd8?"jpeg":nullptr;
     if(!type)return {};
     GError *error=nullptr;
     auto *loader=gdk_pixbuf_loader_new_with_type(type,&error);

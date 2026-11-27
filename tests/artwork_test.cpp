@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <jpeglib.h>
 #include <png.h>
+#include <webp/encode.h>
 #include <string>
 #include <fstream>
 #include <iterator>
@@ -53,6 +54,14 @@ int main()
     assert(pngBytes.valid()&&pngBytes.argb==png.argb);
     assert(suiteosd::LoadArtworkBytes(readBytes(pngPath),1,1).width==1);
     assert(!suiteosd::LoadArtworkBytes("invalid image bytes",2,2).valid());
+    uint8_t *webp=nullptr;
+    const size_t webpSize=WebPEncodeLosslessRGBA(rgba,2,2,8,&webp);
+    assert(webpSize>0&&webp);
+    const std::string webpBytes(reinterpret_cast<const char*>(webp),webpSize);
+    WebPFree(webp);
+    auto decodedWebp=suiteosd::LoadArtworkBytes(webpBytes,2,2);
+    assert(decodedWebp.valid()&&decodedWebp.argb==png.argb);
+    assert(suiteosd::LoadArtworkBytes(webpBytes,1,1).valid());
     assert(png.valid() && png.width == 2 && png.height == 2);
     assert(png.argb[0] == 0xFFFF0000u);
     assert(png.argb[3] == 0x80FFFFFFu);

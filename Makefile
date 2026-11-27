@@ -13,8 +13,8 @@ OBJECTS = suiteosd.o suite_skin.o suite_menu.o artwork_decode.o core_admin_clien
 # named "vdr". Example: VDR_SOURCE_PARENT=upstream with upstream/vdr/plugin.h.
 SOURCE_FLAGS = $(if $(VDR_SOURCE_PARENT),-I$(VDR_SOURCE_PARENT))
 
-CXXFLAGS += -std=c++17 -fPIC $(SOURCE_FLAGS) $(VDR_CXXFLAGS) $(VDR_CFLAGS) $(shell $(PKG_CONFIG) --cflags libpng librsvg-2.0 libcurl json-c)
-ARTWORK_LIBS = $(shell $(PKG_CONFIG) --libs libpng librsvg-2.0) -ljpeg
+CXXFLAGS += -std=c++17 -fPIC $(SOURCE_FLAGS) $(VDR_CXXFLAGS) $(VDR_CFLAGS) $(shell $(PKG_CONFIG) --cflags libpng librsvg-2.0 gdk-pixbuf-2.0 libwebp libcurl json-c)
+ARTWORK_LIBS = $(shell $(PKG_CONFIG) --libs libpng librsvg-2.0 gdk-pixbuf-2.0 libwebp) -ljpeg
 CORE_LIBS = $(shell $(PKG_CONFIG) --libs libcurl json-c libcrypto)
 DEFINES += -DPLUGIN_NAME_I18N='"$(PLUGIN)"'
 
@@ -40,7 +40,7 @@ artwork_decode.o: artwork_decode.c artwork_decode.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 check-artwork:
-	$(CXX) -std=c++17 -Wall -Wextra -pedantic $(shell $(PKG_CONFIG) --cflags libpng librsvg-2.0) -o artwork-test tests/artwork_test.cpp artwork_decode.c $(ARTWORK_LIBS)
+	$(CXX) -std=c++17 -Wall -Wextra -pedantic $(shell $(PKG_CONFIG) --cflags libpng librsvg-2.0 gdk-pixbuf-2.0 libwebp) -o artwork-test tests/artwork_test.cpp artwork_decode.c $(ARTWORK_LIBS)
 	./artwork-test
 	rm -f artwork-test
 
