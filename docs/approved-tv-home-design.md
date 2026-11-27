@@ -149,3 +149,7 @@ Die Poster werden proportional mittig beschnitten und im Cache mit einem opaken 
 ## Größere Home-Kacheln (26.11.2026)
 
 Auf Maintainer-Wunsch fünf gleich große 2:3-Kacheln je Reihe statt sechs (160 × 240 statt 132 × 198 logische Einheiten); horizontaler Abstand 20 statt 36, bei ausgeklappter Sidebar weiterhin 14. Zwei vollständige Reihen sind gleichzeitig sichtbar; alle weiteren bleiben vertikal per Fernbedienung erreichbar. Die native Live-TV-/Fokusfläche und die Bildproportionen bleiben unverändert. Der echte TV-Test steht aus.
+
+## Drei Reihen mit weichem Scrollen (27.11.2026)
+
+Neuere Maintainer-Freigabe ersetzt die Zwei-Reihen-Geometrie: fünf gleich große 2:3-Poster (140 × 210 logische Einheiten) in genau drei vollständig sichtbaren Rails. Der vertikale Ausschnitt reicht von 82 bis 850 der 900 logischen OSD-Einheiten und skaliert mit dem realen OSD. Erst beim Verlassen des sichtbaren Ausschnitts wird eine weitere Reihe mit einer 240-ms-Smoothstep-Animation über einen nativen Pixmap-DrawPort eingefahren. Kopfzeile, Sidebar, Live-TV und Detailpanel bleiben stehen. Bei fehlender Pixmap-Unterstützung bleibt die direkte Navigation verfügbar. Daten, Reihenfolge, horizontales Paging und Aktionen bleiben unverändert. Hardware-/Frameratenabnahme offen.

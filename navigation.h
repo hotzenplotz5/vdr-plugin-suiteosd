@@ -24,7 +24,7 @@ struct Navigation {
     int section = 0;
     std::array<int, kSections> card = {{0, 0, 0, 0}};
     std::array<int, kSections> firstCard = {{0, 0, 0, 0}};
-    int firstVisibleSection = 1; // hero is fixed at the top initially
+    int firstVisibleSection = 1; // first fully visible rail; section zero is the fixed live panel
 
     void KeepVisible(int visibleCards, int sectionCount)
     {
@@ -60,7 +60,7 @@ struct Navigation {
                 default: return Activation::Module; // VDR menus or installed plugins
                 }
                 KeepVisible(visibleCards, sectionCount);
-                firstVisibleSection = HomeLayout::firstRow(section,kSections);
+                firstVisibleSection = HomeLayout::firstRow(section,kSections,firstVisibleSection);
             }
             return Activation::None;
         }
@@ -86,7 +86,7 @@ struct Navigation {
         }
         KeepVisible(visibleCards, sectionCount);
         // The visible rails stay together; subsequent rails scroll vertically. Section zero focuses the separate live panel.
-        firstVisibleSection = HomeLayout::firstRow(section,kSections);
+        firstVisibleSection = HomeLayout::firstRow(section,kSections,firstVisibleSection);
         return Activation::None;
     }
 };

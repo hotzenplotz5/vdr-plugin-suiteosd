@@ -1,3 +1,10 @@
+vdr-plugin-suiteosd (0.9.18~dev) unstable; urgency=medium
+
+  * Fit three full Home rails with five proportional portraits each.
+  * Animate vertical rail transitions inside the fixed native OSD viewport.
+
+ -- VDR-Suite contributors <noreply@github.com>  Fri, 27 Nov 2026 02:27:00 +0100
+
 vdr-plugin-suiteosd (0.9.17~dev) unstable; urgency=medium
 
   * Enlarge Home portraits to five cards per row with tighter horizontal spacing.

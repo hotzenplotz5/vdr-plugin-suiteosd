@@ -56,7 +56,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.17-dev";
+static const char *VERSION = "0.9.18-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -599,6 +599,9 @@ private:
     bool scaledForHome = false;
     std::chrono::steady_clock::time_point nextPreviewAttempt{};
     using HL = suiteosd::HomeLayout;
+    // Only rail drawing is redirected while preparing a clipped animation strip.
+    cPixmap *railDrawPixmap=nullptr;
+    int railDrawX=0,railDrawY=0;
     std::array<suiteosd::Artwork,2> cinematicBackgrounds;
     std::map<std::array<int,7>,suiteosd::CinemaPatch> cinematicFrames;
     std::map<std::pair<std::array<int,7>,std::uintptr_t>,suiteosd::CinemaPatch> cinematicComposites;
@@ -634,16 +637,22 @@ private:
         int y0 = std::max(0, Y(top));
         int x1 = std::min(width - 1, X(right));
         int y1 = std::min(height - 1, Y(bottom));
-        if (osd && x1 >= x0 && y1 >= y0)
-            osd->DrawRectangle(x0, y0, x1, y1, color);
+        if (osd && x1 >= x0 && y1 >= y0) {
+            if(railDrawPixmap)
+                railDrawPixmap->DrawRectangle(cRect(x0+railDrawX,y0+railDrawY,x1-x0+1,y1-y0+1),color);
+            else osd->DrawRectangle(x0, y0, x1, y1, color);
+        }
     }
 
     void print(int x, int y, const std::string &s, const cFont *f,
                tColor fg = kText, int maxWidth = 0)
     {
-        if (osd && f && !s.empty() && y >= 0 && y < 885)
-            osd->DrawText(X(x), Y(y), s.c_str(), fg, clrTransparent, f,
-                          maxWidth > 0 ? X(maxWidth) : 0);
+        if (osd && f && !s.empty() && y >= 0 && y < 885) {
+            const int w=maxWidth>0?X(maxWidth):0;
+            if(railDrawPixmap)
+                railDrawPixmap->DrawText(cPoint(X(x)+railDrawX,Y(y)+railDrawY),s.c_str(),fg,clrTransparent,f,w);
+            else osd->DrawText(X(x),Y(y),s.c_str(),fg,clrTransparent,f,w);
+        }
     }
 
     void panel(int x, int y, int w, int h, bool focused = false, tColor bg = kCard)
@@ -1500,7 +1509,9 @@ private:
     {
         if(!art.valid())return;
         cImage img(cSize(art.width,art.height),art.argb.data());
-        osd->DrawImage(cPoint(x,y),img);
+        if(railDrawPixmap)
+            railDrawPixmap->DrawImage(cPoint(x+railDrawX,y+railDrawY),img);
+        else osd->DrawImage(cPoint(x,y),img);
     }
     void paintHomeBackground()
     {
@@ -4331,6 +4342,65 @@ private:
         }
         drawHomeRail(section,HL::headingY(row));
     }
+    // Render four adjacent rails once, then move their native draw port inside
+    // the fixed three-rail viewport. No image decoding or API work per frame.
+    bool animateHomeRows(int previousFirst,int first)
+    {
+        if(!osd||std::abs(first-previousFirst)!=1)return false;
+        const int x0=X(homeLeft()-12),x1=X(HL::right-9);
+        const int y0=Y(HL::top),y1=Y(HL::viewportBottom);
+        const int step=Y(HL::headingY(1))-y0;
+        const int w=x1-x0,h=y1-y0;
+        if(w<=0||h<=0||step<=0)return false;
+        cPixmap *strip=osd->CreatePixmap(1,cRect(x0,y0,w,h),cRect(0,0,w,h+step+2));
+        if(!strip)return false; // providers without a large pixmap keep normal navigation
+        strip->Fill(kBackground);
+        const int start=std::min(previousFirst,first);
+        const auto &bg=cinematicBackground();
+        for(int i=0;i<=HL::rows;++i){
+            // Use a real on-screen row for composition, including the entering
+            // rail; translate only its finished drawing into the strip.
+            const int row=std::clamp(start+i-first,0,HL::rows-1);
+            const int sourceY=Y(HL::headingY(row));
+            const int destY=Y(HL::headingY(i))-y0;
+            const int sourceH=Y(HL::headingY(row+1))-sourceY;
+            suiteosd::Artwork patch{w,sourceH,std::vector<uint32_t>(size_t(w)*sourceH)};
+            for(int y=0;y<sourceH;++y)
+                std::copy_n(bg.argb.begin()+size_t(sourceY+y)*width+x0,w,
+                            patch.argb.begin()+size_t(y)*w);
+            railDrawPixmap=strip;
+            railDrawX=-x0;
+            railDrawY=destY-sourceY;
+            drawCinemaImage(patch,x0,sourceY);
+            drawHomeRail(start+i,HL::headingY(row));
+            railDrawPixmap=nullptr;
+        }
+        const int from=(previousFirst-start)*step,to=(first-start)*step;
+        strip->SetDrawPortPoint(cPoint(0,-from));
+        osd->Flush();
+        // VDR's normal idle key cadence is not a video frame clock. Keep
+        // this short transition on the existing OSD owner, using elapsed
+        // time so a slow provider skips frames rather than extending it.
+        const auto began=std::chrono::steady_clock::now();
+        for(;;){
+            const auto now=std::chrono::steady_clock::now();
+            const int elapsed=int(std::chrono::duration_cast<std::chrono::milliseconds>(now-began).count());
+            if(elapsed>=HL::scrollDurationMs)break;
+            strip->SetDrawPortPoint(cPoint(0,-HL::scrollOffset(from,to,elapsed)));
+            osd->Flush();
+            std::this_thread::sleep_until(now+std::chrono::milliseconds(24));
+        }
+        strip->SetDrawPortPoint(cPoint(0,-to));
+        osd->Flush();
+        // Restore the normal static rendering at the exact destination before
+        // removing the temporary layer. Subsequent focus redraws stay local.
+        for(int row=0;row<HL::rows;++row)
+            redrawHomeRail(first+row,first,true);
+        osd->DestroyPixmap(strip);
+        drawHomeFocusPanel();
+        osd->Flush();
+        return true;
+    }
     void drawHomeNotice()
     {
         // No permanent instructional footer: keys and actions are unchanged.
@@ -4383,7 +4453,8 @@ private:
             if(!recordingDetails)drawHomeSidePanel();
             drawRecordingDetails();osd->Flush();return;
         }
-        const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
+        nav.firstVisibleSection=HL::firstRow(nav.section,suiteosd::Navigation::kSections,nav.firstVisibleSection);
+        const int first=nav.firstVisibleSection;
         for(int row=0;row<HL::rows;++row)
             drawHomeRail(first+row,HL::headingY(row));
         drawHomeSidePanel();
@@ -4601,7 +4672,7 @@ public:
                     for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
                     recordingGenres.clear();
                 }
-                const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
+                const int first=nav.firstVisibleSection;
                 for(int row=first;row<first+HL::rows;++row){
                     if(row>=3&&(homeRails.find(row)==homeRails.end()||!homeRails.at(row).attempted)){
                         loadHomeRail(row);
@@ -4691,9 +4762,12 @@ public:
             previous.sideIndex!=nav.sideIndex||previous.card!=nav.card||previous.firstCard!=nav.firstCard;
         if(direction==suiteosd::Direction::Select||hadNotice){draw();return osContinue;}
         if(!changed&&!railLoaded)return osContinue;
-        const int first=HL::firstRow(nav.section,suiteosd::Navigation::kSections);
+        const int first=nav.firstVisibleSection;
+        if(osd&&!previous.sideFocused&&!nav.sideFocused&&first!=previous.firstVisibleSection&&
+            (direction==suiteosd::Direction::Up||direction==suiteosd::Direction::Down)&&
+            animateHomeRows(previous.firstVisibleSection,first))return osContinue;
         if(osd&&!previous.sideFocused&&!nav.sideFocused&&
-            first==HL::firstRow(previous.section,suiteosd::Navigation::kSections)){
+            first==previous.firstVisibleSection){
             redrawHomeRail(previous.section,first,previous.firstCard[previous.section]!=nav.firstCard[previous.section]||
                           (railLoaded&&previous.section==target));
             if(nav.section!=previous.section)
