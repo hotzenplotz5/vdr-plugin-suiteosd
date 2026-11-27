@@ -3745,6 +3745,15 @@ private:
         recordingDetails = false;
         photosActive = true;
         photoInfoVisible = false;
+        // The Home/recordings preview leaves a transparent video window in
+        // the reused OSD. Restore the scale and cover the ENTIRE physical
+        // output immediately, before image_next scans source directories.
+        // Otherwise the live TV picture remains visible during a slow browse.
+        restoreLivePreview();
+        if (osd) {
+            osd->DrawRectangle(0, 0, width - 1, height - 1, kBackground);
+            flushHomeOsd();
+        }
         photoGallery.SetView(gPhotoViewMode ? suiteosd::PhotoGallery::View::Carousel :
                                              suiteosd::PhotoGallery::View::Grid);
         nav.sideIndex = 8;
@@ -4135,7 +4144,10 @@ private:
 
     void drawPhotoGallery()
     {
-        fill(0, 0, 1599, 899, kBackground);
+        // Do not inherit the transparent preview cutout from Home. A fresh
+        // opaque full-pixel background is required on EVERY gallery repaint,
+        // including carousel animation and navigation after video resizing.
+        osd->DrawRectangle(0, 0, width - 1, height - 1, kBackground);
         fill(0, 0, 1599, 76, kSurface);
         print(32, 23, "VDR Suite", fontLarge, kText, 226);
         print(284, 24, "Bilder", fontLarge, kMuted, 1000);
