@@ -1,9 +1,18 @@
 #include "../navigation.h"
+#include "../home_cache.h"
 #include <cassert>
 
 int main()
 {
     using namespace suiteosd;
+    HomeLru<int,int> cache;
+    cache.emplace(1,10);cache.emplace(2,20);cache.emplace(3,30);
+    const auto *retained=&cache.find(1)->second;
+    cache.evictOldest();assert(cache.size()==2&&cache.find(2)==cache.end());
+    assert(&cache.find(1)->second==retained&&*retained==10);
+    cache.insertOrAssign(1,11);assert(&cache.find(1)->second==retained&&*retained==11);
+    cache.eraseIf([](int k,int){return k==3;});assert(cache.size()==1);
+    cache.clear();assert(cache.size()==0);
     for(auto size:{PreviewRect{0,0,1280,720},PreviewRect{0,0,1920,1080},PreviewRect{0,0,3840,2160}}){
         const auto full=FullscreenOsdRect(size.w,size.h,{96,54,1728,972});
         assert(full.x==0&&full.y==0&&full.w==size.w&&full.h==size.h);

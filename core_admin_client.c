@@ -1080,8 +1080,9 @@ CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row
     next.startTime=stringOf(root.get(),"recordedAt");
     detail=std::move(next);return last_;
 }
-CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &row,std::string &bytes) {
-    bytes.clear();
+CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &row,std::string &bytes,
+    std::string *assetId,const std::string &knownAsset) {
+    bytes.clear();if(assetId)assetId->clear();
     if(!safeId(row.id)||row.id.rfind("rec_",0)!=0||!safeId(row.backendId))
         return (last_={false,0,"Ungültige Aufnahme-ID"});
     const auto base="/api/v1/recordings/"+row.id+"/artwork";
@@ -1102,7 +1103,8 @@ CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &ro
             rank=priority;id=candidate;
         }
     }
-    if(id.empty())return (last_={true,list.http,""});
+    if(assetId)*assetId=id;
+    if(id.empty()||id==knownAsset)return (last_={true,list.http,""});
     // Construct only the documented same-origin opaque-ID route. Never
     // follow a server-provided arbitrary URL or attach credentials to it.
     auto image=request("GET",base+"/"+id+scope,"","","","","",false,true);

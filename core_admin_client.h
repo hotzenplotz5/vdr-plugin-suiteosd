@@ -162,7 +162,8 @@ public:
                                   int limit, int offset, CoreGlobalSearch &results);
     CoreStatus publicRecordingDetail(const CoreSearchRecording &row, CoreSearchEvent &detail,
                                      bool nativeMatch = false);
-    CoreStatus publicRecordingArtwork(const CoreSearchRecording &row, std::string &bytes);
+    CoreStatus publicRecordingArtwork(const CoreSearchRecording &row, std::string &bytes,
+        std::string *assetId=nullptr,const std::string &knownAsset={});
     CoreStatus publicHomePage(const std::string &backend, HomeKind kind, const std::string &key,
                         int limit, int offset, int year, CoreHomePage &page);
     CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,

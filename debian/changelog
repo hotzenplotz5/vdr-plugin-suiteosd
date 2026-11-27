@@ -2,6 +2,8 @@ vdr-plugin-suiteosd (0.9.20~dev) unstable; urgency=medium
 
   * Render the Suite dashboard over the full output-device OSD area.
   * Keep preview scaling relative to the actual dashboard origin.
+  * Retain decoded Home posters across SSE resync and evict cache entries individually.
+  * Reuse current artwork references and prepare adjacent Home rails.
 
  -- VDR-Suite contributors <noreply@github.com>  Fri, 27 Nov 2026 03:07:00 +0100
 

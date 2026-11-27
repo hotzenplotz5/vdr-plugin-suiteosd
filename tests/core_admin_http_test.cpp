@@ -310,7 +310,7 @@ int main() {
     len=sizeof(bindTo);
     assert(getsockname(pairFd,reinterpret_cast<sockaddr*>(&bindTo),&len)==0);
     std::thread pairMock([&]{
-        for(int i=0;i<19;++i){
+        for(int i=0;i<20;++i){
             const int fd=accept(pairFd,nullptr,nullptr);assert(fd>=0);
             const auto req=readRequest(fd);
             assert(!req.headers.count("cookie")&&!req.headers.count("x-csrf-token"));
@@ -363,6 +363,9 @@ int main() {
                     assert(req.headers.at("accept")=="image/png, image/jpeg, image/webp");
                     answer(fd,std::string("PNG\0test",8));
                 }else if(i==17){
+                    assert(req.path=="/api/v1/recordings/rec_0123456789abcdef0123456789abcdef/artwork?backendId=default");
+                    answer(fd,R"({"recordingId":"rec_0123456789abcdef0123456789abcdef","backendId":"default","items":[{"artworkId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","kind":"poster"}]})");
+                }else if(i==18){
                     assert(req.path=="/api/v1/recordings/rec_0123456789abcdef0123456789abcdef/artwork?backendId=default");
                     answer(fd,R"({"code":"permission_denied"})","",403);
                 }else{
@@ -421,7 +424,11 @@ int main() {
     assert(publicResults.status=="partial"&&publicResults.people.size()==1&&publicResults.people[0].epgCount==0);
     suiteosd::CoreSearchRecording imageRow;imageRow.id="rec_0123456789abcdef0123456789abcdef";imageRow.backendId="default";
     std::string imageBytes;
-    assert(reopened.publicRecordingArtwork(imageRow,imageBytes).ok&&imageBytes==std::string("PNG\0test",8));
+    std::string assetId;
+    assert(reopened.publicRecordingArtwork(imageRow,imageBytes,&assetId).ok&&imageBytes==std::string("PNG\0test",8));
+    assert(assetId=="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    const auto known=assetId;
+    assert(reopened.publicRecordingArtwork(imageRow,imageBytes,&assetId,known).ok&&imageBytes.empty()&&assetId==known);
     assert(reopened.publicRecordingArtwork(imageRow,imageBytes).http==403&&imageBytes.empty());
     std::atomic<bool> stop{false},changed{false};
     reopened.recordingEvents("default",stop,changed);
