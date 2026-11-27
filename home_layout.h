@@ -4,6 +4,14 @@
 #include <cstdint>
 namespace suiteosd {
 struct PreviewRect { int x,y,w,h; };
+// The Suite dashboard is a full-screen OSD owner, not a normal VDR
+// menu inset. Never change VDR's global menu geometry to achieve this.
+constexpr PreviewRect FullscreenOsdRect(int outputW,int outputH,PreviewRect configured) {
+    return outputW>0&&outputH>0?PreviewRect{0,0,outputW,outputH}:configured;
+}
+constexpr int InclusiveOsdEnd(int logical,int logicalExtent,int pixels) {
+    return logical>=logicalExtent-1?pixels-1:logical*pixels/logicalExtent;
+}
 // Fit an even-pixel video rectangle strictly inside the reserved screen slot.
 // NV12/P010 providers can align down; requesting even coordinates avoids
 // rejecting a valid preview merely because the OSD origin is odd.

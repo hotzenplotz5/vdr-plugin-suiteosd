@@ -56,7 +56,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.19-dev";
+static const char *VERSION = "0.9.20-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -633,6 +633,7 @@ private:
     std::string homeTimerNotice;
     int width = 1600;
     int height = 900;
+    int osdOriginX=0,osdOriginY=0;
 
     int X(int px) const { return px * width / 1600; }
     int Y(int px) const { return px * height / 900; }
@@ -641,8 +642,8 @@ private:
     {
         int x0 = std::max(0, X(left));
         int y0 = std::max(0, Y(top));
-        int x1 = std::min(width - 1, X(right));
-        int y1 = std::min(height - 1, Y(bottom));
+        int x1 = std::min(width - 1, suiteosd::InclusiveOsdEnd(right,1600,width));
+        int y1 = std::min(height - 1, suiteosd::InclusiveOsdEnd(bottom,900,height));
         if (osd && x1 >= x0 && y1 >= y0) {
             if(railDrawPixmap)
                 railDrawPixmap->DrawRectangle(cRect(x0+railDrawX,y0+railDrawY,x1-x0+1,y1-y0+1),color);
@@ -1752,8 +1753,8 @@ private:
         // real recording replay, not the transfer player used for live TV.
         if (!device || (device->Replaying() && !device->Transferring()))
             return;
-        const int left = cOsd::OsdLeft();
-        const int top = cOsd::OsdTop();
+        const int left = osdOriginX;
+        const int top = osdOriginY;
         // Reuse the exact rectangle verified by the user in recordings.
         // 4:2:0 output providers may round odd screen coordinates down.
         // Align inward before negotiation, so normalization cannot make an
@@ -4705,16 +4706,26 @@ public:
     void Show() override
     {
         data = readVdrSnapshot();
-        width = cOsd::OsdWidth();
-        height = cOsd::OsdHeight();
-        osd = cOsdProvider::NewOsd(cOsd::OsdLeft(), cOsd::OsdTop());
+        int outputW=0,outputH=0;
+        double pixelAspect=1.0;
+        if(auto *device=cDevice::PrimaryDevice())
+            device->GetOsdSize(outputW,outputH,pixelAspect);
+        const auto area=suiteosd::FullscreenOsdRect(outputW,outputH,
+            {cOsd::OsdLeft(),cOsd::OsdTop(),cOsd::OsdWidth(),cOsd::OsdHeight()});
+        width=area.w;height=area.h;osdOriginX=area.x;osdOriginY=area.y;
+        osd = cOsdProvider::NewOsd(osdOriginX,osdOriginY);
         if (!osd)
             return;
         const tArea fullArea = {0, 0, width - 1, height - 1, 32};
         if (osd->SetAreas(&fullArea, 1) != oeOk) {
             esyslog("suiteosd: TrueColor OSD area unavailable; cannot render Home");
+            delete osd;osd=nullptr;
             return;
         }
+        isyslog("suiteosd: dashboard OSD %dx%d at (%d,%d), output %dx%d",
+            width,height,osdOriginX,osdOriginY,outputW,outputH);
+        // Cover the entire output before exposing any intentional video slot.
+        osd->DrawRectangle(0,0,width-1,height-1,kBackground);
         fontTitle = cFont::CreateFont("Sans:Bold", std::max(20, Y(50)));
         fontLarge = cFont::CreateFont("Sans:Bold", std::max(16, Y(29)));
         fontBody = cFont::CreateFont("Sans", std::max(14, Y(23)));

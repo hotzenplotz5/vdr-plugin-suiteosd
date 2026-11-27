@@ -4,6 +4,19 @@
 int main()
 {
     using namespace suiteosd;
+    for(auto size:{PreviewRect{0,0,1280,720},PreviewRect{0,0,1920,1080},PreviewRect{0,0,3840,2160}}){
+        const auto full=FullscreenOsdRect(size.w,size.h,{96,54,1728,972});
+        assert(full.x==0&&full.y==0&&full.w==size.w&&full.h==size.h);
+        assert(InclusiveOsdEnd(1599,1600,full.w)==full.w-1);
+        assert(InclusiveOsdEnd(899,900,full.h)==full.h-1);
+        for(bool expanded:{false,true}){
+            const auto video=AlignPreviewRect(HomeLayout::videoX(expanded)*full.w/1600,HomeLayout::videoY*full.h/900,
+                HomeLayout::videoW*full.w/1600,HomeLayout::videoH*full.h/900);
+            assert(video.x>=0&&video.y>=0&&video.x+video.w<=full.w&&video.y+video.h<=full.h);
+        }
+    }
+    const auto fallback=FullscreenOsdRect(0,0,{96,54,1728,972});
+    assert(fallback.x==96&&fallback.y==54&&fallback.w==1728&&fallback.h==972);
     Navigation n;
     assert(n.section == 0 && !n.sideFocused);
     n.card[0]=0;
