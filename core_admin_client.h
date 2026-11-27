@@ -4,6 +4,7 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#include <tuple>
 
 namespace suiteosd {
 
@@ -85,6 +86,21 @@ struct CoreHomePage {
     int nextOffset = 0;
     bool hasMore = false;
 };
+// Compare the actual displayed Home projection, not the arrival of a new
+// HTTP response. Unchanged readbacks need no rail replacement or redraw.
+inline bool SameHomePage(const CoreHomePage &a,const CoreHomePage &b){
+    if(a.total!=b.total||a.nextOffset!=b.nextOffset||a.hasMore!=b.hasMore||a.cards.size()!=b.cards.size())return false;
+    for(size_t i=0;i<a.cards.size();++i){
+        const auto &x=a.cards[i],&y=b.cards[i];
+        auto projection=[](const CoreHomeCard &c){
+            return std::tie(c.kind,c.key,c.title,c.subtitle,c.posterUrl,c.count,c.position,c.duration,c.completed,
+                c.recording.id,c.recording.backendId,c.recording.nativeId,c.recording.title,c.recording.subtitle,
+                c.recording.startTime,c.recording.artworkUrl);
+        };
+        if(projection(x)!=projection(y))return false;
+    }
+    return true;
+}
 struct DevicePairing {
     std::string origin, requestId, userCode, token, state;
     int pollIntervalSeconds = 5;

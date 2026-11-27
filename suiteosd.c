@@ -4158,9 +4158,10 @@ private:
         for(int section=std::max(3,first);section<first+HL::rows;++section){
             const auto it=homeRails.find(section);
             if(it!=homeRails.end()&&it->second.attempted)continue;
+            const bool needsPlaceholder=it==homeRails.end()||!it->second.status.ok;
             loadHomeRail(section);
             const auto loaded=homeRails.find(section);
-            if(redraw&&loaded!=homeRails.end()&&loaded->second.attempted){
+            if(redraw&&needsPlaceholder&&loaded!=homeRails.end()&&loaded->second.attempted){
                 if(section==nav.section)nav.KeepVisible(HL::columns,count(section));
                 redrawHomeRail(section,first,true);
                 changed=true;
@@ -4185,12 +4186,15 @@ private:
         }else for(auto &collection:homeCollections)if(collection.rail.requestId==result.request.id){
             rail=&collection.rail;selected=&collection.selected;first=&collection.first;break;
         }
+        bool changed=false;
         if(rail){
             rail->loading=false;
             if(!result.status.ok&&result.status.http==0&&result.status.message=="Keine Geräteanmeldung"&&
                 nativeHomePage(result.request.kind,result.request.key,result.request.offset,result.page))
                 result.status={true,0,"Lokaler VDR"};
             if(result.status.ok){
+                changed=!rail->status.ok||rail->stale||!suiteosd::SameHomePage(rail->page,result.page);
+                if(!changed){rail->status=result.status;launchHomeRead();return false;}
                 auto preserve=[&](int index){
                     return index>=0&&index<int(rail->page.cards.size())?rail->page.cards[index].key:std::string{};
                 };
@@ -4204,17 +4208,20 @@ private:
                 if(*selected<*first)*first=*selected;
                 if(*selected>=*first+HL::columns)*first=*selected-HL::columns+1;
             }else if(rail->status.ok&&result.status.http!=401&&result.status.http!=403){
-                rail->stale=true;
+                changed=!rail->stale;rail->stale=true;
             }else{
-                rail->page={};rail->status=result.status;rail->stale=false;*selected=*first=0;
+                changed=true;rail->page={};rail->status=result.status;rail->stale=false;*selected=*first=0;
             }
-            if(result.request.section==suiteosd::Navigation::kGenres){
+            if(changed&&result.request.section==suiteosd::Navigation::kGenres){
                 auto it=homeRails.find(suiteosd::Navigation::kRecommendation);
                 if(it!=homeRails.end()&&!it->second.loading)it->second.attempted=false;
             }
         }
         launchHomeRead();
-        return rail!=nullptr;
+        if(!changed||!rail)return false;
+        if(!homeCollections.empty())return rail==&homeCollections.back().rail;
+        return result.request.section>=nav.firstVisibleSection&&
+               result.request.section<nav.firstVisibleSection+HL::rows;
     }
     static std::string playbackClock(std::int64_t seconds) {
         if(seconds<0)return "";

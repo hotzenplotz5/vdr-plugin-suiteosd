@@ -85,6 +85,15 @@ void answer(int fd, const std::string &body, const std::string &extra = "",
 } // namespace
 
 int main() {
+    suiteosd::CoreHomePage page;
+    suiteosd::CoreHomeCard card;
+    card.key="rec_a";card.recording.id=card.key;card.recording.backendId="default";card.title="Film";
+    page.cards.push_back(card);page.total=1;page.nextOffset=1;
+    auto same=page;
+    assert(suiteosd::SameHomePage(page,same));
+    same.cards[0].position=30;assert(!suiteosd::SameHomePage(page,same));
+    same=page;same.cards[0].recording.id="rec_b";assert(!suiteosd::SameHomePage(page,same));
+    same=page;same.cards[0].title="Neu";assert(!suiteosd::SameHomePage(page,same));
     int listenFd = socket(AF_INET, SOCK_STREAM, 0);
     assert(listenFd >= 0);
     sockaddr_in bindTo{};
