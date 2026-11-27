@@ -51,6 +51,8 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <condition_variable>
+#include <mutex>
 #include <deque>
 #include <thread>
 #include <ctime>
@@ -84,6 +86,7 @@ int gLivePreviewEnabled = 1;
 int gPhotoViewMode = 1;
 char gCoreUrl[256] = "http://127.0.0.1:18080";
 char gDeviceName[129] = "VDR Suite OSD";
+std::atomic<unsigned long> gProfileRevision{1};
 
 std::string deviceProfilePath()
 {
@@ -517,6 +520,43 @@ class NativeHomeCache {
     std::future<void> publicPrime;
     std::atomic<bool> publicPrimeCancel{false};
     bool publicPrimeRequested=true;
+    std::atomic<bool> eventStop{false},recordingEvent{false},progressEvent{false};
+    std::future<void> recordingStream,progressStream;
+    std::mutex reconnectMutex;
+    std::condition_variable reconnectWake;
+    unsigned long profileRevision=0,recordingRevision_=0,progressRevision_=0;
+    void stopStreams(){eventStop.store(true);reconnectWake.notify_all();}
+    void observeSuiteEvents(){
+        const auto requested=gProfileRevision.load();
+        if(profileRevision!=requested){
+            stopStreams();
+            auto done=[](auto &f){return !f.valid()||f.wait_for(std::chrono::seconds(0))==std::future_status::ready;};
+            if(!done(recordingStream)||!done(progressStream))return;
+            if(recordingStream.valid())recordingStream.get();
+            if(progressStream.valid())progressStream.get();
+            profileRevision=requested;recordingEvent.store(false);progressEvent.store(false);
+            ++recordingRevision_;++progressRevision_;
+            publicPrimeCancel.store(true);publicPrimeRequested=true;privateArtwork.clear();
+            suiteosd::DeviceCredential credential;
+            const std::string origin=gCoreUrl,path=deviceProfilePath();
+            if(suiteosd::loadDeviceProfile(path,origin,credential)){
+                eventStop.store(false);
+                auto subscribe=[this,origin,credential](const std::string &domain,std::atomic<bool> &changed){
+                    suiteosd::CoreAdminClient client(origin);
+                    if(!client.setDeviceCredential(credential))return;
+                    while(!eventStop.load()){
+                        client.recordingEvents("default",eventStop,changed,domain);
+                        std::unique_lock<std::mutex> lock(reconnectMutex);
+                        reconnectWake.wait_for(lock,std::chrono::seconds(3),[this]{return eventStop.load();});
+                    }
+                };
+                recordingStream=std::async(std::launch::async,[this,subscribe]{subscribe("recordings",recordingEvent);});
+                progressStream=std::async(std::launch::async,[this,subscribe]{subscribe("continueWatching",progressEvent);});
+            }
+        }
+        if(recordingEvent.exchange(false)){++recordingRevision_;publicPrimeRequested=true;}
+        if(progressEvent.exchange(false))++progressRevision_;
+    }
     std::atomic<bool> nativeChanged{true};
     std::atomic<bool> recordingChanged{true};
     cStateKey channelState,scheduleState,recordingState;
@@ -735,8 +775,10 @@ public:
     void closed(){menu=false;dirty.clear();evicted.clear();}
     void cancelPending(){++generation;pending.clear();nativePrimeRequested=true;}
     unsigned long snapshotRevision()const{return snapshotRevision_;}
+    unsigned long recordingRevision()const{return recordingRevision_;}
+    unsigned long progressRevision()const{return progressRevision_;}
     void retireDetail(std::future<RecordingDetailReadback> job){if(job.valid())retiredDetails.push_back(std::move(job));}
-    void recordingMetadataChanged(){publicPrimeRequested=true;}
+
     std::size_t pixelBytes()const{return artwork.totalWeight(bytes)+logos.totalWeight(bytes);}
     const suiteosd::Artwork &programme(const Programme &p,bool visible=true){
         Work w;w.key=programmeKey(p);w.programme=p;w.epg=true;
@@ -796,10 +838,10 @@ public:
                     const auto &row=card.recording;
                     if(row.backendId!="default"||row.id.empty())continue;
                     const PrivateKey key{scope,row.backendId,row.id,w,h};
-                    if(!privateArtwork.get(key).asset.empty())continue;
+                    const auto cached=privateArtwork.get(key);
                     std::string bytes,asset;int maxAge=0;
                     const auto began=Clock::now();
-                    auto status=client.publicRecordingArtwork(row,bytes,&asset,{},&maxAge);
+                    auto status=client.publicRecordingArtwork(row,bytes,&asset,cached.asset,&maxAge);
                     if(publicPrimeCancel.load())return;
                     if(!status.ok||maxAge<=0||bytes.empty()||asset.empty())continue;
                     auto pixels=suiteosd::CoverHomePoster(suiteosd::LoadArtworkBytes(bytes,std::min(1024,w*2),std::min(1024,h*2)),w,h,0);
@@ -819,6 +861,7 @@ public:
             inFlight.clear();
         }
         observeNativeChanges();
+        try{observeSuiteEvents();}catch(const std::exception &){esyslog("suiteosd: SSE subscription preparation failed");}
         if(!menu&&nativePrimeRequested){
             nativePrimeRequested=false;
             int w=0,h=0;double aspect=1.0;
@@ -849,7 +892,9 @@ public:
         }
     }
     void stop(){
-        stopped=true;publicPrimeCancel.store(true);pending.clear();
+        stopped=true;stopStreams();publicPrimeCancel.store(true);pending.clear();
+        if(recordingStream.valid())recordingStream.wait();
+        if(progressStream.valid())progressStream.wait();
         if(job.valid())job.wait();
         if(publicPrime.valid())publicPrime.wait();
         if(backgroundJob.valid())backgroundJob.wait();
@@ -907,9 +952,7 @@ private:
         unsigned long requestId=0;
     };
     std::map<int,HomeRail> homeRails;
-    std::atomic<bool> homeEventStop{false},homeEventChanged{false};
-    std::future<void> homeEventJob,homeProgressJob;
-    std::atomic<bool> homeProgressChanged{false};
+    unsigned long seenRecordingRevision=0,seenProgressRevision=0;
     struct HomeRead {
         unsigned long id=0;
         int section=-1, offset=0, year=0;
@@ -4455,26 +4498,6 @@ private:
     int currentYear() const {
         const auto now=time(nullptr);tm t{};return localtime_r(&now,&t)?1900+t.tm_year:2026;
     }
-    void startHomeEvents(){
-        const std::string origin=gCoreUrl,path=deviceProfilePath();
-        suiteosd::DeviceCredential saved;
-        if(!suiteosd::loadDeviceProfile(path,origin,saved))return;
-        auto subscribe=[this,origin,path](const std::string &domain,std::atomic<bool> &changed){
-            while(!homeEventStop.load()){
-                suiteosd::DeviceCredential credential;
-                suiteosd::CoreAdminClient client(origin);
-                if(!suiteosd::loadDeviceProfile(path,origin,credential)||!client.setDeviceCredential(credential))break;
-                client.recordingEvents("default",homeEventStop,changed,domain);
-                // Reconnect transport only; no snapshot/status polling.
-                for(int i=0;i<30&&!homeEventStop.load();++i)
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
-        };
-        try{
-            homeEventJob=std::async(std::launch::async,[this,subscribe]{subscribe("recordings",homeEventChanged);});
-            homeProgressJob=std::async(std::launch::async,[this,subscribe]{subscribe("continueWatching",homeProgressChanged);});
-        }catch(const std::exception &){}
-    }
     bool nativeHomePage(suiteosd::HomeKind kind,const std::string &key,int offset,
                         suiteosd::CoreHomePage &page) {
         using suiteosd::HomeKind;
@@ -5282,10 +5305,7 @@ public:
         detailCancel->store(true);
         nativeHome.retireDetail(std::move(detailJob));
         nativeHome.closed();
-        homeEventStop.store(true);
         for(auto &entry:homePosterJobs)if(entry.second.valid())entry.second.wait();
-        if(homeEventJob.valid())homeEventJob.wait();
-        if(homeProgressJob.valid())homeProgressJob.wait();
         restoreLivePreview();
         delete osd;
         delete fontTitle;
@@ -5333,7 +5353,8 @@ public:
         fontCinemaMeta = cFont::CreateFont("Sans",std::max(11,Y(16)));
         const auto fontsDone=PerfClock::now();
         nav.section=0;
-        startHomeEvents();
+        seenRecordingRevision=nativeHome.recordingRevision();
+        seenProgressRevision=nativeHome.progressRevision();
         if (!gReplayPersonSearch.empty()) {
             searchFromReplay=true;
             const std::string name=std::exchange(gReplayPersonSearch,"");
@@ -5367,11 +5388,29 @@ public:
             }
         }
         if(homeDetailPending&&base!=kNone){homeDetailPending=false;invalidateSearchRead();notice.clear();}
+        bool metadataChanged=false;
+        if(seenRecordingRevision!=nativeHome.recordingRevision()){
+            seenRecordingRevision=nativeHome.recordingRevision();metadataChanged=true;
+            ++detailGeneration;recordingDetailImages.clear();detailCastCache.clear();recordingMeta.clear();recordingGenres.clear();
+            for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
+            ++homePosterRevision;
+            if(!homeCollections.empty()){
+                auto &collection=homeCollections.back();
+                queueHomeRead(collection.rail,-1,collection.kind,collection.key,collection.offset);
+            }
+        }
+        if(seenProgressRevision!=nativeHome.progressRevision()){
+            seenProgressRevision=nativeHome.progressRevision();
+            for(int section:{suiteosd::Navigation::kContinue,suiteosd::Navigation::kRecent}){
+                auto it=homeRails.find(section);
+                if(it!=homeRails.end()){it->second.attempted=false;it->second.loading=false;it->second.requestId=0;}
+            }
+        }
         const bool homeChanged=finishHomeRead();
         const auto posterChanged=finishHomePosters();
         const bool searchChanged=finishSearchRead();
         const bool detailChanged=finishRecordingDetail();
-        if(detailChanged&&osd&&(recordingDetails||browserDetails||(searchActive&&searchNav.page==suiteosd::SearchPage::Recording)))draw();
+        if((detailChanged||metadataChanged)&&osd&&(recordingDetails||browserDetails||(searchActive&&searchNav.page==suiteosd::SearchPage::Recording)))draw();
         const bool homeDashboard=osd&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails;
         std::vector<std::string> localKeys;std::vector<std::uintptr_t> localEvictions;
         nativeHome.takeChanges(localKeys,localEvictions);
@@ -5468,21 +5507,6 @@ public:
                 if(seenNativeRevision!=nativeHome.snapshotRevision()){
                     refreshHomeSnapshot();
                     draw();
-                }
-                if(homeProgressChanged.exchange(false)){
-                    for(const int section:{suiteosd::Navigation::kContinue,suiteosd::Navigation::kRecent}){
-                        auto it=homeRails.find(section);
-                        if(it!=homeRails.end()){it->second.attempted=false;it->second.loading=false;it->second.requestId=0;}
-                    }
-                }
-                if(homeEventChanged.exchange(false)){
-                    nativeHome.recordingMetadataChanged();
-                    ++detailGeneration;recordingDetailImages.clear();detailRows.clear();
-                    refreshHomeSnapshot();
-                    // Invalidate once on hello/change; keep visible last data until refreshed.
-                    for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
-                    recordingGenres.clear();
-                    ++homePosterRevision; // resync in place; never discard decoded pixels on SSE hello
                 }
                 if(loadVisibleHomeRails(true)){drawHomeFocusPanel();flushHomeOsd();}
                 // Warm the next/previous rail using the existing read queue.
@@ -5680,6 +5704,7 @@ private:
                     out.message=status.ok?"Code im Webfrontend genehmigen – Abschluss automatisch":status.message;
                 }else if(action==PairAction::Complete){
                     status=client.completePairing(out.pairing,out.issued,path);
+                    if(status.ok&&status.http==201)++gProfileRevision;
                     out.message=status.message;
                 }else{
                     suiteosd::DeviceCredential saved;
@@ -5771,7 +5796,10 @@ protected:
         SetupStore("LivePreview", gLivePreviewEnabled);
         gPhotoViewMode = photoView;
         SetupStore("PhotoView", gPhotoViewMode);
-        std::snprintf(gCoreUrl, sizeof(gCoreUrl), "%s", coreUrl);
+        if(std::strcmp(gCoreUrl,coreUrl)!=0){
+            std::snprintf(gCoreUrl, sizeof(gCoreUrl), "%s", coreUrl);
+            ++gProfileRevision;
+        }
         SetupStore("CoreURL", gCoreUrl);
         std::snprintf(gDeviceName, sizeof(gDeviceName), "%s", deviceName);
         SetupStore("DeviceName", gDeviceName);
@@ -5838,6 +5866,7 @@ public:
                 setStatus("Lokale Kopplung konnte nicht entfernt werden");
                 return osContinue;
             }
+            ++gProfileRevision;
             pairingClient.forgetDevice();
             pairing = {};
             if (issued.origin == pairingClient.origin()) issued = {};
