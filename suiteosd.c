@@ -4204,7 +4204,7 @@ private:
         }
         if(!candidate)return;
         const auto row=*candidate;
-        const auto origin=gCoreUrl,profile=deviceProfilePath();
+        const std::string origin=gCoreUrl,profile=deviceProfilePath();
         const auto generation=homePosterGeneration;
         const int w=X(HL::posterW),h=Y(HL::posterH);
         std::vector<std::string> names;
