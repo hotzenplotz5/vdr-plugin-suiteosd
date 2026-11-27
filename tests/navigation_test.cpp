@@ -189,5 +189,11 @@ int main()
         assert(menu.sideIndex == index);
         assert(menu.Move(Direction::Select, 1, 4) == Activation::Module);
     }
+    suiteosd::HomeLru<int,std::string> weighted;
+    weighted.emplace(1,std::string("abc"));weighted.emplace(2,std::string("defgh"));
+    const auto weight=[](const std::string &v){return v.size();};
+    assert(weighted.totalWeight(weight)==8);
+    weighted.find(1);weighted.evictOldest();assert(weighted.totalWeight(weight)==3);
+    weighted.clear();assert(weighted.totalWeight(weight)==0);
     return 0;
 }

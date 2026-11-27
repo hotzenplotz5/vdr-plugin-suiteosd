@@ -22,6 +22,9 @@ public:
     auto end(){return entries.end();}
     auto end() const{return entries.end();}
     auto size() const{return entries.size();}
+    template<class F> std::size_t totalWeight(F weight) const {
+        std::size_t sum=0;for(const auto &entry:entries)sum+=weight(entry.second);return sum;
+    }
     void clear(){entries.clear();used.clear();clock=0;}
     template<class V> auto emplace(const Key &key,V &&v){
         auto result=entries.emplace(key,std::forward<V>(v));touch(key);return result;
