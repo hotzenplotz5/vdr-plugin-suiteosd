@@ -143,7 +143,68 @@ struct RecordingDetailReadback {
     std::string fileName;
     unsigned long generation=0;
     RecordingDetailImage image;
+    suiteosd::CoreSearchRecording row;
 };
+
+// One canonical reader for local recording cards, details and replay Info.
+// Search discovers candidates; the backend-qualified equality proof is the
+// only authority for binding one to a native recording.
+RecordingDetailReadback readCanonicalRecording(const Recording &rec,
+        const suiteosd::CoreSearchRecording &known,const std::string &origin,const std::string &profile,
+        int pw,int ph,int fw,int fh,bool preview,unsigned long generation,
+        const std::shared_ptr<std::atomic<bool>> &cancel)
+{
+    RecordingDetailReadback result;result.fileName=rec.fileName;result.generation=generation;
+    auto &image=result.image;image.metadata.title=rec.baseName;image.metadata.overview=rec.description;
+    image.status="VDR-Aufnahmedaten · Suite-Metadaten nicht verfügbar";
+    suiteosd::CoreAdminClient client(origin);suiteosd::DeviceCredential saved;
+    if(cancel->load()||!suiteosd::loadDeviceProfile(profile,origin,saved)||!client.setDeviceCredential(saved))return result;
+    suiteosd::CoreSearchRecording matched;suiteosd::CoreSearchEvent detail;
+    const std::vector<std::string> exact{rec.fileName};
+    bool denied=false;
+    auto match=[&](const suiteosd::CoreSearchRecording &row){
+        if(cancel->load()||row.id.empty()||(!rec.fileName.empty()&&row.backendId!="default"))return false;
+        suiteosd::CoreSearchEvent read;
+        const auto status=client.publicRecordingDetail(row,read,!rec.fileName.empty());
+        if(status.http==401||status.http==403)denied=true;
+        if(!status.ok||(!rec.fileName.empty()&&suiteosd::matchNativeRecording(row,read.nativeMatchProof,exact)!=rec.fileName))return false;
+        matched=row;detail=std::move(read);return true;
+    };
+    if(!match(known)&&!denied&&!rec.fileName.empty()){
+        const auto query=rec.baseName;
+        if(query.size()>=2&&query.size()<=240)for(int offset=0;!cancel->load()&&!denied;){
+            suiteosd::CoreGlobalSearch page;
+            if(!client.publicSearch("default",query,false,30,offset,page).ok)break;
+            for(const auto &row:page.recordings){if(match(row)||denied)break;}
+            if(!matched.id.empty()||!page.recordingHasMore||page.recordings.empty())break;
+            if(offset>1000000-30)break;
+            offset+=30;
+        }
+    }
+    if(cancel->load()||matched.id.empty())return result;
+    image.canonical=true;image.status.clear();image.metadata=std::move(detail.recordingMetadata);
+    result.row=matched;
+    std::string bytes;
+    if(pw>0&&ph>0&&!cancel->load()){
+        const auto status=client.publicRecordingArtwork(matched,bytes,nullptr,{},nullptr,"poster",preview);
+        if(status.ok)image.poster=suiteosd::LoadArtworkBytes(bytes,pw,ph);
+        if(status.http==401||status.http==403)denied=true;
+    }
+    if(fw>0&&fh>0&&!denied&&!cancel->load()){
+        const auto status=client.publicRecordingArtwork(matched,bytes,nullptr,{},nullptr,"fanart",preview);
+        if(status.ok){
+            image.fanart=suiteosd::LoadArtworkBytes(bytes,fw,fh);
+            if(preview)image.fanart=suiteosd::CoverHomePoster(std::move(image.fanart),fw,fh,0,0xFF061626u);
+            else{suiteosd::ExpandArtwork(image.fanart,fw,fh);suiteosd::FadeArtwork(image.fanart,kBackground);}
+        }
+        if(status.http==401||status.http==403)denied=true;
+    }
+    if(denied){
+        image={};result.row={};image.metadata.title=rec.baseName;image.metadata.overview=rec.description;
+        image.status="VDR-Aufnahmedaten · Suite-Metadaten nicht verfügbar";
+    }
+    return result;
+}
 
 struct Snapshot {
     Programme live;
@@ -219,7 +280,7 @@ Snapshot readVdrSnapshot(bool prime=false,int liveOverride=0)
                 }
                 // Keep VDR channel order and expose the complete rail;
                 // horizontal navigation pages through every channel.
-                if(!prime||snapshot.now.size()<12){snapshot.now.push_back(current);
+                if(!prime||snapshot.now.size()<12||ch->Number()==liveNumber){snapshot.now.push_back(current);
                 snapshot.next.push_back(fromEvent(ch, next));}
             }
         }
@@ -315,9 +376,16 @@ const std::array<const char *, 13> kSidebar = {{
 
 
 // This is the menu VDR asks for through cControl::GetInfo() when Info is
-// pressed during replay. It displays local TVScraper data but leaves the
+// pressed during replay. It displays canonical Suite data but leaves the
 // playback engine and transport keys entirely with cReplayControl.
+class NativeHomeCache;
+void retireRecordingDetail(NativeHomeCache *,std::future<RecordingDetailReadback>);
 class cSuiteReplayInfo final : public cOsdObject {
+    NativeHomeCache *owner;
+    Recording recordingIdentity;
+    std::future<RecordingDetailReadback> readJob;
+    std::shared_ptr<std::atomic<bool>> cancel=std::make_shared<std::atomic<bool>>(false);
+    std::string sourceStatus;
     cOsd *view = nullptr;
     cFont *titleFont = nullptr;
     cFont *bodyFont = nullptr;
@@ -359,7 +427,7 @@ class cSuiteReplayInfo final : public cOsdObject {
     }
 
 public:
-    explicit cSuiteReplayInfo(const cRecording *recording)
+    explicit cSuiteReplayInfo(const cRecording *recording,NativeHomeCache *cache):owner(cache)
     {
         // Caller holds LOCK_RECORDINGS_READ. Copy everything before it ends.
         if (!recording) return;
@@ -374,30 +442,15 @@ public:
             if (recording->Info()->Description())
                 overview = recording->Info()->Description();
         }
-        cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
-        if (!scraper) return;
-        cGetScraperVideo request(nullptr, recording);
-        if (!scraper->Service("GetScraperVideo", &request) || !request.m_scraperVideo)
-            return;
-        detail = suiteosd::ReadScraperDetail(request.m_scraperVideo.get());
-        if (!detail.title.empty()) title = detail.title;
-        if (!detail.episode.empty()) episode = detail.episode;
-        if (!detail.overview.empty()) overview = detail.overview;
-        release = detail.release;
-        runtime = detail.runtime;
-        rating = detail.rating;
-        season = detail.season;
-        episodeNumber = detail.episodeNumber;
-        fanartPath = detail.fanartPath;
-        posterPath = detail.posterPath;
-        for (const auto &genre : detail.genres) {
-            if (!genres.empty()) genres += "  ·  ";
-            genres += genre;
-        }
+        recordingIdentity.fileName=recording->FileName()?recording->FileName():"";
+        recordingIdentity.baseName=*baseName?*baseName:title;
+        recordingIdentity.start=recording->Start();recordingIdentity.description=overview;
+        detail.title=title;detail.episode=episode;detail.overview=overview;
     }
 
     ~cSuiteReplayInfo() override
     {
+        cancel->store(true);retireRecordingDetail(owner,std::move(readJob));
         delete view;
         delete titleFont;
         delete bodyFont;
@@ -419,8 +472,13 @@ public:
         titleFont = cFont::CreateFont("Sans:Bold", std::max(20, Y(49)));
         bodyFont = cFont::CreateFont("Sans", std::max(14, Y(24)));
         smallFont = cFont::CreateFont("Sans", std::max(12, Y(19)));
-        heroFanart = suiteosd::LoadDetailArtwork(fanartPath,X(1050),Y(500),true);
-        heroPoster = suiteosd::LoadDetailArtwork(posterPath,X(262),Y(402));
+        const std::string origin=gCoreUrl,profile=deviceProfilePath();
+        const auto rec=recordingIdentity;auto stopped=cancel;
+        const int pw=std::min(1024,X(262)),ph=std::min(1024,Y(402)),fw=std::min(1024,X(1050)),fh=std::min(1024,Y(500));
+        sourceStatus="Suite-Metadaten werden geladen …";
+        readJob=std::async(std::launch::async,[rec,origin,profile,pw,ph,fw,fh,stopped]{
+            return readCanonicalRecording(rec,{},origin,profile,pw,ph,fw,fh,false,0,stopped);
+        });
         if(detail.title.empty()) detail.title=title;
         if(detail.episode.empty()) detail.episode=episode;
         Render();
@@ -431,7 +489,7 @@ public:
         box(0,0,1599,899,kBackground);
         box(0,0,1599,77,kSurface);
         label(36,25,"VDR Suite",bodyFont,kText,225);
-        label(286,25,"WIEDERGABE / AUFNAHMEINFO",bodyFont,kMuted);
+        label(286,25,sourceStatus.empty()?"WIEDERGABE / AUFNAHMEINFO":sourceStatus,bodyFont,kMuted,1100);
         label(1430,25,formatTime(time(nullptr)),bodyFont);
         suiteosd::DrawRecordingHero(view,width,height,titleFont,bodyFont,smallFont,
             detail,title,recorded,overview,heroFanart,heroPoster,descriptionScroll,&castNav,castCache);
@@ -445,6 +503,13 @@ public:
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
+        if(readJob.valid()&&readJob.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+            try{auto result=readJob.get();sourceStatus=result.image.status;
+                detail=std::move(result.image.metadata);heroPoster=std::move(result.image.poster);heroFanart=std::move(result.image.fanart);
+                if(!detail.overview.empty())overview=detail.overview;
+            }catch(const std::exception &){sourceStatus="Suite-Metadaten nicht verfügbar";}
+            Render();
+        }
         if (castNav.active) {
             if (base == kOk && castNav.selected >= 0 && castNav.selected < int(detail.people.size())) {
                 if (cRemote::CallPlugin("suiteosd")) {
@@ -473,7 +538,9 @@ public:
 };
 
 class cSuiteReplayControl final : public cReplayControl {
+    NativeHomeCache *owner;
 public:
+    explicit cSuiteReplayControl(NativeHomeCache &cache):owner(&cache){}
     cOsdObject *GetInfo() override
     {
         // As in VDR's default cReplayControl::GetInfo(), look up the
@@ -482,7 +549,7 @@ public:
         const char *path = cReplayControl::LastReplayed();
         const cRecording *recording = path && Recordings ?
             Recordings->GetByName(path) : nullptr;
-        return recording ? new cSuiteReplayInfo(recording) : nullptr;
+        return recording ? new cSuiteReplayInfo(recording,owner) : nullptr;
     }
 };
 
@@ -937,7 +1004,7 @@ public:
             for(size_t i=0;i<HL::columns&&i<snapshot.now.size();++i)programme(snapshot.now[i],false);
             for(size_t i=0;i<HL::columns&&i<snapshot.next.size();++i)programme(snapshot.next[i],false);
             if(snapshot.live.channelNumber>0){requestLogo(snapshot.live.channel,false);requestFocus(&snapshot.live,nullptr,false);}
-            for(size_t i=0;i<HL::columns&&i<snapshot.recordings.size();++i)recording(snapshot.recordings[i],false);
+            // Suite recording artwork is prepared by the authorized public reader, not TVScraper.
             for(size_t i=HL::columns;i<2*HL::columns&&i<snapshot.now.size();++i)programme(snapshot.now[i],false);
             for(size_t i=HL::columns;i<2*HL::columns&&i<snapshot.next.size();++i)programme(snapshot.next[i],false);
             }
@@ -966,6 +1033,10 @@ public:
         retiredDetails.clear();
     }
 };
+
+void retireRecordingDetail(NativeHomeCache *cache,std::future<RecordingDetailReadback> job){
+    if(cache)cache->retireDetail(std::move(job));
+}
 
 class cSuiteHome final : public cOsdObject {
 private:
@@ -1086,7 +1157,9 @@ private:
     std::map<std::string, suiteosd::Artwork> timelineArtwork;
     Snapshot data;
     unsigned long seenNativeRevision=0;
-    std::map<std::string, RecordingMeta> recordingMeta;
+    suiteosd::HomeLru<std::string,RecordingMeta> recordingMeta;
+    std::future<RecordingDetailReadback> cardJob,publicFocusJob;
+    suiteosd::HomeLru<std::string,NativeFocusPreview> publicFocusPreviews;
     // Titles are copied together with the portrait path, not obtained by a second scraper request.
     suiteosd::HomeLru<std::string, suiteosd::DetailMetadata> &homeRecordingTitles=nativeHome.titles;
     std::map<std::string, RecordingDetailImage> recordingDetailImages;
@@ -1764,7 +1837,7 @@ private:
         }
         restoreLivePreview(); // Fullscreen replay owns the video plane
         cReplayControl::SetRecording(rec->fileName.c_str());
-        cControl::Launch(new cSuiteReplayControl());
+        cControl::Launch(new cSuiteReplayControl(nativeHome));
         return osEnd;
     }
 
@@ -2155,69 +2228,38 @@ private:
         if(items.empty())print(homeLeft(),y+94,"Keine EPG-Daten verfügbar",fontBody,kMuted);
     }
 
-    RecordingMeta loadRecordingMeta(const Recording &item)
-    {
-        RecordingMeta meta;
-        std::string imagePath;
-        cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
-        if (!scraper || item.fileName.empty())
-            return meta;
-
-        // The TVScraper service borrows the cRecording pointer. Read and
-        // copy every returned value while its VDR read lock is valid.
-        {
-            LOCK_RECORDINGS_READ;
-            const cRecording *recording = Recordings ?
-                Recordings->GetByName(item.fileName.c_str()) : nullptr;
-            if (!recording)
-                return meta;
-            cGetScraperVideo request(nullptr, recording);
-            if (!scraper->Service("GetScraperVideo", &request) || !request.m_scraperVideo)
-                return meta;
-            cScraperVideo *video = request.m_scraperVideo.get();
-            video->getOverview(&meta.title, &meta.episode, &meta.release,
-                               &meta.runtime, nullptr, nullptr, nullptr);
-            meta.season = video->getSeasonNumber();
-            meta.episodeNumber = video->getEpisodeNumber();
-            video->getMovieOrTv(
-                nullptr, nullptr, nullptr, &meta.overview,
-                &meta.genres, nullptr, nullptr, nullptr, nullptr, nullptr,
-                &meta.rating, nullptr, nullptr, nullptr, nullptr,
-                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
-            if (video->getVideoType() == tSeries) {
-                std::string episodeOverview;
-                int episodeRuntime = 0;
-                if (video->getEpisode(nullptr, &episodeOverview, nullptr,
-                                      nullptr, &episodeRuntime, nullptr, nullptr, nullptr)) {
-                    if (!episodeOverview.empty()) meta.overview = std::move(episodeOverview);
-                    if (episodeRuntime > 0) meta.runtime = episodeRuntime;
-                }
-            }
-            cTvMedia image = video->getImage(
-                cImageLevels(eImageLevel::episodeMovie,
-                             eImageLevel::seasonMovie,
-                             eImageLevel::tvShowCollection),
-                cOrientations(eOrientation::landscape,
-                              eOrientation::banner,
-                              eOrientation::portrait),
-                true);
-            imagePath = image.path; // TVScraper owns the scraper cache files.
-        }
-        // Image disk I/O and decode must not hold the VDR recordings lock.
-        if (!imagePath.empty())
-            meta.artwork = suiteosd::LoadArtwork(imagePath, X(164), Y(84));
-        return meta;
-    }
-
     const RecordingMeta &metaFor(const Recording &item)
     {
-        const auto cached = recordingMeta.find(item.fileName);
-        if (cached != recordingMeta.end())
-            return cached->second;
-        // Limit thumbnail memory while scrolling large recording libraries.
-        if (recordingMeta.size() >= 48)
-            recordingMeta.clear();
-        return recordingMeta.emplace(item.fileName, loadRecordingMeta(item)).first->second;
+        auto cached=recordingMeta.find(item.fileName);
+        if(cached!=recordingMeta.end())return cached->second;
+        if(!cardJob.valid()){
+            suiteosd::CoreSearchRecording row;
+            if(auto it=detailRows.find(item.fileName);it!=detailRows.end())row=it->second;
+            const std::string origin=gCoreUrl,profile=deviceProfilePath();
+            const int pw=std::min(1024,X(204)),ph=std::min(1024,Y(194));
+            const auto generation=detailGeneration;auto cancel=detailCancel;
+            cardJob=std::async(std::launch::async,[item,row,origin,profile,pw,ph,generation,cancel]{
+                return readCanonicalRecording(item,row,origin,profile,pw,ph,0,0,true,generation,cancel);
+            });
+        }
+        static const RecordingMeta empty;
+        return empty;
+    }
+    bool finishRecordingCard(){
+        if(!cardJob.valid()||cardJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return false;
+        try{
+            auto result=cardJob.get();if(result.generation!=detailGeneration)return true;
+            if(!result.row.id.empty())detailRows[result.fileName]=result.row;
+            const auto &d=result.image.metadata;RecordingMeta meta;
+            meta.title=d.title;meta.episode=d.episode;meta.release=d.release;meta.overview=d.overview;meta.genres=d.genres;
+            meta.season=d.season;meta.episodeNumber=d.episodeNumber;meta.runtime=d.runtime;meta.rating=d.rating;
+            meta.artwork=std::move(result.image.poster);
+            const auto bytes=[](const auto &v){return v.artwork.argb.capacity()*sizeof(uint32_t);};
+            while(recordingMeta.size()&&(recordingMeta.size()>=48||recordingMeta.totalWeight(bytes)+bytes(meta)>16U*1024U*1024U))
+                recordingMeta.evictOldest();
+            recordingMeta.insertOrAssign(result.fileName,std::move(meta));
+        }catch(const std::exception &){esyslog("suiteosd: canonical recording card read failed");}
+        return true;
     }
 
     const Recording *findRecording(const std::string &fileName) const
@@ -2351,39 +2393,19 @@ private:
 
     std::string homeRecordingTitle(const Recording &rec,const std::string &fallback) const
     {
-        const auto found=homeRecordingTitles.find(rec.fileName);
-        return found==homeRecordingTitles.end()?fallback:suiteosd::RecordingDisplayTitle(found->second,fallback);
+        auto it=recordingMeta.find(rec.fileName);
+        return it==recordingMeta.end()||it->second.title.empty()?fallback:it->second.title;
     }
     std::string homeRecordingEpisode(const Recording &rec) const
     {
-        const auto found=homeRecordingTitles.find(rec.fileName);
-        return found==homeRecordingTitles.end()?std::string{}:suiteosd::RecordingEpisodeLabel(found->second);
+        auto it=recordingMeta.find(rec.fileName);if(it==recordingMeta.end())return {};
+        suiteosd::DetailMetadata d;d.title=it->second.title;d.episode=it->second.episode;
+        d.season=it->second.season;d.episodeNumber=it->second.episodeNumber;
+        return suiteosd::RecordingEpisodeLabel(d);
     }
-    const suiteosd::Artwork &recordingPoster(const Recording &rec,int w=184,int h=240)
+    const suiteosd::Artwork &recordingPoster(const Recording &rec,int=184,int=240)
     {
-        if(w==HL::posterW&&h==HL::posterH)return nativeHome.recording(rec);
-        const std::string key=NativeHomeCache::recordingKey(rec,w,h);
-        auto it=homeArtwork.find(key);if(it!=homeArtwork.end()){homeRecordingTitles.find(rec.fileName);return it->second;}
-        trimLocalHomeArtwork();
-        std::string path;
-        suiteosd::DetailMetadata metadata;
-        if(auto *scraper=cPluginManager::GetPlugin("tvscraper")){
-            LOCK_RECORDINGS_READ;
-            const auto *r=Recordings?Recordings->GetByName(rec.fileName.c_str()):nullptr;
-            if(r){
-                cGetScraperVideo req(nullptr,r);
-                if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo){
-                    auto *video=req.m_scraperVideo.get();
-                    video->getOverview(&metadata.title,&metadata.episode,nullptr,nullptr,nullptr,nullptr,nullptr);
-                    metadata.season=video->getSeasonNumber();metadata.episodeNumber=video->getEpisodeNumber();
-                    path=video->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
-                        cOrientations(eOrientation::portrait,eOrientation::landscape),true).path;
-                }
-            }
-        }
-        if(homeRecordingTitles.size()>=512)homeRecordingTitles.evictOldest();
-        homeRecordingTitles.insertOrAssign(rec.fileName,std::move(metadata));
-        return homeArtwork.emplace(key,w==HL::posterW&&h==HL::posterH?loadHomePoster(path):suiteosd::LoadDetailArtwork(path,X(w),Y(h))).first->second;
+        return metaFor(rec).artwork;
     }
     void drawRecordings(int y)
     {
@@ -2418,44 +2440,7 @@ private:
             const auto generation=detailGeneration;
             auto cancel=detailCancel;
             detailJob=std::async(std::launch::async,[rec,known,origin,profile,fw,fh,pw,ph,generation,cancel]{
-                RecordingDetailReadback result;result.fileName=rec.fileName;result.generation=generation;
-                auto &image=result.image;image.metadata.title=rec.baseName;image.metadata.overview=rec.description;
-                image.status="VDR-Aufnahmedaten · Suite-Metadaten nicht verfügbar";
-                suiteosd::CoreAdminClient client(origin);suiteosd::DeviceCredential saved;
-                if(cancel->load()||!suiteosd::loadDeviceProfile(profile,origin,saved)||!client.setDeviceCredential(saved))return result;
-                suiteosd::CoreSearchRecording matched;suiteosd::CoreSearchEvent detail;
-                const std::vector<std::string> exact{rec.fileName};
-                auto match=[&](const suiteosd::CoreSearchRecording &row){
-                    if(cancel->load()||row.backendId!="default"||row.id.empty())return false;
-                    suiteosd::CoreSearchEvent read;
-                    if(!client.publicRecordingDetail(row,read,true).ok||
-                        suiteosd::matchNativeRecording(row,read.nativeMatchProof,exact)!=rec.fileName)return false;
-                    matched=row;detail=std::move(read);return true;
-                };
-                if(!match(known)){
-                    // Search is candidate discovery only: NEVER match by title,
-                    // year, name or position. Only the native equality proof wins.
-                    const auto query=rec.baseName;
-                    if(query.size()>=2&&query.size()<=240)for(int offset=0;!cancel->load();){
-                        suiteosd::CoreGlobalSearch page;
-                        if(!client.publicSearch("default",query,false,30,offset,page).ok)break;
-                        for(const auto &row:page.recordings)if(match(row))break;
-                        if(!matched.id.empty()||!page.recordingHasMore||page.recordings.empty())break;
-                        if(offset>1000000-30)break;
-                        offset+=30;
-                    }
-                }
-                if(cancel->load()||matched.id.empty())return result;
-                image.canonical=true;image.status.clear();image.metadata=std::move(detail.recordingMetadata);
-                std::string bytes;
-                if(!cancel->load()&&client.publicRecordingArtwork(matched,bytes,nullptr,{},nullptr,"poster").ok)
-                    image.poster=suiteosd::LoadArtworkBytes(bytes,pw,ph);
-                if(!cancel->load()&&client.publicRecordingArtwork(matched,bytes,nullptr,{},nullptr,"fanart").ok){
-                    image.fanart=suiteosd::LoadArtworkBytes(bytes,fw,fh);
-                    suiteosd::ExpandArtwork(image.fanart,fw,fh);
-                    suiteosd::FadeArtwork(image.fanart,kBackground);
-                }
-                return result;
+                return readCanonicalRecording(rec,known,origin,profile,pw,ph,fw,fh,false,generation,cancel);
             });
         }else{
             // Do not cache a placeholder for a second selection until its
@@ -2473,6 +2458,7 @@ private:
             auto result=detailJob.get();
             if(result.generation!=detailGeneration)return true;
             detailCastCache.clear();
+            if(!result.row.id.empty())detailRows[result.fileName]=result.row;
             recordingDetailImages[result.fileName]=std::move(result.image);
         }catch(const std::exception &){
             recordingDetailImages.clear();
@@ -4488,7 +4474,7 @@ private:
                 if (present) {
                     restoreLivePreview();
                     cReplayControl::SetRecording(searchRecording.fileName.c_str());
-                    cControl::Launch(new cSuiteReplayControl());
+                    cControl::Launch(new cSuiteReplayControl(nativeHome));
                     return osEnd;
                 }
                 searchNotice = "Aufnahme nicht mehr im lokalen VDR vorhanden";
@@ -4852,6 +4838,11 @@ private:
     std::string applyHomePoster(HomePosterRead result){
         if(result.generation!=homePosterGeneration)return {};
         const auto key=result.key;
+        if(result.detailStatus.ok&&!result.nativeId.empty()){
+            const auto sep=key.find('\n');
+            if(sep!=std::string::npos){suiteosd::CoreSearchRecording row;row.backendId=key.substr(0,sep);row.id=key.substr(sep+1);row.title=result.detail.title;
+                detailRows[result.nativeId]=std::move(row);}
+        }
         auto old=publicHomePosters.find(key);
         const bool denied=result.detailStatus.http==401||result.detailStatus.http==403||
                           result.artStatus.http==401||result.artStatus.http==403;
@@ -4984,7 +4975,7 @@ private:
         }
         restoreLivePreview();
         cReplayControl::SetRecording(path.c_str());
-        cControl::Launch(new cSuiteReplayControl());
+        cControl::Launch(new cSuiteReplayControl(nativeHome));
         return osEnd;
     }
     void openHomeCard(const suiteosd::CoreHomeCard &card,bool resume=false){
@@ -5372,6 +5363,7 @@ public:
             suiteosd::homePerf.http.load()-startHttp,suiteosd::homePerf.httpBytes.load()-startHttpBytes,suiteosd::homePerf.httpUs.load()-startHttpUs,suiteosd::homePerf.connections.load()-startConnections,suiteosd::homePerf.decodes.load()-startDecodes,suiteosd::homePerf.decodeUs.load()-startDecodeUs,usage.ru_maxrss);
         detailCancel->store(true);
         nativeHome.retireDetail(std::move(detailJob));
+        nativeHome.retireDetail(std::move(cardJob));nativeHome.retireDetail(std::move(publicFocusJob));
         nativeHome.closed();
         for(auto &entry:homePosterJobs)if(entry.second.valid())entry.second.wait();
         restoreLivePreview();
@@ -5460,6 +5452,7 @@ public:
         if(seenRecordingRevision!=nativeHome.recordingRevision()){
             seenRecordingRevision=nativeHome.recordingRevision();metadataChanged=true;
             ++detailGeneration;recordingDetailImages.clear();detailCastCache.clear();recordingMeta.clear();recordingGenres.clear();
+            publicFocusPreviews.clear();focusPending=true;
             for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
             ++homePosterRevision;
             if(!homeCollections.empty()){
@@ -5478,6 +5471,8 @@ public:
         const auto posterChanged=finishHomePosters();
         const bool searchChanged=finishSearchRead();
         const bool detailChanged=finishRecordingDetail();
+        const bool cardChanged=finishRecordingCard();
+        if(cardChanged&&osd&&!searchActive&&!photosActive&&!settingsActive&&!timelineActive&&!recordingDetails&&!browserDetails)draw();
         if((detailChanged||metadataChanged)&&osd&&(recordingDetails||browserDetails||(searchActive&&searchNav.page==suiteosd::SearchPage::Recording)))draw();
         const bool homeDashboard=osd&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails;
         std::vector<std::string> localKeys;std::vector<std::uintptr_t> localEvictions;
@@ -5625,7 +5620,7 @@ public:
         if (base == k0) {
             refreshHomeSnapshot();
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
-            ++detailGeneration;recordingDetailImages.clear();detailRows.clear();
+            ++detailGeneration;recordingDetailImages.clear();detailRows.clear();publicFocusPreviews.clear();
             focusPreviews.clear();focusKey.clear();focusPending=false;
             cinematicComposites.clear();nativeHome.reset();
             homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();invalidatePublicHomePosters();
