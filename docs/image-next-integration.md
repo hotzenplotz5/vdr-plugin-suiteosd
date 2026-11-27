@@ -61,10 +61,9 @@ on real output hardware still need device validation.
 - **Grün**: start the selected image in slideshow mode.
 - **Gelb / Info**: show the selected file/folder name.
 - **Blau / Zurück**: parent folder, source list, then Suite Home.
-- **Pfeile**: move over the visible 5-column tile grid.
+- **Pfeile**: move over the visible four-column tile grid.
 - **Channel +/-**: page forward/backward.
 - **0**: refresh the current source/folder and its thumbnails.
-- **Links** at the leftmost tile: focus SuiteOSD sidebar.
 
 If image_next is not installed or predates this contract, the gallery
 displays a helpful message instead of opening arbitrary folders. If the
@@ -84,3 +83,16 @@ legacy MPEG-2 fallback according to its own setup).
 5. Test at least one non-ASCII filename and one inaccessible source.
 
 No separate SuiteOSD image decoder or parallel VDR player is introduced.
+
+## Approved visual refresh (27.11.2026)
+
+Both approved TV mockups are implemented through one opaque native OSD canvas:
+shared dark gradient/header/action bar, four-column two-row full-bleed grid,
+rounded thumbnails, selected filename and cyan focus halo. Short final rows
+expand real photos without duplication; vertical D-pad movement follows visual
+column centres. The carousel preserves inward-facing projection, eased movement,
+rounded rims and fading reflections. Fast response is requested only for the
+existing animation, not for status polling. Source, decoder, playback, folder
+order, and PhotoView persistence retain their existing owners and contracts.
+The prior opaque background and fullscreen playback passed the user's TV test;
+this revised design and its timing remain NOT_VERIFIED on actual hardware.

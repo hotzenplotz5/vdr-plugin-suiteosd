@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace suiteosd {
@@ -37,17 +38,17 @@ inline CarouselSlot CarouselGeometry(float relative)
     const float a = std::min(distance, 1.0f);
     const float b = std::clamp(distance - 1.0f, 0.0f, 1.0f);
     const float offset = distance <= 1.0f ?
-        CarouselMix(0.0f, 485.0f, a) :
-        CarouselMix(485.0f, 704.0f, b);
+        CarouselMix(0.0f, 438.0f, a) :
+        CarouselMix(438.0f, 677.0f, b);
     const float width = distance <= 1.0f ?
-        CarouselMix(660.0f, 275.0f, a) :
-        CarouselMix(275.0f, 166.0f, b);
+        CarouselMix(612.0f, 252.0f, a) :
+        CarouselMix(252.0f, 188.0f, b);
     const float height = distance <= 1.0f ?
-        CarouselMix(404.0f, 326.0f, a) :
-        CarouselMix(326.0f, 252.0f, b);
+        CarouselMix(420.0f, 328.0f, a) :
+        CarouselMix(328.0f, 236.0f, b);
     const float top = distance <= 1.0f ?
-        CarouselMix(197.0f, 253.0f, a) :
-        CarouselMix(253.0f, 291.0f, b);
+        CarouselMix(178.0f, 238.0f, a) :
+        CarouselMix(238.0f, 284.0f, b);
     const float opacity = distance <= 1.0f ?
         CarouselMix(1.0f, 0.62f, a) :
         CarouselMix(0.62f, 0.39f, b);
@@ -79,7 +80,9 @@ struct CarouselBitmap {
 // inward-facing card perspective approved for the SuiteOSD carousel.
 inline CarouselBitmap WarpCarousel(const uint32_t *src, int srcWidth,
                                    int srcHeight, int destWidth, int destHeight,
-                                   int side, float inset, float opacity)
+                                   int side, float inset, float opacity,
+                                   float radius = 0, float rim = 0,
+                                   uint32_t rimColor = 0xFF53E5FFU)
 {
     CarouselBitmap result;
     if (!src || srcWidth < 1 || srcHeight < 1 ||
@@ -93,6 +96,7 @@ inline CarouselBitmap WarpCarousel(const uint32_t *src, int srcWidth,
     const float cropX = srcAspect > destAspect ? destAspect / srcAspect : 1.0f;
     const float cropY = srcAspect < destAspect ? srcAspect / destAspect : 1.0f;
     const float fade = std::clamp(opacity, 0.0f, 1.0f);
+    radius = std::clamp(radius, 0.0f, 0.5f * std::min(destWidth, destHeight));
 
     for (int x = 0; x < destWidth; ++x) {
         const float u = (float(x) + 0.5f) / float(destWidth);
@@ -110,6 +114,20 @@ inline CarouselBitmap WarpCarousel(const uint32_t *src, int srcWidth,
             const float v = (float(y) + 0.5f) / float(destHeight);
             if (v < verticalInset || v > 1.0f - verticalInset) continue;
             const float stretch = (v - verticalInset) / usable;
+            // Round the unwarped card, then apply the same perspective to
+            // the image and its rim. Keep the old rectangular path for callers
+            // that request no radius.
+            float coverage = 1.0f, edge = 0.0f;
+            if (radius > 0 || rim > 0) {
+                const float px = std::min(u, 1.0f-u) * destWidth;
+                const float py = std::min(stretch, 1.0f-stretch) * destHeight;
+                const float dx = radius-px, dy = radius-py;
+                const float d = (dx > 0 && dy > 0 ? std::sqrt(dx*dx+dy*dy) :
+                                 std::max(dx,dy)) - radius;
+                coverage = std::clamp(0.5f-d, 0.0f, 1.0f);
+                if (coverage == 0) continue;
+                edge = std::clamp(d+rim+0.5f, 0.0f, 1.0f);
+            }
             const float srcY = ((1.0f - cropY) / 2.0f + stretch * cropY) *
                                float(srcHeight - 1);
             const int y0 = std::clamp(int(srcY), 0, srcHeight - 1);
@@ -128,7 +146,8 @@ inline CarouselBitmap WarpCarousel(const uint32_t *src, int srcWidth,
                 const float p1 = CarouselMix(float((corners[2] >> shift) & 255),
                                              float((corners[3] >> shift) & 255), fx);
                 float c = CarouselMix(p0, p1, fy);
-                if (shift == 24) c *= fade;
+                if (shift == 24) c = CarouselMix(c, 255.0f, edge) * fade * coverage;
+                else c = CarouselMix(c, float((rimColor >> shift) & 255), edge);
                 pixel |= static_cast<uint32_t>(std::lround(
                     std::clamp(c, 0.0f, 255.0f))) << shift;
             }
@@ -148,10 +167,12 @@ inline CarouselBitmap ReflectCarousel(const CarouselBitmap &card, int depth = 72
     result.height = std::min(depth, card.height);
     result.argb.resize(size_t(result.width) * result.height, 0);
     for (int y = 0; y < result.height; ++y) {
-        const float opacity = 0.24f * (1.0f - float(y) / float(result.height));
+        const float t = float(y) / float(result.height);
+        const float opacity = 0.30f * (1.0f-t) * (1.0f-t);
         for (int x = 0; x < result.width; ++x) {
-            const uint32_t pixel =
-                card.argb[size_t(card.height - 1 - y) * card.width + x];
+            // Preserve the warped silhouette and rounded alpha mask.
+            const int sy = card.height - 1 - std::min(card.height-1, y);
+            const uint32_t pixel = card.argb[size_t(sy) * card.width + x];
             const uint32_t alpha = static_cast<uint32_t>(std::lround(
                 float((pixel >> 24) & 255) * opacity));
             result.argb[size_t(y) * result.width + x] =
@@ -159,6 +180,70 @@ inline CarouselBitmap ReflectCarousel(const CarouselBitmap &card, int depth = 72
         }
     }
     return result;
+}
+
+// ARGB chrome patches are always composited onto an opaque canvas by the
+// OSD caller. No semi-transparent pixels are copied to the video plane.
+inline uint32_t PhotoRgbMix(uint32_t a, uint32_t b, float t) {
+    uint32_t out = 0xFF000000U;
+    for (int shift : {0,8,16})
+        out |= uint32_t(CarouselMix(float((a>>shift)&255),float((b>>shift)&255),t)+0.5f)<<shift;
+    return out;
+}
+
+inline float PhotoRoundDistance(float x,float y,float w,float h,float radius) {
+    radius=std::clamp(radius,0.0f,0.5f*std::min(w,h));
+    const float dx=std::abs(x-w*0.5f)-w*0.5f+radius;
+    const float dy=std::abs(y-h*0.5f)-h*0.5f+radius;
+    const float ox=std::max(0.0f,dx),oy=std::max(0.0f,dy);
+    return std::sqrt(ox*ox+oy*oy)+std::min(0.0f,std::max(dx,dy))-radius;
+}
+
+inline CarouselBitmap PhotoPanel(int w,int h,float radius,uint32_t color,
+                                 uint32_t rim=0,float border=0,int halo=0) {
+    CarouselBitmap out;
+    if(w<1||h<1||halo<0) return out;
+    out.width=w+2*halo; out.height=h+2*halo;
+    out.argb.resize(size_t(out.width)*out.height);
+    for(int y=0;y<out.height;++y)for(int x=0;x<out.width;++x){
+        const float d=PhotoRoundDistance(x+0.5f-halo,y+0.5f-halo,w,h,radius);
+        if(d>0.5f){
+            if(halo && d<halo){
+                const float fade=1.0f-d/halo;
+                out.argb[size_t(y)*out.width+x]=(uint32_t(105*fade*fade)<<24)|(rim&0xFFFFFFU);
+            }
+            continue;
+        }
+        const float coverage=std::clamp(0.5f-d,0.0f,1.0f);
+        const float edge=border>0?std::clamp(d+border+0.5f,0.0f,1.0f):0;
+        const uint32_t rgb=PhotoRgbMix(color,rim,edge);
+        const float alpha=CarouselMix(float(color>>24),float(rim>>24),edge)*coverage;
+        out.argb[size_t(y)*out.width+x]=(uint32_t(alpha+0.5f)<<24)|(rgb&0xFFFFFFU);
+    }
+    return out;
+}
+
+inline CarouselBitmap PhotoBackdrop(int w,int h) {
+    CarouselBitmap out;
+    if(w<1||h<1) return out;
+    out.width=w; out.height=h;
+    out.argb.resize(size_t(w)*h);
+    std::vector<float> horizontal(w);
+    for(int x=0;x<w;++x){
+        const float u=(x+0.5f)/w;
+        const float d=(u-0.5f)*2;
+        horizontal[x]=std::max(0.0f,1-d*d);
+    }
+    for(int y=0;y<h;++y){
+        const float v=(y+0.5f)/h;
+        const float upper=std::max(0.0f,1-std::abs(v-0.30f)*3);
+        const float floor=std::max(0.0f,1-std::abs(v-0.74f)*5);
+        for(int x=0;x<w;++x){
+            auto c=PhotoRgbMix(0xFF050D20U,0xFF102B51U,0.50f*horizontal[x]*upper);
+            out.argb[size_t(y)*w+x]=PhotoRgbMix(c,0xFF07345AU,0.70f*horizontal[x]*floor);
+        }
+    }
+    return out;
 }
 
 } // namespace suiteosd

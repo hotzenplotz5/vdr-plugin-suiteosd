@@ -17,9 +17,31 @@ namespace suiteosd {
 
 class PhotoGallery {
 public:
-    static constexpr int kColumns = 5;
-    static constexpr int kRows = 3;
+    static constexpr int kColumns = 4;
+    static constexpr int kRows = 2;
     static constexpr int kVisible = kColumns * kRows;
+
+    // Fill a short final row without inventing or duplicating photos.
+    // The first tile spans two columns when three remain; two remaining
+    // tiles each span two. A lone tile is centred across two columns.
+    static int GridSpan(int cell, int visible) {
+        const int rowStart = (cell / kColumns) * kColumns;
+        const int remaining = std::min(kColumns, visible - rowStart);
+        const int col = cell % kColumns;
+        return remaining <= 2 || (remaining == 3 && col == 0) ? 2 : 1;
+    }
+    static int GridStart(int cell, int visible) {
+        const int rowStart = (cell / kColumns) * kColumns;
+        const int remaining = std::min(kColumns, visible - rowStart);
+        const int col = cell % kColumns;
+        if (remaining == 1) return 1;
+        if (remaining == 2) return col * 2;
+        if (remaining == 3) return col ? col + 1 : 0;
+        return col;
+    }
+    static int GridCentre(int cell, int visible) {
+        return 2 * GridStart(cell, visible) + GridSpan(cell, visible);
+    }
 
     int source = -1; // select a configured image_next source first
     std::string directory;
@@ -125,10 +147,23 @@ public:
             --selected;
         else if (dx > 0 && col < kColumns - 1 && selected + 1 < count)
             ++selected;
-        else if (dy < 0 && selected >= kColumns)
-            selected -= kColumns;
-        else if (dy > 0 && selected + kColumns < count)
-            selected += kColumns;
+        else if (dy != 0) {
+            const int row = selected / kColumns + (dy < 0 ? -1 : 1);
+            const int first = row * kColumns;
+            if (first >= 0 && first < count) {
+                const int currentPage = (selected / kVisible) * kVisible;
+                const int centre = GridCentre(selected - currentPage,
+                    std::min(kVisible, count - currentPage));
+                const int targetPage = (first / kVisible) * kVisible;
+                const int visible = std::min(kVisible, count - targetPage);
+                int best = first, distance = 100;
+                for (int i = first; i < std::min(first + kColumns, count); ++i) {
+                    const int d = std::abs(GridCentre(i - targetPage, visible) - centre);
+                    if (d < distance) { best = i; distance = d; }
+                }
+                selected = best;
+            }
+        }
         firstVisible = (selected / kVisible) * kVisible;
     }
 

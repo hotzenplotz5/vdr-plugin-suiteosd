@@ -49,5 +49,16 @@ int main()
     assert(reflection.valid() && reflection.height == 20);
     assert((reflection.argb[0] >> 24) > (reflection.argb[19 * 80] >> 24));
     assert(!WarpCarousel(nullptr, 20, 10, 80, 60, 0, 0, 1.0f).valid());
+    auto rounded=WarpCarousel(src.data(),32,24,160,100,0,0,1,15,3);
+    assert(rounded.valid() && (rounded.argb[0]>>24)==0);
+    assert((rounded.argb[50*160+80]>>24)==255);
+    assert((rounded.argb[80]&0xFFFFFFU)==0x53E5FFU);
+    auto halo=PhotoPanel(100,80,15,0x00000000U,0xFF53E5FFU,0,20);
+    assert(halo.valid() && halo.argb[0]==0);
+    assert((halo.argb[40*halo.width+10]>>24)>0);
+    auto background=PhotoBackdrop(320,180);
+    assert(background.valid());
+    for(auto pixel:background.argb)assert((pixel>>24)==255);
+    assert(background.argb[0]!=background.argb[90*320+160]);
     return 0;
 }

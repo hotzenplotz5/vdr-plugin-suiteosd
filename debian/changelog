@@ -1,3 +1,11 @@
+vdr-plugin-suiteosd (0.9.25~dev) unstable; urgency=medium
+
+  * Implement the approved photo gallery grid and 3D carousel design.
+  * Compose rounded photo cards, focus halos and reflections over an opaque native canvas.
+  * Keep Image Next playback ownership and persistent view selection.
+
+ -- VDR-Suite contributors <noreply@github.com>  Fri, 27 Nov 2026 08:15:00 +0100
+
 vdr-plugin-suiteosd (0.9.24~dev) unstable; urgency=medium
 
   * Prepare Home snapshots and initial graphics before menu opening.

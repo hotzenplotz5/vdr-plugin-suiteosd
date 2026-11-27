@@ -63,7 +63,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.24-dev";
+static const char *VERSION = "0.9.25-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -1174,6 +1174,7 @@ private:
     bool recordingsActive = false;
     bool photosActive = false;
     suiteosd::PhotoGallery photoGallery;
+    suiteosd::CarouselBitmap photoBackdrop;
     bool photoInfoVisible = false;
     float photoVisualCenter = 0.0f;
     float photoAnimationFrom = 0.0f;
@@ -3787,8 +3788,8 @@ private:
             imagenext::Thumbnail request;
             request.source = photoGallery.source;
             request.path = item.cover;
-            request.maxWidth = std::min(896, std::max(1, X(carousel ? 720 : 266)));
-            request.maxHeight = std::min(896, std::max(1, Y(carousel ? 450 : 140)));
+            request.maxWidth = std::min(896, std::max(1, X(carousel ? 720 : 760)));
+            request.maxHeight = std::min(896, std::max(1, Y(carousel ? 450 : 310)));
             if (provider->Service(imagenext::kThumbnail, &request) && request.ready) {
                 if (photoThumbnails.size() >= 20)
                     photoThumbnails.clear(); // bound the foreground ARGB copies
@@ -3830,6 +3831,7 @@ private:
         if (t >= 1.0f) {
             photoVisualCenter = photoAnimationTo;
             photoAnimating = false;
+            SetNeedsFastResponse(false);
         }
     }
 
@@ -3842,6 +3844,7 @@ private:
         photoAnimationStart = std::chrono::steady_clock::now();
         photoLastFrame = photoAnimationStart;
         photoAnimating = true;
+        SetNeedsFastResponse(true); // native animation frames only
     }
 
     // VDR's existing setup.conf is the only persistent preference owner.
@@ -3891,6 +3894,11 @@ private:
         if (nav.sideFocused)
             nav.sideFocused = false;
 
+        if (base != kLeft && base != kRight) {
+            photoAnimating = false;
+            photoVisualCenter = float(photoGallery.selected);
+            SetNeedsFastResponse(false);
+        }
         if (base == k1) {
             togglePhotoView();
         } else if (base == kBack || base == kBlue) {
@@ -3982,243 +3990,186 @@ private:
                source : source + " / " + photoGallery.directory;
     }
 
-    void drawPhotoCarousel()
+    // The gallery uses one opaque native canvas. The ARGB layers never
+    // replace layer-0 pixels on the output device directly.
+    void photoComposite(cPixmapMemory &canvas,int x,int y,
+                        const suiteosd::CarouselBitmap &bitmap)
     {
-        // DrawImage/DrawRectangle on VDR's layer 0 replace ARGB pixels.
-        // Composite translucent cards, cutouts and reflections over an opaque
-        // gallery surface first, so they cannot expose the live video plane.
-        const int canvasTop = Y(180);
-        const int canvasHeight = Y(810) - canvasTop;
-        if (width < 1 || canvasHeight < 1) return;
-        cPixmapMemory canvas(0, cRect(0, 0, width, canvasHeight));
-        canvas.Fill(kBackground);
-        auto canvasFill = [&](int left, int top, int right, int bottom, tColor color) {
-            const int x0 = X(left), y0 = Y(top) - canvasTop;
-            const int x1 = suiteosd::InclusiveOsdEnd(right,1600,width);
-            const int y1 = suiteosd::InclusiveOsdEnd(bottom,900,height) - canvasTop;
-            if (x1 >= x0 && y1 >= y0)
-                canvas.DrawRectangle(cRect(x0, y0, x1-x0+1, y1-y0+1), color);
-        };
-        auto canvasPrint = [&](int x, int y, const std::string &s, const cFont *f,
-                               tColor fg, int maxWidth) {
-            if (f && !s.empty())
-                canvas.DrawText(cPoint(X(x), Y(y)-canvasTop), s.c_str(),
-                                fg, clrTransparent, f, X(maxWidth));
-        };
-        auto composite = [&](int x, int y, const suiteosd::CarouselBitmap &bitmap) {
-            const cSize size(bitmap.width, bitmap.height);
-            const cRect rect(0, 0, bitmap.width, bitmap.height);
-            cPixmapMemory layer(1, rect);
-            const cImage image(size, bitmap.argb.data());
-            layer.DrawImage(cPoint(0,0), image);
-            canvas.Render(&layer, rect, cPoint(x, y-canvasTop));
-        };
-        for (int y = 568; y < 810; y += 12) {
-            const int intensity = std::max(0, 0x34 - (y - 568) / 5);
-            const tColor floor = 0xFF000000U | (uint32_t(intensity / 3) << 16) |
-                                 (uint32_t(intensity) << 8) | uint32_t(intensity + 12);
-            canvasFill(0, y, 1599, y + 11,
-                       suiteosd::CinemaMix(kBackground, floor, 208.0/255.0));
+        if (!bitmap.valid()) return;
+        const cRect rect(0,0,bitmap.width,bitmap.height);
+        cPixmapMemory layer(1,rect);
+        const cImage image(cSize(bitmap.width,bitmap.height),bitmap.argb.data());
+        layer.DrawImage(cPoint(0,0),image);
+        canvas.Render(&layer,rect,cPoint(x,y));
+    }
+
+    void photoPanel(cPixmapMemory &canvas,int x,int y,int w,int h,int radius,
+                    tColor color,tColor rim=0,int border=0,int halo=0)
+    {
+        const int pad=halo?std::max(1,Y(halo)):0;
+        const auto patch=suiteosd::PhotoPanel(std::max(1,X(w)),std::max(1,Y(h)),
+            float(Y(radius)),color,rim,float(border?std::max(1,Y(border)):0),pad);
+        photoComposite(canvas,X(x)-pad,Y(y)-pad,patch);
+    }
+
+    void photoText(cPixmapMemory &canvas,int x,int y,int w,
+                   const std::string &s,const cFont *font,tColor color,bool center=false)
+    {
+        if (!font || s.empty() || w<=0) return;
+        const int left=X(x), avail=X(w);
+        const int dx=center?std::max(0,(avail-font->Width(s.c_str()))/2):0;
+        canvas.DrawText(cPoint(left+dx,Y(y)),s.c_str(),color,clrTransparent,font,
+                        std::max(1,avail-dx));
+    }
+
+    void photoCard(cPixmapMemory &canvas,int index,const suiteosd::CarouselSlot &slot,
+                   bool focus,bool carousel)
+    {
+        std::string name,cover;
+        bool folder=true;
+        if (photoGallery.InSources()) name=photoGallery.sources[index].title;
+        else {
+            const auto &item=photoGallery.entries[index];
+            name=item.name;cover=item.cover;folder=item.directory;
         }
-
-        // Photos farther away are painted first, so arriving photos appear
-        // to travel in front of the receding ones, towards the centre.
-        const float centre = photoVisualCenter;
-        std::vector<int> visible;
-        const int first = std::max(0, int(std::floor(centre)) - 3);
-        const int last = std::min(photoGallery.Count(), int(std::ceil(centre)) + 4);
-        for (int index = first; index < last; ++index)
-            if (std::fabs(float(index) - centre) <= 2.22f)
-                visible.push_back(index);
-        std::stable_sort(visible.begin(), visible.end(), [centre](int a, int b) {
-            return std::fabs(float(a) - centre) > std::fabs(float(b) - centre);
-        });
-
-        for (int index : visible) {
-            const auto slot = suiteosd::CarouselGeometry(float(index) - centre);
-            if (slot.width < 1 || slot.height < 1) continue;
-            const bool foreground =
-                std::fabs(float(index) - centre) < 0.5f;
-            const int drawX = X(slot.x);
-            const int drawY = Y(slot.y);
-            const int drawW = std::max(1, X(slot.width));
-            const int drawH = std::max(1, Y(slot.height));
-
-            std::string label;
-            std::string cover;
-            bool folder = true;
-            if (photoGallery.InSources()) {
-                label = photoGallery.sources[index].title;
-            } else {
-                const auto &item = photoGallery.entries[index];
-                label = item.name;
-                cover = item.cover;
-                folder = item.directory;
-            }
-
-            // Deep cyan focus surround; side cards have quieter blue edges.
-            if (foreground) {
-                canvasFill(slot.x - 9, slot.y - 9,
-                     slot.x + slot.width + 9, slot.y + slot.height + 9,
-                     suiteosd::CinemaMix(kBackground, 0xFF37C8EE, 0.4));
-                canvasFill(slot.x - 4, slot.y - 4,
-                     slot.x + slot.width + 4, slot.y + slot.height + 4,
-                     kFocus);
-            }
-
-            const std::string key = std::to_string(photoGallery.source) + ":" + cover;
-            const auto found = cover.empty() ? photoThumbnails.end() :
-                              photoThumbnails.find(key);
-            bool rendered = false;
-            if (found != photoThumbnails.end() && found->second.ready &&
-                !found->second.argb.empty()) {
-                const auto &thumb = found->second;
-                const auto picture = suiteosd::WarpCarousel(
-                    thumb.argb.data(), thumb.width, thumb.height,
-                    drawW, drawH, slot.side, slot.inset, slot.opacity);
-                if (picture.valid()) {
-                    composite(drawX, drawY, picture);
-                    const auto reflection = suiteosd::ReflectCarousel(
-                        picture, std::max(1, Y(foreground ? 72 : 48)));
-                    if (reflection.valid()) {
-                        composite(drawX, drawY + drawH + Y(9), reflection);
-                    }
-                    rendered = true;
-                }
-            }
-            if (!rendered) {
-                canvasFill(slot.x + 1, slot.y + 1,
-                     slot.x + slot.width - 1, slot.y + slot.height - 1,
-                     foreground ? kCardAlt : kCard);
-                canvasPrint(slot.x + 16, slot.y + slot.height / 2 - 20,
-                      folder ? "ORDNER" : "FOTO", fontBody,
-                      foreground ? kFocus : kMuted,
-                      std::max(1, slot.width - 28));
-                if (foreground)
-                    canvasPrint(slot.x + 17, slot.y + slot.height / 2 + 16,
-                          label, fontSmall, kText, slot.width - 35);
-            }
+        const int x=slot.x,y=slot.y,w=slot.width,h=slot.height;
+        const int pw=std::max(1,X(w)),ph=std::max(1,Y(h));
+        const float radius=float(std::max(1,Y(focus?25:18)));
+        const float rim=float(std::max(1,Y(focus?5:1)));
+        const tColor edge=focus?0xFF53ECFFU:0xFF368CA8U;
+        // The soft halo follows the selected card and fades into the backdrop.
+        // While the carousel is between slots the warped rim alone marks focus.
+        if(focus && slot.inset<0.025f)
+            photoPanel(canvas,x,y,w,h,25,0x00000000U,edge,0,24);
+        const auto found=cover.empty()?photoThumbnails.end():photoThumbnails.find(
+            std::to_string(photoGallery.source)+":"+cover);
+        const uint32_t placeholder=0xFF101E34U;
+        const bool loaded=found!=photoThumbnails.end()&&found->second.ready&&
+            !found->second.argb.empty();
+        const auto picture=loaded?suiteosd::WarpCarousel(found->second.argb.data(),
+            found->second.width,found->second.height,pw,ph,slot.side,slot.inset,
+            slot.opacity,radius,rim,edge):
+            suiteosd::WarpCarousel(&placeholder,1,1,pw,ph,slot.side,slot.inset,
+                slot.opacity,radius,rim,edge);
+        if(carousel&&picture.valid()){
+            const auto mirror=suiteosd::ReflectCarousel(picture,std::max(1,Y(focus?108:78)));
+            photoComposite(canvas,X(x),Y(y)+ph+Y(9),mirror);
         }
-
-        const cImage composed(cSize(width, canvasHeight),
-                              reinterpret_cast<const tColor *>(canvas.Data()));
-        osd->DrawImage(cPoint(0, canvasTop), composed);
-
-        std::string name;
-        if (photoGallery.InSources()) {
-            const auto *entry = photoGallery.SelectedSource();
-            if (entry) name = entry->title;
-        } else {
-            const auto *entry = photoGallery.SelectedEntry();
-            if (entry) name = entry->name;
-        }
-        if (photoGallery.Count()) {
-            print(454, 694, name, fontLarge, kText, 692);
-            print(678, 745, "<   " +
-                  std::to_string(photoGallery.selected + 1) + " / " +
-                  std::to_string(photoGallery.Count()) + "   >",
-                  fontBody, kMuted, 250);
-            // Five position markers underneath the focussed photo.
-            for (int i = -2; i <= 2; ++i)
-                fill(795 + i * 36, 793, 808 + i * 36, 801,
-                     i == 0 ? kFocus : kLine);
-        } else if (photoNotice.empty()) {
-            print(376, 480, "Dieser Ordner enthält keine Fotos",
-                  fontLarge, kMuted, 890);
+        photoComposite(canvas,X(x),Y(y),picture);
+        if(!loaded)
+            photoText(canvas,x+12,y+h/2-16,w-24,folder?"ORDNER":"FOTO",
+                      fontLarge,kMuted,true);
+        // Photos are the content; only the selected file needs its filename.
+        // Folder names stay visible so remote navigation remains meaningful.
+        if((focus||folder)&&(!carousel||slot.inset<0.025f)){
+            const int labelH=focus?48:38;
+            photoPanel(canvas,x+6,y+h-labelH-6,w-12,labelH,13,0xC0051828U);
+            photoText(canvas,x+14,y+h-labelH+3,w-28,name,
+                      focus?fontBody:fontSmall,kText,true);
         }
     }
 
-    void drawPhotoGrid()
+    void drawPhotoCarousel(cPixmapMemory &canvas)
     {
-        // The original grid remains available and uses the same cached
-        // image_next thumbnails, now without an unnecessary right panel.
-        const int start = photoGallery.firstVisible;
-        const int last = std::min(photoGallery.Count(),
-                                  start + suiteosd::PhotoGallery::kVisible);
-        for (int index = start; index < last; ++index) {
-            const int cell = index - start;
-            const int x = 41 + (cell % suiteosd::PhotoGallery::kColumns) * 310;
-            const int y = 210 + (cell / suiteosd::PhotoGallery::kColumns) * 194;
-            const bool focused = index == photoGallery.selected;
-            panel(x, y, 291, 176, focused, kCardAlt);
-            fill(x + 10, y + 10, x + 280, y + 133, kLine);
-            std::string name;
-            std::string cover;
-            bool folder = true;
-            if (photoGallery.InSources()) {
-                name = photoGallery.sources[index].title;
-            } else {
-                const auto &item = photoGallery.entries[index];
-                name = item.name;
-                cover = item.cover;
-                folder = item.directory;
-            }
-            const auto found = photoThumbnails.find(
-                std::to_string(photoGallery.source) + ":" + cover);
-            if (!cover.empty() && found != photoThumbnails.end() &&
-                found->second.ready && !found->second.argb.empty()) {
-                const auto &thumb = found->second;
-                cImage picture(cSize(thumb.width, thumb.height), thumb.argb.data());
-                osd->DrawImage(cPoint(X(x + 145) - thumb.width / 2,
-                                      Y(y + 70) - thumb.height / 2), picture);
-            } else
-                print(x + 32, y + 53, folder ? "ORDNER" : "FOTO",
-                      fontBody, focused ? kFocus : kMuted, 221);
-            print(x + 13, y + 144, name, fontSmall, kText, 263);
+        const float centre=photoVisualCenter;
+        std::vector<int> visible;
+        const int first=std::max(0,int(std::floor(centre))-3);
+        const int last=std::min(photoGallery.Count(),int(std::ceil(centre))+4);
+        for(int i=first;i<last;++i)
+            if(std::fabs(float(i)-centre)<=2.22f)visible.push_back(i);
+        std::stable_sort(visible.begin(),visible.end(),[centre](int a,int b){
+            return std::fabs(float(a)-centre)>std::fabs(float(b)-centre);
+        });
+        for(int index:visible){
+            const auto slot=suiteosd::CarouselGeometry(float(index)-centre);
+            photoCard(canvas,index,slot,std::fabs(float(index)-centre)<0.5f,true);
         }
-        if (!photoGallery.Count() && photoNotice.empty())
-            print(200, 410, "Keine Bilder vorhanden", fontLarge, kMuted);
+        if(photoGallery.Count()){
+            photoText(canvas,420,646,760,"<   "+std::to_string(photoGallery.selected+1)+
+                " / "+std::to_string(photoGallery.Count())+"   >",fontLarge,kText,true);
+            const int dots=std::min(9,photoGallery.Count());
+            const int firstDot=std::clamp(photoGallery.selected-dots/2,0,photoGallery.Count()-dots);
+            for(int i=0;i<dots;++i){
+                const bool active=firstDot+i==photoGallery.selected;
+                photoPanel(canvas,800-dots*18+i*36+11,708,13,13,4,
+                    active?0xFF37E9FFU:0xFF125994U,0,0,0);
+            }
+        }
+    }
+
+    void drawPhotoGrid(cPixmapMemory &canvas)
+    {
+        const int start=photoGallery.firstVisible;
+        const int count=std::min(photoGallery.Count()-start,suiteosd::PhotoGallery::kVisible);
+        // Paint the focus last so its slight enlargement floats over adjacent
+        // tiles without shifting their positions or the D-pad selection.
+        for(int pass=0;pass<2;++pass)for(int cell=0;cell<count;++cell){
+            const int index=start+cell;
+            const bool focus=index==photoGallery.selected;
+            if(focus!=(pass==1))continue;
+            const int column=suiteosd::PhotoGallery::GridStart(cell,count);
+            const int span=suiteosd::PhotoGallery::GridSpan(cell,count);
+            suiteosd::CarouselSlot slot;
+            slot.x=52+column*380;slot.y=194+(cell/4)*304;
+            slot.width=span*380-24;slot.height=270;
+            if(focus){slot.x-=9;slot.y-=8;slot.width+=18;slot.height+=16;}
+            photoCard(canvas,index,slot,focus,false);
+        }
     }
 
     void drawPhotoGallery()
     {
-        // Do not inherit the transparent preview cutout from Home. A fresh
-        // opaque full-pixel background is required on EVERY gallery repaint,
-        // including carousel animation and navigation after video resizing.
-        osd->DrawRectangle(0, 0, width - 1, height - 1, kBackground);
-        fill(0, 0, 1599, 76, kSurface);
-        print(32, 23, "VDR Suite", fontLarge, kText, 226);
-        print(284, 24, "Bilder", fontLarge, kMuted, 1000);
-        print(1390, 24, formatTime(time(nullptr)), fontLarge, kText, 175);
+        // One cached opaque background and one composed frame. This also
+        // keeps the carousel's reflection and rounded grid free of live TV.
+        if(!photoBackdrop.valid()||photoBackdrop.width!=width||photoBackdrop.height!=height)
+            photoBackdrop=suiteosd::PhotoBackdrop(width,height);
+        if(!photoBackdrop.valid())return;
+        cPixmapMemory canvas(0,cRect(0,0,width,height));
+        const cImage background(cSize(width,height),photoBackdrop.argb.data());
+        canvas.DrawImage(cPoint(0,0),background);
+        canvas.DrawRectangle(cRect(X(27),Y(82),X(1546),std::max(1,Y(1))),0xFF25466BU);
+        canvas.DrawRectangle(cRect(X(265),Y(26),std::max(1,X(1)),Y(30)),0xFF4479ABU);
+        photoText(canvas,52,22,208,"VDR Suite",fontCinemaBrand,kText);
+        photoText(canvas,315,22,300,"Bilder",fontCinemaBrand,0xFF38E9FFU);
+        photoText(canvas,1380,22,166,formatTime(time(nullptr)),fontCinemaBrand,kText,true);
+        photoText(canvas,52,108,1496,photoFolderTitle(),fontCinemaBrand,kText);
 
-        // The title bar contains only the currently selected folder/source.
-        panel(20, 94, 1560, 63, false, kSurface);
-        print(76, 105, photoFolderTitle(), fontLarge, kText, 1430);
+        const bool carousel=photoGallery.view==suiteosd::PhotoGallery::View::Carousel;
+        if(carousel)drawPhotoCarousel(canvas);else drawPhotoGrid(canvas);
+        if(!photoGallery.Count()&&photoNotice.empty())
+            photoText(canvas,200,420,1200,"Dieser Ordner enthält keine Bilder",fontLarge,kMuted,true);
 
-        if (photoGallery.view == suiteosd::PhotoGallery::View::Carousel)
-            drawPhotoCarousel();
-        else
-            drawPhotoGrid();
+        // Shared rounded action bar matching both approved designs.
+        photoPanel(canvas,26,792,1548,78,28,0xE00B203CU,0xFF20578DU,1);
+        for(int x:{298,604,854,1240})
+            canvas.DrawRectangle(cRect(X(x),Y(814),std::max(1,X(1)),Y(32)),0xFF31577BU);
+        photoPanel(canvas,72,812,60,38,10,0xFFF12449U);
+        photoText(canvas,72,816,60,"OK",fontBody,kText,true);
+        photoText(canvas,148,816,145,"Vollbild",fontBody,kText);
+        photoPanel(canvas,364,812,55,38,10,0xFF09C753U);
+        photoText(canvas,364,816,55,">",fontBody,kText,true);
+        photoText(canvas,435,816,160,"Diashow",fontBody,kText);
+        photoPanel(canvas,668,812,53,38,10,0xFFFFC619U);
+        photoText(canvas,668,816,53,"i",fontBody,kBackground,true);
+        photoText(canvas,738,816,110,"Info",fontBody,kText);
+        photoPanel(canvas,916,812,55,38,10,0xFF15DFFFU);
+        photoText(canvas,916,816,55,"1",fontBody,kBackground,true);
+        photoText(canvas,989,816,240,carousel?"Raster wählen":"Karussell wählen",fontBody,kText);
+        photoText(canvas,1260,816,285,"Zurück: Ordner",fontBody,0xFF38E9FFU,true);
 
-        // One compact footer; no sidebar, permanent info panel or menus.
-        panel(20, 827, 1560, 66, false, kSurface);
-        fill(81, 845, 129, 875, 0xFFE42330);
-        print(91, 846, "OK", fontSmall, kText);
-        print(151, 846, "Vollbild", fontSmall, kText);
-        fill(366, 845, 410, 875, 0xFF138D35);
-        print(377, 847, ">", fontSmall, kText);
-        print(425, 846, "Diashow", fontSmall, kText);
-        fill(682, 845, 722, 875, 0xFFEAC10C);
-        print(698, 846, "i", fontSmall, kBackground);
-        print(738, 846, "Info", fontSmall, kText);
-        fill(909, 845, 949, 875, 0xFF1468D9);
-        print(919, 846, "1", fontSmall, kText);
-        print(969, 846,
-              photoGallery.view == suiteosd::PhotoGallery::View::Carousel ?
-              "Raster wählen" : "Karussell wählen", fontSmall, kText, 265);
-        print(1328, 846, "Zurück: Ordner", fontSmall, kMuted, 248);
-
-        if (photoInfoVisible) {
-            const auto *entry = photoGallery.SelectedEntry();
-            if (entry) {
-                fill(235, 775, 1390, 814, kSurface);
-                print(257, 784, entry->path, fontSmall, kText, 1100);
+        if(photoInfoVisible){
+            const auto *entry=photoGallery.SelectedEntry();
+            if(entry){
+                photoPanel(canvas,188,741,1224,43,12,0xF010243CU);
+                photoText(canvas,210,749,1180,entry->path,fontSmall,kText,true);
             }
         }
-        if (!photoNotice.empty()) {
-            fill(161, 777, 1480, 820, kSurface);
-            print(188, 785, photoNotice, fontSmall, kFocus, 1262);
+        if(!photoNotice.empty()){
+            photoPanel(canvas,160,741,1280,43,12,0xF010243CU);
+            photoText(canvas,182,749,1236,photoNotice,fontSmall,kFocus,true);
         }
+        const cImage frame(cSize(width,height),reinterpret_cast<const tColor *>(canvas.Data()));
+        osd->DrawImage(cPoint(0,0),frame);
     }
 
     // Resolve exact native IDs in the existing local VDR recording list.
