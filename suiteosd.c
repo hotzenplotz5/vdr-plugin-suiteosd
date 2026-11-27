@@ -2333,6 +2333,7 @@ private:
         }
     }
     void drawHomeSidePanel() {
+        focusClockMinute=time(nullptr)/60;
         drawHomeFocusPanel();
     }
 
@@ -4220,17 +4221,18 @@ private:
             return result;
         });
     }
-    bool finishHomePoster(){
-        if(!homePosterJob.valid()||homePosterJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return false;
+    std::string finishHomePoster(){
+        if(!homePosterJob.valid()||homePosterJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return {};
         auto result=homePosterJob.get();
-        if(result.generation!=homePosterGeneration)return false;
+        if(result.generation!=homePosterGeneration)return {};
         if(publicPosterOrder.size()>=96){
             cinematicComposites.clear();
             publicHomePosters.erase(publicPosterOrder.front());publicPosterOrder.pop_front();
         }
-        publicPosterOrder.push_back(result.key);
-        publicHomePosters.emplace(result.key,std::move(result));
-        return true;
+        const auto key=result.key;
+        publicPosterOrder.push_back(key);
+        publicHomePosters.emplace(key,std::move(result));
+        return key;
     }
     void drawCoreCards(const HomeRail &rail,int first,int selected,int y,bool focus,bool moreCard=false) {
         if(!rail.status.ok){
@@ -4724,9 +4726,27 @@ public:
         }
         if(homeDetailPending&&base!=kNone){homeDetailPending=false;invalidateSearchRead();notice.clear();}
         const bool homeChanged=finishHomeRead();
-        const bool posterChanged=finishHomePoster();
+        const auto posterChanged=finishHomePoster();
         const bool searchChanged=finishSearchRead();
-        if(posterChanged&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails)draw();
+        if(!posterChanged.empty()&&osd&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails){
+            if(!homeCollections.empty())draw();
+            else {
+                bool changed=false;
+                const int first=nav.firstVisibleSection;
+                for(int section=first;section<first+HL::rows;++section){
+                    const auto it=homeRails.find(section);
+                    if(it==homeRails.end())continue;
+                    const auto &cards=it->second.page.cards;
+                    const int start=nav.firstCard[section];
+                    for(int i=start;i<start+HL::visibleColumns(nav.sideFocused)&&i<int(cards.size());++i)
+                        if(homePosterKey(cards[i].recording)==posterChanged){
+                            redrawHomeRail(section,first,true);changed=true;break;
+                        }
+                }
+                if(changed){drawHomeFocusPanel();osd->Flush();}
+                scheduleVisibleHomePoster();
+            }
+        }
         if(searchChanged&&!searchActive&&base==kNone&&osd){draw();return osContinue;}
         if (searchActive) {
             if(base==kNone){if(searchChanged)draw();return osContinue;}

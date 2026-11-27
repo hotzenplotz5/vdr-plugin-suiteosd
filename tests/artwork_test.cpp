@@ -8,6 +8,8 @@
 #include <jpeglib.h>
 #include <png.h>
 #include <string>
+#include <fstream>
+#include <iterator>
 
 int main()
 {
@@ -46,6 +48,11 @@ int main()
     image.format = PNG_FORMAT_RGBA;
     assert(png_image_write_to_file(&image, pngPath.c_str(), 0, rgba, 0, nullptr));
     auto png = suiteosd::LoadArtwork(pngPath, 2, 2);
+    auto readBytes=[](const std::string &path){std::ifstream f(path,std::ios::binary);return std::string(std::istreambuf_iterator<char>(f),{});};
+    auto pngBytes=suiteosd::LoadArtworkBytes(readBytes(pngPath),2,2);
+    assert(pngBytes.valid()&&pngBytes.argb==png.argb);
+    assert(suiteosd::LoadArtworkBytes(readBytes(pngPath),1,1).width==1);
+    assert(!suiteosd::LoadArtworkBytes("invalid image bytes",2,2).valid());
     assert(png.valid() && png.width == 2 && png.height == 2);
     assert(png.argb[0] == 0xFFFF0000u);
     assert(png.argb[3] == 0x80FFFFFFu);
@@ -99,6 +106,9 @@ int main()
     fclose(f);
 
     auto jpeg = suiteosd::LoadArtwork(jpegPath, 2, 2);
+    auto jpegBytes=suiteosd::LoadArtworkBytes(readBytes(jpegPath),2,2);
+    assert(jpegBytes.valid()&&jpegBytes.width==2&&jpegBytes.height==2);
+    assert((jpegBytes.argb[0]>>24)==255);
     assert(jpeg.valid() && jpeg.width == 2 && jpeg.height == 2);
     assert((jpeg.argb[0] & 0xFF000000u) == 0xFF000000u);
     assert(!suiteosd::LoadArtwork("/nonexistent/suiteosd-artwork.jpg", 3, 3).valid());
