@@ -50,6 +50,7 @@
 #include <cmath>
 #include <chrono>
 #include <future>
+#include <memory>
 #include <deque>
 #include <thread>
 #include <ctime>
@@ -132,6 +133,13 @@ struct RecordingDetailImage {
     suiteosd::DetailMetadata metadata;
     suiteosd::Artwork fanart;
     suiteosd::Artwork poster;
+    std::string status;
+    bool canonical=false;
+};
+struct RecordingDetailReadback {
+    std::string fileName;
+    unsigned long generation=0;
+    RecordingDetailImage image;
 };
 
 struct Snapshot {
@@ -505,6 +513,7 @@ class NativeHomeCache {
     };
     std::deque<Work> pending;
     std::future<Result> job;
+    std::vector<std::future<RecordingDetailReadback>> retiredDetails;
     std::future<void> publicPrime;
     std::atomic<bool> publicPrimeCancel{false};
     bool publicPrimeRequested=true;
@@ -726,6 +735,7 @@ public:
     void closed(){menu=false;dirty.clear();evicted.clear();}
     void cancelPending(){++generation;pending.clear();nativePrimeRequested=true;}
     unsigned long snapshotRevision()const{return snapshotRevision_;}
+    void retireDetail(std::future<RecordingDetailReadback> job){if(job.valid())retiredDetails.push_back(std::move(job));}
     void recordingMetadataChanged(){publicPrimeRequested=true;}
     std::size_t pixelBytes()const{return artwork.totalWeight(bytes)+logos.totalWeight(bytes);}
     const suiteosd::Artwork &programme(const Programme &p,bool visible=true){
@@ -803,6 +813,7 @@ public:
     }
     void tick(){
         if(stopped)return;
+        retiredDetails.erase(std::remove_if(retiredDetails.begin(),retiredDetails.end(),[](auto &f){return f.wait_for(std::chrono::seconds(0))==std::future_status::ready;}),retiredDetails.end());
         if(job.valid()&&job.wait_for(std::chrono::seconds(0))==std::future_status::ready){
             try{apply(job.get());++completed;}catch(const std::exception &){esyslog("suiteosd: native Home preparation failed");}
             inFlight.clear();
@@ -842,6 +853,8 @@ public:
         if(job.valid())job.wait();
         if(publicPrime.valid())publicPrime.wait();
         if(backgroundJob.valid())backgroundJob.wait();
+        for(auto &f:retiredDetails)if(f.valid())f.wait();
+        retiredDetails.clear();
     }
 };
 
@@ -970,6 +983,10 @@ private:
     // Titles are copied together with the portrait path, not obtained by a second scraper request.
     suiteosd::HomeLru<std::string, suiteosd::DetailMetadata> &homeRecordingTitles=nativeHome.titles;
     std::map<std::string, RecordingDetailImage> recordingDetailImages;
+    std::map<std::string,suiteosd::CoreSearchRecording> detailRows;
+    std::future<RecordingDetailReadback> detailJob;
+    std::shared_ptr<std::atomic<bool>> detailCancel=std::make_shared<std::atomic<bool>>(false);
+    unsigned long detailGeneration=0;
     suiteosd::CreditNavigation detailCastNav;
     std::map<std::string, suiteosd::Artwork> detailCastCache;
     std::map<std::string, std::vector<std::string>> recordingGenres;
@@ -2276,32 +2293,84 @@ private:
 
     const RecordingDetailImage &detailImageFor(const Recording &rec)
     {
-        auto found = recordingDetailImages.find(rec.fileName);
-        if (found != recordingDetailImages.end()) return found->second;
-        if (recordingDetailImages.size() >= 3) recordingDetailImages.clear();
-        RecordingDetailImage image;
-        // The VDR-owned cRecording and TVScraper service result are used only
-        // under VDR's read lock. Decoding follows outside the lock.
-        cPlugin *scraper = cPluginManager::GetPlugin("tvscraper");
-        if (scraper && !rec.fileName.empty()) {
-            {
-                LOCK_RECORDINGS_READ;
-                const cRecording *recording = Recordings ?
-                    Recordings->GetByName(rec.fileName.c_str()) : nullptr;
-                if (recording) {
-                    cGetScraperVideo request(nullptr, recording);
-                    if (scraper->Service("GetScraperVideo", &request) && request.m_scraperVideo) {
-                        image.metadata = suiteosd::ReadScraperDetail(request.m_scraperVideo.get());
+        auto found=recordingDetailImages.find(rec.fileName);
+        if(found!=recordingDetailImages.end())return found->second;
+        if(recordingDetailImages.size()>=3)recordingDetailImages.clear();
+        RecordingDetailImage initial;initial.metadata.title=rec.baseName;
+        initial.metadata.overview=rec.description;
+        initial.status="Suite-Metadaten werden geladen …";
+        // The native recording is authoritative for playback only. Metadata
+        // must come from the exact same Suite identity as in the Web frontend.
+        if(!detailJob.valid()){
+            suiteosd::CoreSearchRecording known;
+            if(auto it=detailRows.find(rec.fileName);it!=detailRows.end())known=it->second;
+            const std::string origin=gCoreUrl,profile=deviceProfilePath();
+            const int fw=std::min(1024,X(1050)),fh=std::min(1024,Y(500));
+            const int pw=std::min(1024,X(262)),ph=std::min(1024,Y(402));
+            const auto generation=detailGeneration;
+            auto cancel=detailCancel;
+            detailJob=std::async(std::launch::async,[rec,known,origin,profile,fw,fh,pw,ph,generation,cancel]{
+                RecordingDetailReadback result;result.fileName=rec.fileName;result.generation=generation;
+                auto &image=result.image;image.metadata.title=rec.baseName;image.metadata.overview=rec.description;
+                image.status="VDR-Aufnahmedaten · Suite-Metadaten nicht verfügbar";
+                suiteosd::CoreAdminClient client(origin);suiteosd::DeviceCredential saved;
+                if(cancel->load()||!suiteosd::loadDeviceProfile(profile,origin,saved)||!client.setDeviceCredential(saved))return result;
+                suiteosd::CoreSearchRecording matched;suiteosd::CoreSearchEvent detail;
+                const std::vector<std::string> exact{rec.fileName};
+                auto match=[&](const suiteosd::CoreSearchRecording &row){
+                    if(cancel->load()||row.backendId!="default"||row.id.empty())return false;
+                    suiteosd::CoreSearchEvent read;
+                    if(!client.publicRecordingDetail(row,read,true).ok||
+                        suiteosd::matchNativeRecording(row,read.nativeMatchProof,exact)!=rec.fileName)return false;
+                    matched=row;detail=std::move(read);return true;
+                };
+                if(!match(known)){
+                    // Search is candidate discovery only: NEVER match by title,
+                    // year, name or position. Only the native equality proof wins.
+                    const auto query=rec.baseName;
+                    if(query.size()>=2&&query.size()<=240)for(int offset=0;!cancel->load();){
+                        suiteosd::CoreGlobalSearch page;
+                        if(!client.publicSearch("default",query,false,30,offset,page).ok)break;
+                        for(const auto &row:page.recordings)if(match(row))break;
+                        if(!matched.id.empty()||!page.recordingHasMore||page.recordings.empty())break;
+                        if(offset>1000000-30)break;
+                        offset+=30;
                     }
                 }
-            }
+                if(cancel->load()||matched.id.empty())return result;
+                image.canonical=true;image.status.clear();image.metadata=std::move(detail.recordingMetadata);
+                std::string bytes;
+                if(!cancel->load()&&client.publicRecordingArtwork(matched,bytes,nullptr,{},nullptr,"poster").ok)
+                    image.poster=suiteosd::LoadArtworkBytes(bytes,pw,ph);
+                if(!cancel->load()&&client.publicRecordingArtwork(matched,bytes,nullptr,{},nullptr,"fanart").ok){
+                    image.fanart=suiteosd::LoadArtworkBytes(bytes,fw,fh);
+                    suiteosd::ExpandArtwork(image.fanart,fw,fh);
+                    suiteosd::FadeArtwork(image.fanart,kBackground);
+                }
+                return result;
+            });
+        }else{
+            // Do not cache a placeholder for a second selection until its
+            // own request has actually been launched.
+            static const RecordingDetailImage loading=[]{
+                RecordingDetailImage image;image.status="Suite-Metadaten werden geladen …";return image;
+            }();
+            return loading;
         }
-        if (image.metadata.title.empty()) image.metadata.title = rec.baseName;
-        if (!image.metadata.fanartPath.empty())
-            image.fanart = suiteosd::LoadDetailArtwork(image.metadata.fanartPath, X(1050), Y(500), true);
-        if (!image.metadata.posterPath.empty())
-            image.poster = suiteosd::LoadDetailArtwork(image.metadata.posterPath, X(262), Y(402));
-        return recordingDetailImages.emplace(rec.fileName, std::move(image)).first->second;
+        return recordingDetailImages.emplace(rec.fileName,std::move(initial)).first->second;
+    }
+    bool finishRecordingDetail(){
+        if(!detailJob.valid()||detailJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return false;
+        try{
+            auto result=detailJob.get();
+            if(result.generation!=detailGeneration)return true;
+            detailCastCache.clear();
+            recordingDetailImages[result.fileName]=std::move(result.image);
+        }catch(const std::exception &){
+            recordingDetailImages.clear();
+            esyslog("suiteosd: canonical recording detail read failed");
+        }
+        return true;
     }
 
     void drawRecordingDetailPage(const Recording &rec)
@@ -2311,7 +2380,7 @@ private:
         fill(0,0,1599,899,kBackground);
         fill(0,0,1599,78,kSurface);
         print(35,22,"VDR Suite",fontLarge,kText,226);
-        print(284,24,"AUFNAHMEN / DETAILS",fontBody,kMuted);
+        print(284,24,image.status.empty()?"AUFNAHMEN / DETAILS":image.status,fontBody,kMuted,1100);
         print(1440,23,formatTime(time(nullptr)),fontLarge);
         suiteosd::DrawRecordingHero(osd,width,height,fontTitle,fontBody,fontSmall,
             detail,rec.baseName,recordingDate(rec.start),
@@ -4071,6 +4140,7 @@ private:
                     if(result.request.detail){
                         auto row=result.request.recording;row.nativeId=result.nativeId;
                         if(resolveSearchRecording(row,searchRecording)){
+                            detailRows[searchRecording.fileName]=row;
                             detailCastNav.Close();detailScroll=0;searchNav.page=suiteosd::SearchPage::Recording;
                         }else{
                             searchEvent=std::move(result.detail);
@@ -4246,11 +4316,7 @@ private:
                 if (searchNav.tab == SearchTab::Recordings) {
                     const auto &row = searchRecordings()[i];
                     title = row.title;
-                    if(row.backendId=="default")if(const auto *local=findRecording(row.nativeId)){
-                        const auto &meta=metaFor(*local);
-                        if(!meta.title.empty())title=meta.title;
-                        if(!meta.episode.empty()&&meta.episode!=title)title+=" – "+meta.episode;
-                    }
+                    if(!row.subtitle.empty()&&row.subtitle!=title)title+=" – "+row.subtitle;
                     info = row.character.empty() ? row.subtitle : row.person + " · " + row.character;
                 } else if (searchNav.tab == SearchTab::Epg) {
                     const auto &row = globalSearch.epg[i];
@@ -4340,6 +4406,7 @@ private:
                 const int i = searchNav.selected;
                 if (searchNav.tab == SearchTab::Recordings) {
                     if (resolveSearchRecording(searchRecordings()[i], searchRecording)) {
+                        detailRows[searchRecording.fileName]=searchRecordings()[i];
                         detailCastNav.Close(); detailScroll=0; searchNav.page = SearchPage::Recording;
                     } else {
                         SearchRead request;
@@ -4758,13 +4825,13 @@ private:
                 const auto *local=findRecording(loaded&&!loaded->nativeId.empty()?loaded->nativeId:card.recording.nativeId);
                 const bool native=local&&card.recording.backendId=="default";
                 const auto *poster=loaded&&loaded->poster.valid()?&loaded->poster:
-                    native?&recordingPoster(*local,HL::posterW,HL::posterH):nullptr;
+                    native&&card.recording.id.empty()?&recordingPoster(*local,HL::posterW,HL::posterH):nullptr;
                 portraitCard(x,top,focus&&index==selected,poster);
                 const std::string subtitle=card.completed?"Angesehen":card.position>=0?playbackClock(card.position):std::string{};
                 const std::string title=loaded&&!loaded->detail.title.empty()?loaded->detail.title:
-                    native?homeRecordingTitle(*local,card.title):card.title;
+                    native&&card.recording.id.empty()?homeRecordingTitle(*local,card.title):card.title;
                 portraitTitle(x,top,title,subtitle,loaded&&!loaded->detail.subtitle.empty()?loaded->detail.subtitle:
-                              native?homeRecordingEpisode(*local):std::string{});
+                              native&&card.recording.id.empty()?homeRecordingEpisode(*local):std::string{});
                 if(card.duration>0&&card.position>=0){
                     cinemaProgress(x+9,top+HL::cardHeight-9,HL::cardWidth-18,int(100*std::clamp(double(card.position)/card.duration,0.0,1.0)));
                 }
@@ -4800,6 +4867,7 @@ private:
         if(!resolveSearchRecording(card.recording,homeDetailRecording)){
             notice="Öffentliche Aufnahme-ID noch nicht nativ zugeordnet";return false;
         }
+        if(!card.recording.id.empty())detailRows[homeDetailRecording.fileName]=card.recording;
         detailCastNav.Close();detailScroll=0;recordingDetails=true;
         homeResumeDetail=resume;homeResumeSeconds=resume?card.position:-1;
         notice.clear();return true;
@@ -5211,6 +5279,8 @@ public:
         struct rusage usage{};getrusage(RUSAGE_SELF,&usage);
         isyslog("suiteosd: HOME_PERF_PROCESS http=%llu http_bytes=%llu http_us=%llu connections=%llu decode_attempts=%llu decode_us=%llu peak_rss_kib=%ld",
             suiteosd::homePerf.http.load()-startHttp,suiteosd::homePerf.httpBytes.load()-startHttpBytes,suiteosd::homePerf.httpUs.load()-startHttpUs,suiteosd::homePerf.connections.load()-startConnections,suiteosd::homePerf.decodes.load()-startDecodes,suiteosd::homePerf.decodeUs.load()-startDecodeUs,usage.ru_maxrss);
+        detailCancel->store(true);
+        nativeHome.retireDetail(std::move(detailJob));
         nativeHome.closed();
         homeEventStop.store(true);
         for(auto &entry:homePosterJobs)if(entry.second.valid())entry.second.wait();
@@ -5300,6 +5370,8 @@ public:
         const bool homeChanged=finishHomeRead();
         const auto posterChanged=finishHomePosters();
         const bool searchChanged=finishSearchRead();
+        const bool detailChanged=finishRecordingDetail();
+        if(detailChanged&&osd&&(recordingDetails||browserDetails||(searchActive&&searchNav.page==suiteosd::SearchPage::Recording)))draw();
         const bool homeDashboard=osd&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails;
         std::vector<std::string> localKeys;std::vector<std::uintptr_t> localEvictions;
         nativeHome.takeChanges(localKeys,localEvictions);
@@ -5382,6 +5454,7 @@ public:
             draw();return osContinue;
         }
         if (recordingDetails) {
+            if(base==kNone)return osContinue;
             if(handleDetailCast(base,&homeDetailRecording))return osContinue;
             if(base==kOk||base==kPlay||base==kRed||(base==kGreen&&homeResumeDetail)){
                 const auto result=playHomeRecording(base==kGreen);
@@ -5404,6 +5477,7 @@ public:
                 }
                 if(homeEventChanged.exchange(false)){
                     nativeHome.recordingMetadataChanged();
+                    ++detailGeneration;recordingDetailImages.clear();detailRows.clear();
                     refreshHomeSnapshot();
                     // Invalidate once on hello/change; keep visible last data until refreshed.
                     for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
@@ -5459,7 +5533,7 @@ public:
         if (base == k0) {
             refreshHomeSnapshot();
             recordingMeta.clear(); // explicit refresh checks for updated scraper results
-            recordingDetailImages.clear();
+            ++detailGeneration;recordingDetailImages.clear();detailRows.clear();
             focusPreviews.clear();focusKey.clear();focusPending=false;
             cinematicComposites.clear();nativeHome.reset();
             homeRails.clear();recommendedGenreId.clear();recommendedGenreTitle.clear();invalidatePublicHomePosters();

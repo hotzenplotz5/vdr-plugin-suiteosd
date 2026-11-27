@@ -1095,6 +1095,26 @@ CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row
     next.description=stringOf(meta,"overview");
     if(next.description.empty())next.description=stringOf(root.get(),"description");
     next.startTime=stringOf(root.get(),"recordedAt");
+    auto &d=next.recordingMetadata;
+    d.title=next.title.empty()?stringOf(root.get(),"title"):next.title;
+    d.episode=next.subtitle;d.overview=next.description;
+    d.release=stringOf(meta,"releaseDate");
+    d.runtime=int(integerOf(meta,"providerRuntimeMinutes"));
+    if(d.runtime<=0){const auto seconds=integerOf(root.get(),"durationSeconds");if(seconds>0)d.runtime=int((seconds+59)/60);}
+    d.season=int(integerOf(meta,"seasonNumber"));d.episodeNumber=int(integerOf(meta,"episodeNumber"));
+    if(auto *rating=field(meta,"voteAverage"))if(json_object_is_type(rating,json_type_double)||json_object_is_type(rating,json_type_int))
+        d.rating=float(json_object_get_double(rating));
+    if(auto *genres=field(meta,"genres");json_object_is_type(genres,json_type_array))
+        for(size_t i=0;i<json_object_array_length(genres);++i){
+            auto *g=json_object_array_get_idx(genres,i);
+            if(json_object_is_type(g,json_type_string))d.genres.emplace_back(json_object_get_string(g));
+        }
+    if(d.genres.empty()){auto genre=stringOf(meta,"genreText");if(!genre.empty())d.genres.push_back(std::move(genre));}
+    if(auto *people=field(meta,"people");json_object_is_type(people,json_type_array))
+        for(size_t i=0;i<json_object_array_length(people);++i){
+            auto *p=json_object_array_get_idx(people,i);
+            AddCredit(d,{stringOf(p,"name"),stringOf(p,"role"),stringOf(p,"characterName"),{}});
+        }
     detail=std::move(next);return last_;
 }
 std::string CoreAdminClient::artworkCredentialScope() const {
@@ -1107,7 +1127,7 @@ std::string CoreAdminClient::artworkCredentialScope() const {
     return std::string(reinterpret_cast<const char*>(digest),length);
 }
 CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &row,std::string &bytes,
-    std::string *assetId,const std::string &knownAsset,int *privateMaxAge) {
+    std::string *assetId,const std::string &knownAsset,int *privateMaxAge,const std::string &requestedKind) {
     bytes.clear();if(assetId)assetId->clear();if(privateMaxAge)*privateMaxAge=0;
     if(!safeId(row.id)||row.id.rfind("rec_",0)!=0||!safeId(row.backendId))
         return (last_={false,0,"Ungültige Aufnahme-ID"});
@@ -1124,7 +1144,8 @@ CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &ro
     for(size_t i=0;i<json_object_array_length(items);++i){
         auto *item=json_object_array_get_idx(items,i);
         const auto kind=stringOf(item,"kind"),candidate=stringOf(item,"artworkId");
-        const int priority=kind=="poster"?0:kind=="fanart"?1:kind=="still"?2:kind=="banner"?3:99;
+        const int priority=!requestedKind.empty()?(kind==requestedKind?0:99):
+            kind=="poster"?0:kind=="fanart"?1:kind=="still"?2:kind=="banner"?3:99;
         if(priority<rank&&candidate.size()==32&&candidate.find_first_not_of("0123456789abcdef")==std::string::npos){
             rank=priority;id=candidate;
         }

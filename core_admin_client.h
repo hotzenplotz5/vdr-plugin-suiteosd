@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <tuple>
+#include "detail_model.h"
 
 namespace suiteosd {
 
@@ -46,6 +47,7 @@ struct CoreSearchEvent {
     std::string eventId, backendId, channelId, channelName, title, subtitle;
     std::string description, startTime, endTime, person, role, matchReason, artworkUrl, personKey;
     std::string nativeMatchProof;
+    DetailMetadata recordingMetadata;
 };
 struct CoreSearchPerson {
     std::string name, role, imageUrl;
@@ -183,7 +185,8 @@ public:
     CoreStatus publicRecordingDetail(const CoreSearchRecording &row, CoreSearchEvent &detail,
                                      bool nativeMatch = false);
     CoreStatus publicRecordingArtwork(const CoreSearchRecording &row, std::string &bytes,
-        std::string *assetId=nullptr,const std::string &knownAsset={},int *privateMaxAge=nullptr);
+        std::string *assetId=nullptr,const std::string &knownAsset={},int *privateMaxAge=nullptr,
+        const std::string &kind={});
     CoreStatus publicHomePage(const std::string &backend, HomeKind kind, const std::string &key,
                         int limit, int offset, int year, CoreHomePage &page);
     CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,

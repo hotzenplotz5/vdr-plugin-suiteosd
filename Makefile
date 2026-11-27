@@ -33,7 +33,7 @@ suite_menu.o: suite_menu.c pairing_dialog.h web_palette.h artwork_decode.h scrap
 suite_skin.o: suite_skin.c web_palette.h artwork_decode.h logo_locator.h skin_registration.h vendor/tvscraper/services.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(DEFINES) -c -o $@ $<
 
-core_admin_client.o: core_admin_client.c home_perf.h core_admin_client.h
+core_admin_client.o: core_admin_client.c home_perf.h core_admin_client.h detail_model.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 artwork_decode.o: artwork_decode.c home_perf.h artwork_decode.h
