@@ -130,6 +130,7 @@ class CoreAdminClient {
         std::string body;
         std::string etag;
         std::string cookie;
+        std::string cacheControl;
         std::string error;
         bool ok() const { return http >= 200 && http < 300 && error.empty(); }
     };
@@ -168,6 +169,7 @@ public:
     void recordingEvents(const std::string &backend, const std::atomic<bool> &stop,
                          std::atomic<bool> &changed, const std::string &domain = "recordings");
     void forgetDevice() { device_ = {}; }
+    std::string artworkCredentialScope() const;
     bool hasDeviceCredential() const { return !device_.credentialId.empty(); }
 
     CoreStatus recordingPersons(const std::string &backendId, const std::string &name,
@@ -181,7 +183,7 @@ public:
     CoreStatus publicRecordingDetail(const CoreSearchRecording &row, CoreSearchEvent &detail,
                                      bool nativeMatch = false);
     CoreStatus publicRecordingArtwork(const CoreSearchRecording &row, std::string &bytes,
-        std::string *assetId=nullptr,const std::string &knownAsset={});
+        std::string *assetId=nullptr,const std::string &knownAsset={},int *privateMaxAge=nullptr);
     CoreStatus publicHomePage(const std::string &backend, HomeKind kind, const std::string &key,
                         int limit, int offset, int year, CoreHomePage &page);
     CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,

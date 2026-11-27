@@ -608,6 +608,8 @@ class NativeHomeCache {
 public:
     suiteosd::HomeLru<std::string,suiteosd::Artwork> artwork,logos;
     suiteosd::HomeLru<std::string,suiteosd::DetailMetadata> titles;
+    using PrivateKey=std::tuple<std::string,std::string,std::string,int,int>;
+    suiteosd::PrivateArtworkCache<PrivateKey,suiteosd::Artwork> privateArtwork{32U*1024U*1024U};
     unsigned long long hits=0,misses=0,scraperCalls=0,scraperUs=0,completed=0;
     static std::string programmeKey(const Programme &p){
         return "epg:"+std::to_string(p.channelNumber)+":"+p.channel+":"+std::to_string(p.eventId)+":"+std::to_string(p.start);
@@ -617,7 +619,7 @@ public:
     }
     void reset(){
         ++generation;pending.clear();missing.clear();artwork.clear();titles.clear();logos.clear();
-        dirty.clear();evicted.clear();nextPrime={};
+        dirty.clear();evicted.clear();nextPrime={};privateArtwork.clear();
     }
     void setSize(int w,int h){
         if(w==width&&h==height)return;
@@ -655,6 +657,7 @@ public:
             setSize(area.w,area.h);nextPrime=Clock::now()+std::chrono::minutes(1);
             // Native snapshot only, never a server poll. Bound preparation to
             // the initial view, then the next rail and horizontal neighbors.
+            privateArtwork.expire();
             const auto snapshot=readVdrSnapshot();
             for(size_t i=0;i<HL::columns&&i<snapshot.now.size();++i)programme(snapshot.now[i],false);
             for(size_t i=0;i<HL::columns&&i<snapshot.next.size();++i)programme(snapshot.next[i],false);
@@ -4493,26 +4496,40 @@ private:
         const auto row=*candidate;
         const std::string origin=gCoreUrl,profile=deviceProfilePath();
         const auto generation=homePosterGeneration,revision=homePosterRevision;
-        std::string knownAsset;
-        if(const auto *cached=publicHomePoster(row))
-            if(cached->poster.valid()&&std::chrono::steady_clock::now()-cached->fetched<std::chrono::seconds(300))
-                knownAsset=cached->assetId;
         const int w=X(HL::posterW),h=Y(HL::posterH);
+        auto *privateArtwork=&nativeHome.privateArtwork;
         std::vector<std::string> names;
         if(row.backendId=="default")for(const auto &rec:data.recordings)names.push_back(rec.fileName);
-        homePosterJobs.emplace(homePosterKey(row),std::async(std::launch::async,[row,origin,profile,generation,revision,w,h,knownAsset,names=std::move(names)]{
+        homePosterJobs.emplace(homePosterKey(row),std::async(std::launch::async,[row,origin,profile,generation,revision,w,h,privateArtwork,names=std::move(names)]{
             HomePosterRead result;result.key=homePosterKey(row);result.generation=generation;result.revision=revision;
             suiteosd::CoreAdminClient client(origin);suiteosd::DeviceCredential saved;
             if(!suiteosd::loadDeviceProfile(profile,origin,saved)||!client.setDeviceCredential(saved))return result;
             result.detailStatus=client.publicRecordingDetail(row,result.detail,!names.empty());
             if(result.detailStatus.ok)
                 result.nativeId=suiteosd::matchNativeRecording(row,result.detail.nativeMatchProof,names);
-            std::string bytes;
-            result.artStatus=client.publicRecordingArtwork(row,bytes,&result.assetId,knownAsset);
-            result.reused=result.artStatus.ok&&!knownAsset.empty()&&result.assetId==knownAsset&&bytes.empty();
+            const auto scope=client.artworkCredentialScope();
+            const NativeHomeCache::PrivateKey key{scope,row.backendId,row.id,w,h};
+            if(result.detailStatus.http==401||result.detailStatus.http==403){
+                privateArtwork->erase(key);return result;
+            }
+            const auto cached=scope.empty()?decltype(privateArtwork->get(key)){}:privateArtwork->get(key);
+            std::string bytes;int maxAge=0;
+            auto began=std::chrono::steady_clock::now();
+            result.artStatus=client.publicRecordingArtwork(row,bytes,&result.assetId,cached.asset,&maxAge);
+            if(result.artStatus.ok&&!cached.asset.empty()&&result.assetId==cached.asset&&bytes.empty()){
+                if(std::chrono::steady_clock::now()<cached.expires){
+                    result.poster=cached.pixels;result.fetched=began;
+                    return result;
+                }
+                began=std::chrono::steady_clock::now();
+                result.artStatus=client.publicRecordingArtwork(row,bytes,&result.assetId,{},&maxAge);
+            }
             if(result.artStatus.ok&&!bytes.empty()){
                 result.poster=suiteosd::CoverHomePoster(suiteosd::LoadArtworkBytes(bytes,std::min(1024,w*2),std::min(1024,h*2)),w,h,0);
                 result.fetched=std::chrono::steady_clock::now();
+                if(!scope.empty())privateArtwork->put(key,{result.assetId,result.poster,began+std::chrono::seconds(maxAge)});
+            }else if(result.artStatus.http==401||result.artStatus.http==403||(result.artStatus.ok&&result.assetId.empty())){
+                privateArtwork->erase(key);
             }
             return result;
         }));
@@ -5042,10 +5059,10 @@ public:
     explicit cSuiteHome(NativeHomeCache &cache):nativeHome(cache){nativeHome.opened();}
     ~cSuiteHome() override
     {
-        isyslog("suiteosd: HOME_PERF warm=%d first_flush_us=%lld full_draws=%llu flushes=%llu flush_us=%llu dpad_samples=%llu dpad_total_us=%llu dpad_max_us=%llu native_hits=%llu native_misses=%llu scraper_calls=%llu scraper_us=%llu native_completed=%llu native_pixel_bytes=%zu",
+        isyslog("suiteosd: HOME_PERF warm=%d first_flush_us=%lld full_draws=%llu flushes=%llu flush_us=%llu dpad_samples=%llu dpad_total_us=%llu dpad_max_us=%llu native_hits=%llu native_misses=%llu scraper_calls=%llu scraper_us=%llu native_completed=%llu native_pixel_bytes=%zu private_pixel_bytes=%zu",
             int(warmOpen),firstFrameUs,fullDraws,flushes,flushUs,keySamples,keyUs,keyMaxUs,
             nativeHome.hits-startHits,nativeHome.misses-startMisses,nativeHome.scraperCalls-startScraper,
-            nativeHome.scraperUs-startScraperUs,nativeHome.completed-startCompleted,nativeHome.pixelBytes());
+            nativeHome.scraperUs-startScraperUs,nativeHome.completed-startCompleted,nativeHome.pixelBytes(),nativeHome.privateArtwork.pixelBytes());
         struct rusage usage{};getrusage(RUSAGE_SELF,&usage);
         isyslog("suiteosd: HOME_PERF_PROCESS http=%llu http_bytes=%llu http_us=%llu connections=%llu decode_attempts=%llu decode_us=%llu peak_rss_kib=%ld",
             suiteosd::homePerf.http.load()-startHttp,suiteosd::homePerf.httpBytes.load()-startHttpBytes,suiteosd::homePerf.httpUs.load()-startHttpUs,suiteosd::homePerf.connections.load()-startConnections,suiteosd::homePerf.decodes.load()-startDecodes,suiteosd::homePerf.decodeUs.load()-startDecodeUs,usage.ru_maxrss);

@@ -110,6 +110,7 @@ struct Transfer {
     std::string body;
     std::string etag;
     std::string cookie;
+    std::string cacheControl;
     bool tooLarge = false;
     size_t limit = 1024U * 1024U;
 };
@@ -135,6 +136,8 @@ size_t receiveHeader(char *bytes, size_t n, size_t size, void *ctx) {
         const std::string value = headerTrim(line.substr(col + 1));
         if (value.size() <= 256 && value.find_first_of("\r\n") == std::string::npos)
             x.etag = value;
+    } else if (strcasecmp(name.c_str(), "Cache-Control") == 0) {
+        x.cacheControl += "," + headerTrim(line.substr(col+1));
     } else if (name.size() == 10 &&
                strncasecmp(name.c_str(), "Set-Cookie", 10) == 0) {
         const std::string value = headerTrim(line.substr(col + 1));
@@ -536,7 +539,7 @@ CoreAdminClient::Reply CoreAdminClient::request(
     if(image)receive.limit=32U*1024U*1024U;
     const std::string url = origin_ + path;
     headers = curl_slist_append(headers, image?"Accept: image/png, image/jpeg, image/webp":"Accept: application/json");
-    headers = curl_slist_append(headers, "Cache-Control: no-store");
+    if(!image)headers = curl_slist_append(headers, "Cache-Control: no-store");
     if (!localSocket_.empty()) {
         // The local Core transport uses kernel peer credentials, never a
         // client-supplied identity header or the browser's credentials.
@@ -605,6 +608,7 @@ CoreAdminClient::Reply CoreAdminClient::request(
     reply.body = std::move(receive.body);
     reply.etag = std::move(receive.etag);
     reply.cookie = std::move(receive.cookie);
+    reply.cacheControl=std::move(receive.cacheControl);
     curl_easy_reset(curl);
     curl_slist_free_all(headers);
     return reply;
@@ -1093,9 +1097,18 @@ CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row
     next.startTime=stringOf(root.get(),"recordedAt");
     detail=std::move(next);return last_;
 }
+std::string CoreAdminClient::artworkCredentialScope() const {
+    if(!hasDeviceCredential())return {};
+    std::string input;
+    for(const auto *part:{&origin_,&device_.deviceId,&device_.credentialId,&device_.secret})
+        input+=std::to_string(part->size())+":"+*part;
+    unsigned char digest[EVP_MAX_MD_SIZE];unsigned int length=0;
+    if(EVP_Digest(input.data(),input.size(),digest,&length,EVP_sha256(),nullptr)!=1||length!=32U)return {};
+    return std::string(reinterpret_cast<const char*>(digest),length);
+}
 CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &row,std::string &bytes,
-    std::string *assetId,const std::string &knownAsset) {
-    bytes.clear();if(assetId)assetId->clear();
+    std::string *assetId,const std::string &knownAsset,int *privateMaxAge) {
+    bytes.clear();if(assetId)assetId->clear();if(privateMaxAge)*privateMaxAge=0;
     if(!safeId(row.id)||row.id.rfind("rec_",0)!=0||!safeId(row.backendId))
         return (last_={false,0,"Ungültige Aufnahme-ID"});
     const auto base="/api/v1/recordings/"+row.id+"/artwork";
@@ -1122,6 +1135,27 @@ CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &ro
     // follow a server-provided arbitrary URL or attach credentials to it.
     auto image=request("GET",base+"/"+id+scope,"","","","","",false,true);
     if(!status(image).ok)return last_;
+    if(privateMaxAge){
+        // Honor the actual image response, not just the documented default.
+        std::string control=image.cacheControl;
+        std::transform(control.begin(),control.end(),control.begin(),[](unsigned char ch){return char(std::tolower(ch));});
+        bool isPrivate=false,noStore=false;int age=0;
+        size_t from=0;
+        while(from<control.size()){
+            const auto end=control.find(',',from);
+            const auto part=headerTrim(control.substr(from,end-from));
+            if(part=="private")isPrivate=true;
+            else if(part=="no-store"||part=="no-cache")noStore=true;
+            else if(part.rfind("max-age=",0)==0){
+                const auto seconds=part.substr(8);
+                if(!seconds.empty()&&seconds.size()<=9&&seconds.find_first_not_of("0123456789")==std::string::npos)
+                    age=std::min(300,std::stoi(seconds));
+            }
+            if(end==std::string::npos)break;
+            from=end+1;
+        }
+        if(isPrivate&&!noStore)*privateMaxAge=age;
+    }
     bytes=std::move(image.body);
     return last_;
 }

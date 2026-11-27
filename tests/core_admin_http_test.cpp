@@ -73,10 +73,10 @@ Request readRequest(int fd) {
     return r;
 }
 void answer(int fd, const std::string &body, const std::string &extra = "",
-            int http = 200) {
+            int http = 200,const std::string &cacheControl="no-store") {
     const std::string response =
         "HTTP/1.1 " + std::to_string(http) + (http == 204 ? " No Content" : " OK") +
-        "\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n" +
+        "\r\nContent-Type: application/json\r\nCache-Control: "+cacheControl+"\r\n" +
         extra + "Content-Length: " + std::to_string(body.size()) +
         "\r\nConnection: close\r\n\r\n" + body;
     const auto sent = send(fd, response.c_str(), response.size(), MSG_NOSIGNAL);
@@ -372,7 +372,7 @@ int main() {
                 }else if(i==16){
                     assert(req.path=="/api/v1/recordings/rec_0123456789abcdef0123456789abcdef/artwork/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb?backendId=default");
                     assert(req.headers.at("accept")=="image/png, image/jpeg, image/webp");
-                    answer(fd,std::string("PNG\0test",8));
+                    answer(fd,std::string("PNG\0test",8),"",200,"private, max-age=300");
                 }else if(i==17){
                     assert(req.path=="/api/v1/recordings/rec_0123456789abcdef0123456789abcdef/artwork?backendId=default");
                     answer(fd,R"({"recordingId":"rec_0123456789abcdef0123456789abcdef","backendId":"default","items":[{"artworkId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","kind":"poster"}]})");
@@ -436,7 +436,10 @@ int main() {
     suiteosd::CoreSearchRecording imageRow;imageRow.id="rec_0123456789abcdef0123456789abcdef";imageRow.backendId="default";
     std::string imageBytes;
     std::string assetId;
-    assert(reopened.publicRecordingArtwork(imageRow,imageBytes,&assetId).ok&&imageBytes==std::string("PNG\0test",8));
+    int maxAge=0;
+    assert(reopened.publicRecordingArtwork(imageRow,imageBytes,&assetId,{},&maxAge).ok&&imageBytes==std::string("PNG\0test",8)&&maxAge==300);
+    const auto scope=reopened.artworkCredentialScope();assert(!scope.empty());
+    assert(scope==reopened.artworkCredentialScope());
     assert(assetId=="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     const auto known=assetId;
     assert(reopened.publicRecordingArtwork(imageRow,imageBytes,&assetId,known).ok&&imageBytes.empty()&&assetId==known);

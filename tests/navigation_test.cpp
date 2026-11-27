@@ -2,10 +2,21 @@
 #include "../home_cache.h"
 #include <cassert>
 #include <string>
+#include <vector>
 
 int main()
 {
     using namespace suiteosd;
+    struct Pixels {std::vector<uint32_t> argb;bool valid()const{return !argb.empty();}};
+    PrivateArtworkCache<std::string,Pixels> privateImages(8);
+    const auto now=decltype(privateImages)::Clock::now();
+    privateImages.put("scope-a",{"asset",{{1,2}},now+std::chrono::seconds(1)},now);
+    assert(privateImages.get("scope-a",now).asset=="asset"&&privateImages.get("scope-b",now).asset.empty());
+    assert(privateImages.get("scope-a",now+std::chrono::seconds(1)).asset.empty());
+    privateImages.put("scope-a",{"asset",{{1,2}},now},now);assert(privateImages.pixelBytes()==0);
+    privateImages.put("scope-a",{"asset",{{1,2}},now+std::chrono::seconds(1)},now);
+    privateImages.put("scope-b",{"asset",{{3,4}},now+std::chrono::seconds(1)},now);
+    assert(privateImages.get("scope-a",now).asset.empty()&&privateImages.pixelBytes()==8);
     static_assert(kHomePosterWorkers==4);
     HomeLru<int,int> cache;
     cache.emplace(1,10);cache.emplace(2,20);cache.emplace(3,30);
