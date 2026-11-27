@@ -183,7 +183,7 @@ Programme fromEvent(const cChannel *ch, const cEvent *event)
     return p;
 }
 
-Snapshot readVdrSnapshot()
+Snapshot readVdrSnapshot(bool prime=false)
 {
     Snapshot snapshot;
     // Copy strings while holding the authoritative VDR read locks.
@@ -196,6 +196,7 @@ Snapshot readVdrSnapshot()
             for (const cChannel *ch = Channels->First(); ch; ch = Channels->Next(ch)) {
                 if (ch->GroupSep() || ch->Number() <= 0)
                     continue;
+                if(prime&&snapshot.now.size()>=12&&ch->Number()!=liveNumber)continue;
                 const cSchedule *schedule = Schedules ? Schedules->GetSchedule(ch) : nullptr;
                 const cEvent *now = schedule ? schedule->GetPresentEvent() : nullptr;
                 const cEvent *next = schedule ? schedule->GetFollowingEvent() : nullptr;
@@ -206,8 +207,8 @@ Snapshot readVdrSnapshot()
                 }
                 // Keep VDR channel order and expose the complete rail;
                 // horizontal navigation pages through every channel.
-                snapshot.now.push_back(current);
-                snapshot.next.push_back(fromEvent(ch, next));
+                if(!prime||snapshot.now.size()<12){snapshot.now.push_back(current);
+                snapshot.next.push_back(fromEvent(ch, next));}
             }
         }
     }
@@ -216,6 +217,12 @@ Snapshot readVdrSnapshot()
         if (Recordings) {
             for (const cRecording *rec = Recordings->First(); rec; rec = Recordings->Next(rec)) {
                 Recording r;
+                if(prime){
+                    r.start=rec->Start();r.fileName=rec->FileName()?rec->FileName():"";
+                    if(snapshot.recordings.size()<6)snapshot.recordings.push_back(std::move(r));
+                    else {auto oldest=std::min_element(snapshot.recordings.begin(),snapshot.recordings.end(),[](const auto &a,const auto &b){return a.start<b.start;});if(r.start>oldest->start)*oldest=std::move(r);}
+                    continue;
+                }
                 r.title = rec->Name() ? rec->Name() : "";
                 cString baseName = rec->BaseName();
                 r.baseName = *baseName ? *baseName : r.title;
@@ -470,6 +477,13 @@ public:
 // Native Home pixels are independent of the device credentials and OSD
 // provider. The plugin owns them; VDR's main thread owns all cache mutations.
 // Only copied paths and metadata cross to the file/decode worker.
+struct NativeFocusPreview {
+    suiteosd::DetailMetadata metadata;
+    suiteosd::Artwork fanart;
+    std::array<suiteosd::CinemaPatch,2> composedFanart;
+    std::string channel;
+    int duration=-1;
+};
 class NativeHomeCache {
     using HL=suiteosd::HomeLayout;
     using Clock=std::chrono::steady_clock;
@@ -477,7 +491,7 @@ class NativeHomeCache {
         std::string key;
         Programme programme;
         Recording recording;
-        bool epg=false;
+        bool epg=false,focus=false;
         int w=0,h=0,logoW=0,logoH=0,pad=0;
         unsigned long generation=0;
     };
@@ -485,6 +499,7 @@ class NativeHomeCache {
         Work work;
         suiteosd::Artwork poster,logo;
         suiteosd::DetailMetadata title;
+        NativeFocusPreview preview;
         bool missing=false;
     };
     std::deque<Work> pending;
@@ -525,46 +540,61 @@ class NativeHomeCache {
         return it==artwork.end()?empty:it->second;
     }
     void launch(Work work){
-        // Resolve VDR pointers and TVScraper on the same VDR thread as before.
-        // Never retain a pointer or hold a VDR lock during file IO/decode.
+        // Resolve VDR pointers and TVScraper on the existing VDR main thread.
+        // Never retain a pointer or a VDR lock during file IO/decode.
         std::string path;
         suiteosd::DetailMetadata title;
+        NativeFocusPreview preview;
         const auto began=Clock::now();
-        if(auto *scraper=cPluginManager::GetPlugin("tvscraper")){
-            if(work.epg){
-                LOCK_CHANNELS_READ;
-                LOCK_SCHEDULES_READ;
-                const auto *ch=Channels?Channels->GetByNumber(work.programme.channelNumber):nullptr;
-                const auto *schedule=ch&&Schedules?Schedules->GetSchedule(ch):nullptr;
-                const auto *event=schedule? schedule->GetEventById(work.programme.eventId):nullptr;
-                if(event&&work.programme.start&&event->StartTime()==work.programme.start){
-                    cGetScraperVideo req(event,nullptr);
-                    ++scraperCalls;
-                    if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo)
-                        path=req.m_scraperVideo->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
-                            cOrientations(eOrientation::portrait,eOrientation::landscape,eOrientation::banner),true).path;
+        auto *scraper=cPluginManager::GetPlugin("tvscraper");
+        if(work.epg&&scraper){
+            LOCK_CHANNELS_READ;
+            LOCK_SCHEDULES_READ;
+            const auto *ch=Channels?Channels->GetByNumber(work.programme.channelNumber):nullptr;
+            const auto *schedule=ch&&Schedules?Schedules->GetSchedule(ch):nullptr;
+            const auto *event=schedule?schedule->GetEventById(work.programme.eventId):nullptr;
+            if(event&&work.programme.start&&event->StartTime()==work.programme.start){
+                cGetScraperVideo req(event,nullptr);
+                ++scraperCalls;
+                if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo){
+                    if(work.focus)preview.metadata=suiteosd::ReadScraperDetail(req.m_scraperVideo.get());
+                    else path=req.m_scraperVideo->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
+                        cOrientations(eOrientation::portrait,eOrientation::landscape,eOrientation::banner),true).path;
                 }
-            }else{
-                LOCK_RECORDINGS_READ;
-                const auto *r=Recordings?Recordings->GetByName(work.recording.fileName.c_str()):nullptr;
-                if(r&&r->Start()==work.recording.start){
+            }
+        }else if(!work.epg){
+            LOCK_RECORDINGS_READ;
+            const auto *r=Recordings?Recordings->GetByName(work.recording.fileName.c_str()):nullptr;
+            if(r&&r->Start()==work.recording.start){
+                if(work.focus){preview.duration=r->LengthInSeconds();if(r->Info()&&r->Info()->ChannelName())preview.channel=r->Info()->ChannelName();}
+                if(scraper){
                     cGetScraperVideo req(nullptr,r);
                     ++scraperCalls;
                     if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo){
                         auto *video=req.m_scraperVideo.get();
-                        video->getOverview(&title.title,&title.episode,nullptr,nullptr,nullptr,nullptr,nullptr);
-                        title.season=video->getSeasonNumber();title.episodeNumber=video->getEpisodeNumber();
-                        path=video->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
-                            cOrientations(eOrientation::portrait,eOrientation::landscape),true).path;
+                        if(work.focus)preview.metadata=suiteosd::ReadScraperDetail(video);
+                        else{
+                            video->getOverview(&title.title,&title.episode,nullptr,nullptr,nullptr,nullptr,nullptr);
+                            title.season=video->getSeasonNumber();title.episodeNumber=video->getEpisodeNumber();
+                            path=video->getImage(cImageLevels(eImageLevel::episodeMovie,eImageLevel::seasonMovie,eImageLevel::tvShowCollection),
+                                cOrientations(eOrientation::portrait,eOrientation::landscape),true).path;
+                        }
                     }
                 }
             }
         }
         scraperUs+=std::chrono::duration_cast<std::chrono::microseconds>(Clock::now()-began).count();
         inFlight=work.key;
-        job=std::async(std::launch::async,[work=std::move(work),path=std::move(path),title=std::move(title)]() mutable {
+        job=std::async(std::launch::async,[work=std::move(work),path=std::move(path),title=std::move(title),preview=std::move(preview)]() mutable {
             Result result;result.work=std::move(work);result.title=std::move(title);
             const auto &w=result.work;
+            if(w.focus){
+                result.preview=std::move(preview);
+                result.preview.fanart=suiteosd::CoverHomePoster(
+                    suiteosd::LoadArtwork(result.preview.metadata.fanartPath,std::min(1024,w.w*2),std::min(1024,w.h*2)),
+                    w.w,w.h,0,0xFF0B2138u);
+                return result;
+            }
             result.poster=suiteosd::CoverHomePoster(suiteosd::LoadArtwork(path,std::min(1024,w.w*2),std::min(1024,w.h*2)),w.w,w.h,0,0xFF061626u);
             result.missing=!result.poster.valid();
             if(w.epg){
@@ -579,6 +609,14 @@ class NativeHomeCache {
     void apply(Result result){
         if(result.work.generation!=generation)return;
         const auto &key=result.work.key;
+        if(result.work.focus){
+            const auto panelBytes=std::size_t(std::max(1,width*HL::rightWidth/1600))*std::max(1,height*(HL::detailBottom-HL::detailY)/900)*4;
+            const auto count=std::clamp<std::size_t>((16U*1024U*1024U)/std::max<std::size_t>(1,2*panelBytes+bytes(result.preview.fanart)),1,12);
+            while(focusPreviews.size()>=count)focusPreviews.evictOldest();
+            focusPreviews.emplace(key,std::move(result.preview));
+            if(menu)dirty.push_back(key);
+            return;
+        }
         auto old=artwork.find(key);
         const bool changed=old==artwork.end()||old->second.width!=result.poster.width||old->second.height!=result.poster.height||old->second.argb!=result.poster.argb;
         if(old!=artwork.end()){
@@ -608,6 +646,10 @@ class NativeHomeCache {
 public:
     suiteosd::HomeLru<std::string,suiteosd::Artwork> artwork,logos;
     suiteosd::HomeLru<std::string,suiteosd::DetailMetadata> titles;
+    suiteosd::HomeLru<std::string,NativeFocusPreview> focusPreviews;
+    std::array<suiteosd::Artwork,2> backgrounds;
+    suiteosd::HomeLru<std::array<int,7>,suiteosd::CinemaPatch> frames;
+    std::map<std::array<int,4>,suiteosd::CinemaPatch> glyphs;
     using PrivateKey=std::tuple<std::string,std::string,std::string,int,int>;
     suiteosd::PrivateArtworkCache<PrivateKey,suiteosd::Artwork> privateArtwork{32U*1024U*1024U};
     unsigned long long hits=0,misses=0,scraperCalls=0,scraperUs=0,completed=0;
@@ -618,7 +660,7 @@ public:
         return "rec:"+r.fileName+":"+std::to_string(w)+":"+std::to_string(h)+":"+std::to_string(r.start);
     }
     void reset(){
-        ++generation;pending.clear();missing.clear();artwork.clear();titles.clear();logos.clear();
+        ++generation;pending.clear();missing.clear();artwork.clear();titles.clear();logos.clear();focusPreviews.clear();backgrounds={};frames.clear();glyphs.clear();
         dirty.clear();evicted.clear();nextPrime={};privateArtwork.clear();
     }
     void setSize(int w,int h){
@@ -640,6 +682,19 @@ public:
         w.w=HL::posterW*width/1600;w.h=HL::posterH*height/900;
         return queue(std::move(w),visible);
     }
+    static std::string focusProgrammeKey(const Programme &p){return "focus:"+programmeKey(p);}
+    static std::string focusRecordingKey(const Recording &r){return "focus:"+recordingKey(r,0,0);}
+    void requestFocus(const Programme *p,const Recording *r,bool visible=true){
+        if(stopped||(!p&&!r))return;
+        Work w;w.focus=true;w.epg=p!=nullptr;
+        if(p){w.programme=*p;w.key=focusProgrammeKey(*p);}else{w.recording=*r;w.key=focusRecordingKey(*r);}
+        if(focusPreviews.find(w.key)!=focusPreviews.end()||inFlight==w.key)return;
+        // Only the most recent settled focus needs preparing.
+        pending.erase(std::remove_if(pending.begin(),pending.end(),[](const Work &v){return v.focus;}),pending.end());
+        w.w=std::max(1,(HL::rightWidth-4)*width/1600);w.h=std::max(1,210*height/900);w.generation=generation;
+        if(pending.size()>=64)pending.pop_back();
+        if(visible)pending.push_front(std::move(w));else pending.push_back(std::move(w));
+    }
     void takeChanges(std::vector<std::string> &keys,std::vector<std::uintptr_t> &ids){
         keys.swap(dirty);ids.swap(evicted);
     }
@@ -658,9 +713,10 @@ public:
             // Native snapshot only, never a server poll. Bound preparation to
             // the initial view, then the next rail and horizontal neighbors.
             privateArtwork.expire();
-            const auto snapshot=readVdrSnapshot();
+            const auto snapshot=readVdrSnapshot(true);
             for(size_t i=0;i<HL::columns&&i<snapshot.now.size();++i)programme(snapshot.now[i],false);
             for(size_t i=0;i<HL::columns&&i<snapshot.next.size();++i)programme(snapshot.next[i],false);
+            if(snapshot.live.channelNumber>0)requestFocus(&snapshot.live,nullptr,false);
             for(size_t i=0;i<HL::columns&&i<snapshot.recordings.size();++i)recording(snapshot.recordings[i],false);
             for(size_t i=HL::columns;i<2*HL::columns&&i<snapshot.now.size();++i)programme(snapshot.now[i],false);
             for(size_t i=HL::columns;i<2*HL::columns&&i<snapshot.next.size();++i)programme(snapshot.next[i],false);
@@ -828,20 +884,13 @@ private:
     // Only rail drawing is redirected while preparing a clipped animation strip.
     cPixmap *railDrawPixmap=nullptr;
     int railDrawX=0,railDrawY=0;
-    std::array<suiteosd::Artwork,2> cinematicBackgrounds;
-    suiteosd::HomeLru<std::array<int,7>,suiteosd::CinemaPatch> cinematicFrames;
+    std::array<suiteosd::Artwork,2> &cinematicBackgrounds=nativeHome.backgrounds;
+    suiteosd::HomeLru<std::array<int,7>,suiteosd::CinemaPatch> &cinematicFrames=nativeHome.frames;
     suiteosd::HomeLru<std::pair<std::array<int,7>,std::uintptr_t>,suiteosd::CinemaPatch> cinematicComposites;
-    std::map<std::array<int,4>,suiteosd::CinemaPatch> cinematicGlyphs;
+    std::map<std::array<int,4>,suiteosd::CinemaPatch> &cinematicGlyphs=nativeHome.glyphs;
     cFont *fontCinemaBrand=nullptr,*fontCinemaCard=nullptr,*fontCinemaMeta=nullptr;
     suiteosd::HomeLru<std::string,suiteosd::Artwork> &cinematicLogos=nativeHome.logos;
-    struct FocusPreview {
-        suiteosd::DetailMetadata metadata;
-        suiteosd::Artwork fanart;
-        std::array<suiteosd::CinemaPatch,2> composedFanart;
-        std::string channel;
-        int duration = -1;
-    };
-    suiteosd::HomeLru<std::string,FocusPreview> focusPreviews;
+    suiteosd::HomeLru<std::string,NativeFocusPreview> &focusPreviews=nativeHome.focusPreviews;
     std::string focusKey;
     std::chrono::steady_clock::time_point focusSince{};
     bool focusPending=false;
@@ -1763,10 +1812,12 @@ private:
         const std::array<int,7> key{{x,y,w,h,radius,int(style),nav.sideFocused?1:0}};
         auto it=cinematicFrames.find(key);
         if(it!=cinematicFrames.end())return it->second;
-        if(cinematicFrames.size()>=160)cinematicFrames.evictOldest();
-        return cinematicFrames.emplace(key,suiteosd::CinematicFrame(bg,X(x),Y(y),X(w),Y(h),
+        auto patch=suiteosd::CinematicFrame(bg,X(x),Y(y),X(w),Y(h),
             std::max(1,X(radius)),style,std::max(.5,double(width)/1600),
-            nav.sideFocused&&(style==suiteosd::CinemaStyle::Poster||style==suiteosd::CinemaStyle::Focus)?7:9)).first->second;
+            nav.sideFocused&&(style==suiteosd::CinemaStyle::Poster||style==suiteosd::CinemaStyle::Focus)?7:9);
+        const auto bytes=[](const auto &p){return p.image.argb.capacity()*sizeof(uint32_t);};
+        while(cinematicFrames.size()&&(cinematicFrames.size()>=160||cinematicFrames.totalWeight(bytes)+bytes(patch)>16U*1024U*1024U))cinematicFrames.evictOldest();
+        return cinematicFrames.emplace(key,std::move(patch)).first->second;
     }
     void cinemaPanel(int x,int y,int w,int h,int radius,suiteosd::CinemaStyle style)
     {
@@ -1793,11 +1844,12 @@ private:
         const auto key=std::make_pair(geom,reinterpret_cast<std::uintptr_t>(art));
         auto it=cinematicComposites.find(key);
         if(it==cinematicComposites.end()){
-            if(cinematicComposites.size()>=80)cinematicComposites.evictOldest();
             auto patch=frame;
             suiteosd::CinematicArtwork(patch,*art,X(x)+(X(w)-art->width)/2,
                 Y(y)+(Y(h)-art->height)/2,X(x),Y(y),X(w),Y(h),X(r),
                 std::max(1.0,(focused?3.5:1.2)*width/1600.0));
+            const auto bytes=[](const auto &p){return p.image.argb.capacity()*sizeof(uint32_t);};
+            while(cinematicComposites.size()&&(cinematicComposites.size()>=80||cinematicComposites.totalWeight(bytes)+bytes(patch)>16U*1024U*1024U))cinematicComposites.evictOldest();
             it=cinematicComposites.emplace(key,std::move(patch)).first;
         }
         drawCinemaImage(it->second.image,it->second.x,it->second.y);
@@ -2459,10 +2511,10 @@ private:
         }
         std::string key,title,description,facts,genre;
         if(p){
-            key="event:"+std::to_string(p->channelNumber)+":"+std::to_string(p->eventId)+":"+std::to_string(p->start);
+            key=NativeHomeCache::focusProgrammeKey(*p);
             title=p->title;description=p->description;facts=p->channel;
         }else if(rec){
-            key="recording:"+rec->fileName;title=rec->baseName;description=rec->description;
+            key=NativeHomeCache::focusRecordingKey(*rec);title=rec->baseName;description=rec->description;
         }else if(card){
             key="card:"+card->key;title=loaded&&!loaded->detail.title.empty()?loaded->detail.title:card->title;facts=card->subtitle;
             if(loaded)description=loaded->detail.description;
@@ -2471,39 +2523,7 @@ private:
         auto cached=focusPreviews.find(key);
         if(cached!=focusPreviews.end())focusPending=false;
         if(focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
-            FocusPreview preview;
-            if(p&&p->start&&p->eventId){
-                if(auto *scraper=cPluginManager::GetPlugin("tvscraper")){
-                    LOCK_CHANNELS_READ;
-                    LOCK_SCHEDULES_READ;
-                    const auto *ch=Channels?Channels->GetByNumber(p->channelNumber):nullptr;
-                    const auto *schedule=ch&&Schedules?Schedules->GetSchedule(ch):nullptr;
-                    const auto *event=schedule?schedule->GetEventById(p->eventId):nullptr;
-                    if(event&&event->StartTime()==p->start){
-                        cGetScraperVideo req(event,nullptr);
-                        if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo)
-                            preview.metadata=suiteosd::ReadScraperDetail(req.m_scraperVideo.get());
-                    }
-                }
-            }else if(rec){
-                LOCK_RECORDINGS_READ;
-                const auto *r=Recordings?Recordings->GetByName(rec->fileName.c_str()):nullptr;
-                if(r){
-                    preview.duration=r->LengthInSeconds();
-                    if(r->Info()&&r->Info()->ChannelName())preview.channel=r->Info()->ChannelName();
-                    if(auto *scraper=cPluginManager::GetPlugin("tvscraper")){
-                        cGetScraperVideo req(nullptr,r);
-                        if(scraper->Service("GetScraperVideo",&req)&&req.m_scraperVideo)
-                            preview.metadata=suiteosd::ReadScraperDetail(req.m_scraperVideo.get());
-                    }
-                }
-            }
-            // Decode only the settled selection, outside native VDR read locks.
-            preview.fanart=suiteosd::CoverHomePoster(
-                suiteosd::LoadArtwork(preview.metadata.fanartPath,std::min(1024,X(HL::rightWidth)*2),std::min(1024,Y(250)*2)),
-                X(HL::rightWidth-4),Y(210),0,0xFF0B2138u);
-            if(focusPreviews.size()>=12)focusPreviews.evictOldest();
-            cached=focusPreviews.emplace(key,std::move(preview)).first;
+            nativeHome.requestFocus(p,rec);
             focusPending=false;
         }
         if(cached!=focusPreviews.end()){
@@ -5126,10 +5146,8 @@ public:
     eOSState ProcessKey(eKeys key) override
     {
         const eKeys base = static_cast<eKeys>(key & ~k_Repeat);
-        if(base!=kNone){
-            keyPending=base==kUp||base==kDown||base==kLeft||base==kRight;
-            if(keyPending)keyAt=PerfClock::now();
-        }
+        keyPending=base==kUp||base==kDown||base==kLeft||base==kRight;
+        if(keyPending)keyAt=PerfClock::now();
         if(base==kNone&&osd&&gLivePreviewEnabled&&!searchActive&&!photosActive&&!settingsActive&&!timelineActive){
             const bool home=!recordingsActive;
             const bool wantsPreview=home?(homeHeroVisible()&&!recordingDetails&&!homeProgrammeDetails):
@@ -5154,6 +5172,9 @@ public:
         if(!localEvictions.empty())cinematicComposites.eraseIf([&](const auto &key,const auto &){
             return std::find(localEvictions.begin(),localEvictions.end(),key.second)!=localEvictions.end();
         });
+        if(homeDashboard&&!homeChanged&&std::find(localKeys.begin(),localKeys.end(),focusKey)!=localKeys.end()){
+            drawHomeFocusPanel();flushHomeOsd();
+        }
         if(!localKeys.empty()&&homeDashboard&&!homeChanged){
             if(!homeCollections.empty())draw();
             else {
