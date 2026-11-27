@@ -1,3 +1,12 @@
+vdr-plugin-suiteosd (0.9.23~dev) unstable; urgency=medium
+
+  * Retain bounded native and private Home artwork working sets across menus.
+  * Prepare native posters, logos, focus artwork and private images off the render path.
+  * Reuse HTTP connections and log Home readiness and performance counters.
+  * Keep the approved Home layout; real TV performance remains to be measured.
+
+ -- VDR-Suite contributors <noreply@github.com>  Fri, 27 Nov 2026 04:32:00 +0100
+
 vdr-plugin-suiteosd (0.9.22~dev) unstable; urgency=medium
 
   * Browse the complete native channel list in a circular Live-TV hero.

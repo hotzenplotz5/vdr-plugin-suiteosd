@@ -13,7 +13,11 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
-## Aktueller Implementierungsstand (0.9.12-dev)
+## Home-Performance (0.9.23-dev)
+
+Pluginweit begrenzte RAM-Arbeitscaches behalten native Poster und Metadaten, Fokusbilder, Logos und geometrische Renderbestandteile über Menüwechsel. Ein Worker bereitet native Inhalte auch bei geschlossenem Menü vor; ein begrenzter, an Menüwechsel gebundener Abruf wärmt private Public-v1-Aufnahmebilder. No-store-Projektionen und Details bleiben menügebunden. Das freigegebene Layout bleibt unverändert. Die Logzeilen `HOME_PERF` und `HOME_PERF_PROCESS` erfassen CPU-seitige Flush-Zeit, EPG-Auflösung, D-Pad, HTTP, Dekodierung und Speicher. Reale TV-Latenzen sind noch nicht gemessen. Weitere Owner-Befunde und offene Punkte stehen in [der Roadmap](docs/roadmap.md).
+
+## Implementierungsstand zuvor (0.9.12-dev)
 
 - **TV-Feedback:** Home verwendet bevorzugt TVScraper-Film-/Serientitel und Episode, mit nativem Namen nur als Fallback. Die Live-Videofläche endet vor Zeit und Fortschritt; Fanart-Komposition bleibt im Cache. Kontrast und fehlende Poster sind angepasst. Geräte-Pairing zeigt einen sichtbaren Status und prüft die aktive Bootstrap-Anfrage im vom Core gelieferten Intervall asynchron. Nach Genehmigung folgt einmalige Credential-Ausgabe, lokale Speicherung und Verbindungstest; die Rechtevergabe bleibt im Webfrontend. Echte TV-Abnahme offen.
 
