@@ -3984,13 +3984,41 @@ private:
 
     void drawPhotoCarousel()
     {
-        // The gallery uses all available width. The floor/reflections are
-        // native true-colour OSD pixels; there is no browser or GPU dependency.
+        // DrawImage/DrawRectangle on VDR's layer 0 replace ARGB pixels.
+        // Composite translucent cards, cutouts and reflections over an opaque
+        // gallery surface first, so they cannot expose the live video plane.
+        const int canvasTop = Y(180);
+        const int canvasHeight = Y(810) - canvasTop;
+        if (width < 1 || canvasHeight < 1) return;
+        cPixmapMemory canvas(0, cRect(0, 0, width, canvasHeight));
+        canvas.Fill(kBackground);
+        auto canvasFill = [&](int left, int top, int right, int bottom, tColor color) {
+            const int x0 = X(left), y0 = Y(top) - canvasTop;
+            const int x1 = suiteosd::InclusiveOsdEnd(right,1600,width);
+            const int y1 = suiteosd::InclusiveOsdEnd(bottom,900,height) - canvasTop;
+            if (x1 >= x0 && y1 >= y0)
+                canvas.DrawRectangle(cRect(x0, y0, x1-x0+1, y1-y0+1), color);
+        };
+        auto canvasPrint = [&](int x, int y, const std::string &s, const cFont *f,
+                               tColor fg, int maxWidth) {
+            if (f && !s.empty())
+                canvas.DrawText(cPoint(X(x), Y(y)-canvasTop), s.c_str(),
+                                fg, clrTransparent, f, X(maxWidth));
+        };
+        auto composite = [&](int x, int y, const suiteosd::CarouselBitmap &bitmap) {
+            const cSize size(bitmap.width, bitmap.height);
+            const cRect rect(0, 0, bitmap.width, bitmap.height);
+            cPixmapMemory layer(1, rect);
+            const cImage image(size, bitmap.argb.data());
+            layer.DrawImage(cPoint(0,0), image);
+            canvas.Render(&layer, rect, cPoint(x, y-canvasTop));
+        };
         for (int y = 568; y < 810; y += 12) {
             const int intensity = std::max(0, 0x34 - (y - 568) / 5);
-            fill(0, y, 1599, y + 11,
-                 (0xD0U << 24) | (uint32_t(intensity / 3) << 16) |
-                 (uint32_t(intensity) << 8) | uint32_t(intensity + 12));
+            const tColor floor = 0xFF000000U | (uint32_t(intensity / 3) << 16) |
+                                 (uint32_t(intensity) << 8) | uint32_t(intensity + 12);
+            canvasFill(0, y, 1599, y + 11,
+                       suiteosd::CinemaMix(kBackground, floor, 208.0/255.0));
         }
 
         // Photos farther away are painted first, so arriving photos appear
@@ -4030,10 +4058,10 @@ private:
 
             // Deep cyan focus surround; side cards have quieter blue edges.
             if (foreground) {
-                fill(slot.x - 9, slot.y - 9,
+                canvasFill(slot.x - 9, slot.y - 9,
                      slot.x + slot.width + 9, slot.y + slot.height + 9,
-                     0x6637C8EE);
-                fill(slot.x - 4, slot.y - 4,
+                     suiteosd::CinemaMix(kBackground, 0xFF37C8EE, 0.4));
+                canvasFill(slot.x - 4, slot.y - 4,
                      slot.x + slot.width + 4, slot.y + slot.height + 4,
                      kFocus);
             }
@@ -4049,32 +4077,32 @@ private:
                     thumb.argb.data(), thumb.width, thumb.height,
                     drawW, drawH, slot.side, slot.inset, slot.opacity);
                 if (picture.valid()) {
-                    cImage image(cSize(picture.width, picture.height),
-                                 picture.argb.data());
-                    osd->DrawImage(cPoint(drawX, drawY), image);
+                    composite(drawX, drawY, picture);
                     const auto reflection = suiteosd::ReflectCarousel(
                         picture, std::max(1, Y(foreground ? 72 : 48)));
                     if (reflection.valid()) {
-                        cImage mirror(cSize(reflection.width, reflection.height),
-                                      reflection.argb.data());
-                        osd->DrawImage(cPoint(drawX, drawY + drawH + Y(9)), mirror);
+                        composite(drawX, drawY + drawH + Y(9), reflection);
                     }
                     rendered = true;
                 }
             }
             if (!rendered) {
-                fill(slot.x + 1, slot.y + 1,
+                canvasFill(slot.x + 1, slot.y + 1,
                      slot.x + slot.width - 1, slot.y + slot.height - 1,
                      foreground ? kCardAlt : kCard);
-                print(slot.x + 16, slot.y + slot.height / 2 - 20,
+                canvasPrint(slot.x + 16, slot.y + slot.height / 2 - 20,
                       folder ? "ORDNER" : "FOTO", fontBody,
                       foreground ? kFocus : kMuted,
                       std::max(1, slot.width - 28));
                 if (foreground)
-                    print(slot.x + 17, slot.y + slot.height / 2 + 16,
+                    canvasPrint(slot.x + 17, slot.y + slot.height / 2 + 16,
                           label, fontSmall, kText, slot.width - 35);
             }
         }
+
+        const cImage composed(cSize(width, canvasHeight),
+                              reinterpret_cast<const tColor *>(canvas.Data()));
+        osd->DrawImage(cPoint(0, canvasTop), composed);
 
         std::string name;
         if (photoGallery.InSources()) {
