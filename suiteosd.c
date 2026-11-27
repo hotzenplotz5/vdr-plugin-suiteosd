@@ -544,8 +544,11 @@ class NativeHomeCache {
                 auto subscribe=[this,origin,credential](const std::string &domain,std::atomic<bool> &changed){
                     suiteosd::CoreAdminClient client(origin);
                     if(!client.setDeviceCredential(credential))return;
+                    long lastDenied=0;
                     while(!eventStop.load()){
-                        client.recordingEvents("default",eventStop,changed,domain);
+                        const auto http=client.recordingEvents("default",eventStop,changed,domain);
+                        if(http==401||http==403){if(lastDenied!=http)changed.store(true);lastDenied=http;}
+                        else if(http==200)lastDenied=0;
                         std::unique_lock<std::mutex> lock(reconnectMutex);
                         reconnectWake.wait_for(lock,std::chrono::seconds(3),[this]{return eventStop.load();});
                     }
@@ -4750,14 +4753,14 @@ private:
             const auto cached=scope.empty()?decltype(privateArtwork->get(key)){}:privateArtwork->get(key);
             std::string bytes;int maxAge=0;
             auto began=std::chrono::steady_clock::now();
-            result.artStatus=client.publicRecordingArtwork(row,bytes,&result.assetId,cached.asset,&maxAge);
+            result.artStatus=client.publicRecordingArtwork(row,bytes,&result.assetId,cached.asset,&maxAge,{},true);
             if(result.artStatus.ok&&!cached.asset.empty()&&result.assetId==cached.asset&&bytes.empty()){
                 if(std::chrono::steady_clock::now()<cached.expires){
                     result.poster=cached.pixels;result.fetched=began;
                     return result;
                 }
                 began=std::chrono::steady_clock::now();
-                result.artStatus=client.publicRecordingArtwork(row,bytes,&result.assetId,{},&maxAge);
+                result.artStatus=client.publicRecordingArtwork(row,bytes,&result.assetId,{},&maxAge,{},true);
             }
             if(result.artStatus.ok&&!bytes.empty()){
                 result.poster=suiteosd::CoverHomePoster(suiteosd::LoadArtworkBytes(bytes,std::min(1024,w*2),std::min(1024,h*2)),w,h,0);

@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <map>
+#include <set>
 #include <utility>
 #include <cerrno>
 #include <fcntl.h>
@@ -862,11 +863,11 @@ CoreStatus CoreAdminClient::testDevice() {
     return last_;
 }
 
-void CoreAdminClient::recordingEvents(const std::string &backend,const std::atomic<bool> &stop,
+long CoreAdminClient::recordingEvents(const std::string &backend,const std::atomic<bool> &stop,
                                       std::atomic<bool> &changed,const std::string &domain) {
-    if(stop.load()||device_.credentialId.empty()||!localSocket_.empty())return;
+    if(stop.load()||device_.credentialId.empty()||!localSocket_.empty())return 0;
     initializeCurl();
-    CURL *curl=curl_easy_init();if(!curl)return;
+    CURL *curl=curl_easy_init();if(!curl)return 0;
     struct Stream {
         const std::string &backend;
         const std::string &domain;
@@ -944,7 +945,9 @@ void CoreAdminClient::recordingEvents(const std::string &backend,const std::atom
     curl_easy_setopt(curl,CURLOPT_NOSIGNAL,1L);
     curl_easy_setopt(curl,CURLOPT_PROTOCOLS,long(CURLPROTO_HTTP|CURLPROTO_HTTPS));
     (void)curl_easy_perform(curl);
+    long http=0;curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&http);
     curl_slist_free_all(headers);curl_easy_cleanup(curl);
+    return http;
 }
 
 CoreStatus CoreAdminClient::recordingPersons(const std::string &backendId,
@@ -1099,9 +1102,9 @@ CoreStatus CoreAdminClient::publicRecordingDetail(const CoreSearchRecording &row
     d.title=next.title.empty()?stringOf(root.get(),"title"):next.title;
     d.episode=next.subtitle;d.overview=next.description;
     d.release=stringOf(meta,"releaseDate");
-    d.runtime=int(integerOf(meta,"providerRuntimeMinutes"));
+    d.runtime=int(integerOf(meta,"providerRuntimeMinutes",0));
     if(d.runtime<=0){const auto seconds=integerOf(root.get(),"durationSeconds");if(seconds>0)d.runtime=int((seconds+59)/60);}
-    d.season=int(integerOf(meta,"seasonNumber"));d.episodeNumber=int(integerOf(meta,"episodeNumber"));
+    d.season=int(integerOf(meta,"seasonNumber",0));d.episodeNumber=int(integerOf(meta,"episodeNumber",0));
     if(auto *rating=field(meta,"voteAverage"))if(json_object_is_type(rating,json_type_double)||json_object_is_type(rating,json_type_int))
         d.rating=float(json_object_get_double(rating));
     if(auto *genres=field(meta,"genres");json_object_is_type(genres,json_type_array))
@@ -1127,7 +1130,7 @@ std::string CoreAdminClient::artworkCredentialScope() const {
     return std::string(reinterpret_cast<const char*>(digest),length);
 }
 CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &row,std::string &bytes,
-    std::string *assetId,const std::string &knownAsset,int *privateMaxAge,const std::string &requestedKind) {
+    std::string *assetId,const std::string &knownAsset,int *privateMaxAge,const std::string &requestedKind,bool homePreview) {
     bytes.clear();if(assetId)assetId->clear();if(privateMaxAge)*privateMaxAge=0;
     if(!safeId(row.id)||row.id.rfind("rec_",0)!=0||!safeId(row.backendId))
         return (last_={false,0,"Ungültige Aufnahme-ID"});
@@ -1154,7 +1157,26 @@ CoreStatus CoreAdminClient::publicRecordingArtwork(const CoreSearchRecording &ro
     if(id.empty()||id==knownAsset)return (last_={true,list.http,""});
     // Construct only the documented same-origin opaque-ID route. Never
     // follow a server-provided arbitrary URL or attach credentials to it.
-    auto image=request("GET",base+"/"+id+scope,"","","","","",false,true);
+    const auto imagePath=base+"/"+id+scope;
+    // Only visible Home thumbnails opt in. The current main daemon rejects
+    // the optional query with 400; the exact same authorized image is then
+    // requested once without the variant. No retry of permission or IO errors.
+    static std::mutex variantMutex;
+    static std::set<std::pair<std::string,std::string>> legacyOrigins;
+    const auto variantScope=std::make_pair(origin_,row.backendId);
+    bool tryPreview=homePreview;
+    if(tryPreview){
+        std::lock_guard<std::mutex> lock(variantMutex);
+        tryPreview=legacyOrigins.count(variantScope)==0;
+    }
+    auto image=request("GET",imagePath+(tryPreview?"&variant=home":""),"","","","","",false,true);
+    if(tryPreview&&image.http==400){
+        image=request("GET",imagePath,"","","","","",false,true);
+        if(image.ok()){
+            std::lock_guard<std::mutex> lock(variantMutex);
+            legacyOrigins.insert(variantScope);
+        }
+    }
     if(!status(image).ok)return last_;
     if(privateMaxAge){
         // Honor the actual image response, not just the documented default.

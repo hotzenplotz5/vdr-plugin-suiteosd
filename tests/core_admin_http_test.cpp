@@ -321,7 +321,7 @@ int main() {
     len=sizeof(bindTo);
     assert(getsockname(pairFd,reinterpret_cast<sockaddr*>(&bindTo),&len)==0);
     std::thread pairMock([&]{
-        for(int i=0;i<20;++i){
+        for(int i=0;i<29;++i){
             const int fd=accept(pairFd,nullptr,nullptr);assert(fd>=0);
             const auto req=readRequest(fd);
             assert(!req.headers.count("cookie")&&!req.headers.count("x-csrf-token"));
@@ -352,7 +352,7 @@ int main() {
                     answer(fd,R"({"items":[{"kind":"recording","backendId":"default","recordingId":"rec_0123456789abcdef0123456789abcdef","title":"I, Robot"}],"page":{"offset":0,"limit":20,"totalCount":11,"hasMore":false}})");
                 }else if(i==8){
                     assert(req.path=="/api/v1/recordings/rec_0123456789abcdef0123456789abcdef?backendId=default");
-                    answer(fd,R"({"recordingId":"rec_0123456789abcdef0123456789abcdef","backendId":"default","description":"Film"})");
+                    answer(fd,R"({"recordingId":"rec_0123456789abcdef0123456789abcdef","backendId":"default","description":"Film","metadata":{"source":"manual","providerTitle":"Papillon","releaseDate":"1973-12-16","providerRuntimeMinutes":151,"genres":["Drama"],"people":[{"name":"Steve McQueen","role":"Schauspiel","characterName":"Henri Charrière"}]}})");
                 }else if(i==9){
                     assert(req.path=="/api/v1/search/epg?backendId=default&query=Hobbit&limit=20&offset=20");
                     answer(fd,R"({"items":[{"kind":"epg","backendId":"default","eventId":"evt-a","channelId":"channel-a","title":"Young Sheldon","subtitle":"Hobbit","startTime":"2026-11-26T20:00:00Z","endTime":"2026-11-26T20:30:00Z"}],"page":{"offset":20,"limit":20,"totalCount":21,"hasMore":false}})");
@@ -379,13 +379,27 @@ int main() {
                 }else if(i==18){
                     assert(req.path=="/api/v1/recordings/rec_0123456789abcdef0123456789abcdef/artwork?backendId=default");
                     answer(fd,R"({"code":"permission_denied"})","",403);
-                }else{
+                }else if(i==19){
                     assert(req.path=="/api/v1/events?backendId=default&domain=recordings");
                     assert(req.headers.at("accept")=="text/event-stream");
                     const std::string body="event: hello\ndata: {\"backendId\":\"default\",\"daemonEpoch\":\"daemon_test\",\"subscriptionSequence\":0,\"authorizedDomains\":[\"recordings\"]}\n\n"
                         "event: update\ndata: {\"backendId\":\"default\",\"daemonEpoch\":\"daemon_test\",\"subscriptionSequence\":1,\"changedDomains\":[\"recordings\"]}\n\n";
                     const std::string response="HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"+body;
                     assert(send(fd,response.data(),response.size(),MSG_NOSIGNAL)==ssize_t(response.size()));
+                }else{
+                    const std::string base="/api/v1/recordings/rec_0123456789abcdef0123456789abcdef/artwork";
+                    const std::string backend=i>=25?"backend-b":"default";
+                    const std::string scope="?backendId="+backend;
+                    if(i==20||i==23||i==25||i==27){
+                        assert(req.path==base+scope);
+                        answer(fd,"{\"recordingId\":\"rec_0123456789abcdef0123456789abcdef\",\"backendId\":\""+backend+"\",\"items\":[{\"artworkId\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"kind\":\"poster\"}]}");
+                    }else{
+                        const bool preview=i==21||i==26||i==28;
+                        assert(req.path==base+"/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"+scope+(preview?"&variant=home":""));
+                        if(i==21)answer(fd,R"({"code":"invalid_request"})","",400);
+                        else if(i==28)answer(fd,R"({"code":"permission_denied"})","",403);
+                        else answer(fd,preview?"preview":"original","",200,preview?"no-store":"private, max-age=300");
+                    }
                 }
             }
             close(fd);
@@ -423,6 +437,9 @@ int main() {
     assert(publicResults.recordingTotal==11&&publicResults.recordings.size()==1&&publicResults.recordings[0].nativeId.empty());
     suiteosd::CoreSearchEvent detail;
     assert(reopened.publicRecordingDetail(publicResults.recordings[0],detail).ok&&detail.description=="Film");
+    assert(detail.recordingMetadata.title=="Papillon"&&detail.recordingMetadata.release=="1973-12-16");
+    assert(detail.recordingMetadata.runtime==151&&detail.recordingMetadata.genres.size()==1);
+    assert(detail.recordingMetadata.people.size()==1&&detail.recordingMetadata.people.front().name=="Steve McQueen");
     assert(reopened.publicSearch("default","Hobbit",true,20,20,publicResults).ok);
     assert(publicResults.epgTotal==21&&publicResults.epg[0].subtitle=="Hobbit");
     const auto denied=reopened.publicSearch("default","Ewan McGregor",false,20,0,publicResults);
@@ -447,6 +464,11 @@ int main() {
     std::atomic<bool> stop{false},changed{false};
     reopened.recordingEvents("default",stop,changed);
     assert(changed.load());
+    assert(reopened.publicRecordingArtwork(imageRow,imageBytes,nullptr,{},&maxAge,{},true).ok&&imageBytes=="original"&&maxAge==300);
+    assert(reopened.publicRecordingArtwork(imageRow,imageBytes,nullptr,{},&maxAge,{},true).ok&&imageBytes=="original");
+    imageRow.backendId="backend-b";
+    assert(reopened.publicRecordingArtwork(imageRow,imageBytes,nullptr,{},&maxAge,{},true).ok&&imageBytes=="preview"&&maxAge==0);
+    assert(reopened.publicRecordingArtwork(imageRow,imageBytes,nullptr,{},&maxAge,{},true).http==403&&imageBytes.empty());
     pairMock.join();
     assert(suiteosd::loadDeviceProfile(vault,issuedCopy.origin,credential)&&credential.secret==issuedCopy.secret);
     pairingClient.setOrigin("https://other.invalid");

@@ -168,7 +168,7 @@ public:
     bool setDeviceCredential(const DeviceCredential &credential);
     CoreStatus testDevice();
     // One authorized SSE subscription. Only publish invalidation hints, never data.
-    void recordingEvents(const std::string &backend, const std::atomic<bool> &stop,
+    long recordingEvents(const std::string &backend, const std::atomic<bool> &stop,
                          std::atomic<bool> &changed, const std::string &domain = "recordings");
     void forgetDevice() { device_ = {}; }
     std::string artworkCredentialScope() const;
@@ -186,7 +186,7 @@ public:
                                      bool nativeMatch = false);
     CoreStatus publicRecordingArtwork(const CoreSearchRecording &row, std::string &bytes,
         std::string *assetId=nullptr,const std::string &knownAsset={},int *privateMaxAge=nullptr,
-        const std::string &kind={});
+        const std::string &kind={},bool homePreview=false);
     CoreStatus publicHomePage(const std::string &backend, HomeKind kind, const std::string &key,
                         int limit, int offset, int year, CoreHomePage &page);
     CoreStatus homePage(const std::string &backend, HomeKind kind, const std::string &key,
