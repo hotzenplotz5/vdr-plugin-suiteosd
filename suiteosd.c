@@ -2786,6 +2786,19 @@ private:
             HL::progressPercent(current.start,current.end,time(nullptr)));
     }
     void drawHomeLivePanel() {if(homeHeroVisible())drawHomeHero(HL::top);}
+    bool finishPublicFocus(){
+        if(!publicFocusJob.valid()||publicFocusJob.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return false;
+        try{
+            auto result=publicFocusJob.get();if(result.generation!=detailGeneration)return true;
+            NativeFocusPreview preview;preview.metadata=std::move(result.image.metadata);preview.fanart=std::move(result.image.fanart);
+            const size_t budget=16U*1024U*1024U;
+            const size_t panelBytes=size_t(X(HL::rightWidth+18))*Y(HL::detailBottom-HL::detailY+18)*4;
+            const auto limit=std::clamp<size_t>(budget/std::max<size_t>(1,2*panelBytes+preview.fanart.argb.capacity()*4),1,6);
+            while(publicFocusPreviews.size()>=limit)publicFocusPreviews.evictOldest();
+            publicFocusPreviews.insertOrAssign(result.fileName,std::move(preview));
+        }catch(const std::exception &){esyslog("suiteosd: canonical recording focus read failed");}
+        return true;
+    }
     void drawHomeFocusPanel() {
         cinemaPanel(HL::right,HL::detailY,HL::rightWidth,HL::detailBottom-HL::detailY,16,suiteosd::CinemaStyle::Panel);
         const Programme *p=homeCollections.empty()?selectedHomeProgramme():nullptr;
@@ -2800,24 +2813,44 @@ private:
             if((it==homeRails.end()||!it->second.status.ok)&&i>=0&&i<int(data.recordings.size()))
                 rec=&data.recordings[i];
         }
+        const bool publicCard=card&&card->kind==suiteosd::CoreHomeCard::Kind::Recording&&card->recording.id.rfind("rec_",0)==0;
         std::string key,title,description,facts,genre;
         if(p){
             key=NativeHomeCache::focusProgrammeKey(*p);
             title=p->title;description=p->description;facts=p->channel;
+        }else if(publicCard){
+            key="public-focus:"+homePosterKey(card->recording);
+            title=loaded&&!loaded->detail.title.empty()?loaded->detail.title:card->title;
+            if(loaded&&loaded->detailStatus.ok)description=loaded->detail.description;
+            facts=card->subtitle;
         }else if(rec){
-            key=NativeHomeCache::focusRecordingKey(*rec);title=rec->baseName;description=rec->description;
+            key="native-focus:"+rec->fileName;title=rec->baseName;description=rec->description;
         }else if(card){
             key="card:"+card->key;title=loaded&&!loaded->detail.title.empty()?loaded->detail.title:card->title;facts=card->subtitle;
             if(loaded)description=loaded->detail.description;
         }
-        if(key!=focusKey){focusKey=key;focusSince=std::chrono::steady_clock::now();focusPending=!key.empty()&&(p||rec);}
-        auto cached=focusPreviews.find(key);
-        if(cached!=focusPreviews.end())focusPending=false;
+        auto &cache=p?focusPreviews:publicFocusPreviews;
+        if(key!=focusKey){focusKey=key;focusSince=std::chrono::steady_clock::now();focusPending=!key.empty()&&(p||rec||publicCard);}
+        auto cached=cache.find(key);
+        if(cached!=cache.end())focusPending=false;
         if(focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
-            nativeHome.requestFocus(p,rec);
-            focusPending=false;
+            if(p){nativeHome.requestFocus(p,nullptr);focusPending=false;}
+            else if((rec||publicCard)&&!publicFocusJob.valid()){
+                Recording native;
+                suiteosd::CoreSearchRecording row;
+                if(publicCard){row=card->recording;native.baseName=card->title;}
+                else if(rec){native=*rec;if(auto it=detailRows.find(rec->fileName);it!=detailRows.end())row=it->second;}
+                const std::string origin=gCoreUrl,profile=deviceProfilePath();
+                const int fw=std::min(1024,X(HL::rightWidth-4)),fh=std::min(1024,Y(210));
+                const auto generation=detailGeneration;auto cancel=detailCancel;
+                publicFocusJob=std::async(std::launch::async,[native,row,key,origin,profile,fw,fh,generation,cancel]{
+                    auto result=readCanonicalRecording(native,row,origin,profile,0,0,fw,fh,true,generation,cancel);
+                    result.fileName=key;return result;
+                });
+                focusPending=false;
+            }else if(!rec&&!publicCard)focusPending=false;
         }
-        if(cached!=focusPreviews.end()){
+        if(cached!=cache.end()){
             const auto &v=cached->second;
             if(v.fanart.valid()){
                 const auto &frame=cinemaFrame(HL::right,HL::detailY,HL::rightWidth,HL::detailBottom-HL::detailY,16,suiteosd::CinemaStyle::Panel);
@@ -2831,14 +2864,15 @@ private:
             }else print(HL::right+20,HL::detailY+92,"Keine Fanart verfügbar",fontSmall,kMuted,HL::rightWidth-40);
             if(!v.metadata.title.empty())title=v.metadata.title;
             if(!v.metadata.episode.empty()&&v.metadata.episode!=title)title+=" – "+v.metadata.episode;
-            if(description.empty())description=v.metadata.overview;
-            if(rec){
+            if(!p&&!v.metadata.overview.empty())description=v.metadata.overview;
+            else if(description.empty())description=v.metadata.overview;
+            if(rec||publicCard){
                 facts=v.channel;
                 const int minutes=v.duration>0?(v.duration+59)/60:v.metadata.runtime;
                 if(minutes>0)facts+=(facts.empty()?"":" · ")+std::to_string(minutes)+" Min.";
             }
             if(!v.metadata.genres.empty())genre=v.metadata.genres.front();
-            if(rec&&v.metadata.season>0){
+            if((rec||publicCard)&&v.metadata.season>0){
                 facts+=(facts.empty()?"":" · ")+std::string("Staffel ")+std::to_string(v.metadata.season);
                 if(v.metadata.episodeNumber>0)facts+=", Folge "+std::to_string(v.metadata.episodeNumber);
             }
@@ -2866,7 +2900,7 @@ private:
         if(!genre.empty()){print(tx,y,genre,fontCinemaMeta?fontCinemaMeta:fontSmall,0xFF70DBF5u,tw);y+=20;}
         y+=8;
         std::string director,cast;
-        if(cached!=focusPreviews.end()){
+        if(cached!=cache.end()){
             for(const auto &person:cached->second.metadata.people){
                 if(person.role=="Regie"&&director.empty())director=person.name;
                 if(person.role=="Schauspiel"||person.role=="Gastrolle"){
@@ -5472,6 +5506,8 @@ public:
         const bool searchChanged=finishSearchRead();
         const bool detailChanged=finishRecordingDetail();
         const bool cardChanged=finishRecordingCard();
+        const bool publicFocusChanged=finishPublicFocus();
+        if(publicFocusChanged&&osd&&!searchActive&&!photosActive&&!settingsActive&&!timelineActive&&!recordingsActive&&!recordingDetails&&!homeProgrammeDetails){drawHomeFocusPanel();flushHomeOsd();}
         if(cardChanged&&osd&&!searchActive&&!photosActive&&!settingsActive&&!timelineActive&&!recordingDetails&&!browserDetails)draw();
         if((detailChanged||metadataChanged)&&osd&&(recordingDetails||browserDetails||(searchActive&&searchNav.page==suiteosd::SearchPage::Recording)))draw();
         const bool homeDashboard=osd&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails;
