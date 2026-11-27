@@ -63,7 +63,7 @@
 #include <string>
 #include <vector>
 
-static const char *VERSION = "0.9.23-dev";
+static const char *VERSION = "0.9.24-dev";
 static const char *DESCRIPTION = trNOOP("VDR Suite TV OSD");
 
 namespace suiteosd { void RegisterSuiteSkin(); }
@@ -1884,6 +1884,7 @@ private:
         if (removed) {
             cVideoDiskUsage::ForceCheck();
             cRecordings::TouchUpdate();
+            if(auto old=recordingMeta.find(fileName);old!=recordingMeta.end())forgetComposite(old->second.artwork);
             recordingMeta.erase(fileName);
             nativeHome.cancelPending();
             homeRecordingTitles.erase(fileName);
@@ -2256,7 +2257,8 @@ private:
             meta.artwork=std::move(result.image.poster);
             const auto bytes=[](const auto &v){return v.artwork.argb.capacity()*sizeof(uint32_t);};
             while(recordingMeta.size()&&(recordingMeta.size()>=48||recordingMeta.totalWeight(bytes)+bytes(meta)>16U*1024U*1024U))
-                recordingMeta.evictOldest();
+                recordingMeta.evictOldest([&](const auto &,const auto &old){forgetComposite(old.artwork);});
+            if(auto old=recordingMeta.find(result.fileName);old!=recordingMeta.end())forgetComposite(old->second.artwork);
             recordingMeta.insertOrAssign(result.fileName,std::move(meta));
         }catch(const std::exception &){esyslog("suiteosd: canonical recording card read failed");}
         return true;
@@ -2354,7 +2356,9 @@ private:
         // The device uses screen coordinates, the OSD draws locally.
         scaledRect = cRect(available.X() - left, available.Y() - top,
                            available.Width(), available.Height());
+        const auto scaleStart=std::chrono::steady_clock::now();
         device->ScaleVideo(available);
+        isyslog("suiteosd: HOME_PERF_VIDEO scale_us=%lld",(long long)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-scaleStart).count());
     }
 
     void restoreLivePreview()
@@ -5485,7 +5489,7 @@ public:
         bool metadataChanged=false;
         if(seenRecordingRevision!=nativeHome.recordingRevision()){
             seenRecordingRevision=nativeHome.recordingRevision();metadataChanged=true;
-            ++detailGeneration;recordingDetailImages.clear();detailCastCache.clear();recordingMeta.clear();recordingGenres.clear();
+            ++detailGeneration;recordingDetailImages.clear();detailCastCache.clear();cinematicComposites.clear();recordingMeta.clear();recordingGenres.clear();
             publicFocusPreviews.clear();focusPending=true;
             for(auto &entry:homeRails){entry.second.attempted=false;entry.second.loading=false;entry.second.requestId=0;}
             ++homePosterRevision;

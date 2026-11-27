@@ -13,6 +13,10 @@ Ein eigenständiges natives VDR-Frontend für **VDR-Suite**. Das Plugin soll die
 - **Bestehende Komponenten wiederverwenden:** Teletext über vorhandene VDR-Plugins, HbbTV über vdr-plugin-web/cefbrowser/remotetranscode, Medienwiedergabe über nachgewiesene VDR-/Ausgabeplugin-Schnittstellen.
 - **Keine zusätzlichen Aktivierungs- oder Berechtigungsgates:** Vorhandene Suite-Autorisierung beibehalten; eine Addon-Beschreibung erzeugt keine eigenen Rechte.
 
+## Home-Performance (0.9.24-dev)
+
+Home-Daten und Geometrie werden ereignisgesteuert vorbereitet. SSE für Aufnahmen und Wiedergabefortschritt läuft pluginweit, auch bei geschlossenem Menü. Aufnahme-Details, Browser-Kacheln, Replay-Info und Aufnahme-Fokus verwenden kanonische Suite-Metadaten mit exaktem Identitätsnachweis statt Titelgleichheit. Public-v1-Previews sind optional; ältere Core-Versionen bleiben über das Originalbild kompatibel. `HOME_PERF_OPEN` und `HOME_PERF_VIDEO` messen die Eröffnungsphasen und Videoskalierung. Reale TV-Abnahme steht aus. Die native Genre-Gruppierung, Geräte-Bootstrap und ImageNext-Bereitschaft verwenden noch ihre bisherigen Owner-Verträge.
+
 ## Home-Performance (0.9.23-dev)
 
 Pluginweit begrenzte RAM-Arbeitscaches behalten native Poster und Metadaten, Fokusbilder, Logos und geometrische Renderbestandteile über Menüwechsel. Ein Worker bereitet native Inhalte auch bei geschlossenem Menü vor; ein begrenzter, an Menüwechsel gebundener Abruf wärmt private Public-v1-Aufnahmebilder. No-store-Projektionen und Details bleiben menügebunden. Das freigegebene Layout bleibt unverändert. Die Logzeilen `HOME_PERF` und `HOME_PERF_PROCESS` erfassen CPU-seitige Flush-Zeit, EPG-Auflösung, D-Pad, HTTP, Dekodierung und Speicher. Reale TV-Latenzen sind noch nicht gemessen. Weitere Owner-Befunde und offene Punkte stehen in [der Roadmap](docs/roadmap.md).

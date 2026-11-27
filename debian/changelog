@@ -1,3 +1,13 @@
+vdr-plugin-suiteosd (0.9.24~dev) unstable; urgency=medium
+
+  * Prepare Home snapshots and initial graphics before menu opening.
+  * Use plugin-lifetime SSE and native change detection for Home preparation.
+  * Read canonical recording artwork and metadata with exact native identity.
+  * Support optional Home preview variants with legacy Core fallback.
+  * Invalidate composed artwork on recording cache eviction; log video scaling.
+
+ -- VDR-Suite contributors <noreply@github.com>  Fri, 27 Nov 2026 12:00:00 +0100
+
 vdr-plugin-suiteosd (0.9.23~dev) unstable; urgency=medium
 
   * Retain bounded native and private Home artwork working sets across menus.
