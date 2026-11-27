@@ -4119,6 +4119,22 @@ private:
         }
         queueHomeRead(rail,section,homeRailKind(section),key,0);
     }
+    // Queue every visible rail immediately; a pending recommendation
+    // dependency must not starve unrelated rows further down.
+    void loadVisibleHomeRails(bool redraw=false){
+        if(!homeCollections.empty())return;
+        const int first=nav.firstVisibleSection;
+        for(int section=std::max(3,first);section<first+HL::rows;++section){
+            const auto it=homeRails.find(section);
+            if(it!=homeRails.end()&&it->second.attempted)continue;
+            loadHomeRail(section);
+            const auto loaded=homeRails.find(section);
+            if(redraw&&loaded!=homeRails.end()&&loaded->second.attempted){
+                if(section==nav.section)nav.KeepVisible(HL::columns,count(section));
+                redrawHomeRail(section,first,true);
+            }
+        }
+    }
     void loadHomeCollection(HomeCollection &collection) {
         collection.rail.page={};collection.rail.status={};
         collection.selected=collection.first=0;
@@ -4560,6 +4576,7 @@ private:
         }
         nav.firstVisibleSection=HL::firstRow(nav.section,suiteosd::Navigation::kSections,nav.firstVisibleSection);
         const int first=nav.firstVisibleSection;
+        loadVisibleHomeRails();
         for(int row=0;row<HL::rows;++row)
             drawHomeRail(first+row,HL::headingY(row));
         drawHomeSidePanel();
@@ -4728,6 +4745,8 @@ public:
         const bool homeChanged=finishHomeRead();
         const auto posterChanged=finishHomePoster();
         const bool searchChanged=finishSearchRead();
+        const bool homeDashboard=osd&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails;
+        if(homeChanged&&homeDashboard)draw(); // also when a remote key arrives with the readback
         if(!posterChanged.empty()&&osd&&!searchActive&&!photosActive&&!settingsActive&&!recordingsActive&&!timelineActive&&!recordingDetails&&!homeProgrammeDetails){
             if(!homeCollections.empty())draw();
             else {
@@ -4793,7 +4812,7 @@ public:
             draw();return osContinue;
         }
         if(base==kNone){
-            if(homeChanged&&osd){draw();return osContinue;}
+            if(homeChanged&&osd&&!homeDashboard){draw();return osContinue;}
             if(osd&&homeCollections.empty()){
                 if(homeProgressChanged.exchange(false)){
                     for(const int section:{suiteosd::Navigation::kContinue,suiteosd::Navigation::kRecent}){
@@ -4808,16 +4827,9 @@ public:
                     recordingGenres.clear();
                     invalidatePublicHomePosters();
                 }
-                const int first=nav.firstVisibleSection;
+                loadVisibleHomeRails(true);
                 scheduleVisibleHomePoster();
-                for(int row=first;row<first+HL::rows;++row){
-                    if(row>=3&&(homeRails.find(row)==homeRails.end()||!homeRails.at(row).attempted)){
-                        loadHomeRail(row);
-                        if(row==nav.section)nav.KeepVisible(HL::columns,count(row));
-                        redrawHomeRail(row,first,true);drawHomeFocusPanel();osd->Flush();
-                        break;
-                    }
-                }
+                osd->Flush();
             }
             if(osd&&focusPending&&std::chrono::steady_clock::now()-focusSince>=std::chrono::milliseconds(220)){
                 drawHomeFocusPanel();osd->Flush();
@@ -4895,6 +4907,7 @@ public:
         const eOSState result = action(nav.Move(direction, count(target), suiteosd::Navigation::kHomeVisibleCards));
         if (result != osContinue)
             return result;
+        loadVisibleHomeRails();
         scheduleVisibleHomePoster();
         const bool changed=previous.section!=nav.section||previous.sideFocused!=nav.sideFocused||
             previous.sideIndex!=nav.sideIndex||previous.card!=nav.card||previous.firstCard!=nav.firstCard;

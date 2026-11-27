@@ -13,8 +13,8 @@ constexpr PreviewRect AlignPreviewRect(int x,int y,int w,int h) {
 }
 struct HomeLayout {
     static constexpr int columns=6, rows=3;
-    static constexpr int cardWidth=140, cardHeight=210, gap=20, expandedGap=14;
-    static constexpr int left=150, top=82, viewportBottom=850, rowStep=(viewportBottom-top)/rows, titleHeight=32;
+    static constexpr int cardWidth=136, cardHeight=204, gap=20, expandedGap=14;
+    static constexpr int left=150, top=82, viewportBottom=850, rowStep=(viewportBottom-top)/rows, titleHeight=38;
     static constexpr int radius=16;
     static constexpr int posterW=cardWidth-2, posterH=cardHeight-2;
     static constexpr int right=1156, rightWidth=426;
